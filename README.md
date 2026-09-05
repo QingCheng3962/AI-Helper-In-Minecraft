@@ -1,3 +1,5 @@
+<p align="right"><b>简体中文</b> · <a href="README_EN.md">English</a></p>
+
 # AI Helper In Minecraft
 
 一个"无客户端"的 Minecraft AI 玩家：不需要打开游戏本体，用 GUI 控制 mineflayer 引擎进入服务器，由大模型驱动它在游戏内与人聊天互动。
