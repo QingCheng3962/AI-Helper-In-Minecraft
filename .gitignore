@@ -1,0 +1,10 @@
+node_modules/
+__pycache__/
+*.pyc
+.env
+config.json
+auth_profile.json
+mcai_chat.json
+runtime_config.json
+.claude/
+logs/
