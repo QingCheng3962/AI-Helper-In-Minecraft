@@ -1,1 +1,3 @@
 httpx>=0.24
+openpyxl>=3.0
+pillow>=9.0

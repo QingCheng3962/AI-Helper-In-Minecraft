@@ -4,7 +4,7 @@
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
-- The front end is a Python tkinter GUI with three pages: **Settings / Player Config / Game Output**. The Node.js (mineflayer) engine handles the connection and protocol in the background.
+- The front end is a Python tkinter GUI with multiple tabs: **Settings / AI Config / Player Config / Roster / QQ Relay / Reconnect·Kick / Appearance / Game Output**. The Node.js (mineflayer) engine handles the connection and protocol in the background.
 - Supports **Offline / LittleSkin / Premium (Microsoft account)** login.
 - Automatic re-login when a session expires (LittleSkin auto-opens the browser OAuth flow and reconnects when done).
 - Optional extras kept from the old Cubex bot: Quiz auto-answer, AutoEat.
@@ -24,6 +24,8 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
   - Message filter regex and player blacklist.
   - Optional image generation (posts the image URL into chat).
 - Auto re-login: when a LittleSkin session becomes invalid (e.g. "Invalid access token"), it launches the login flow automatically and reconnects.
+- Auto reconnect & kick handling (**Reconnect·Kick** tab): when the connection ends by itself (drop / kick) the bot reconnects after a configurable delay, up to a configurable number of attempts (reset on a successful spawn). After being kicked and reconnecting it can send `/lobby` automatically. Clicking **Disconnect** manually never triggers a reconnect.
+- Appearance (**Appearance** tab): pick a PNG / JPG as the window background image and dim it; the text theme can be **Auto (from background brightness)** / light background with black text / dark background with white text.
 
 ## Project Layout
 
@@ -31,8 +33,8 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 .
 ├─ main.py                # Entry point (GUI)
 ├─ aafm_py/               # Python side: GUI, config, controller, AI player
-│  ├─ gui.py              #   Pages: Settings / Player Config / Game Output
-│  ├─ controller.py       #   Controller (event dispatch, runtime config)
+│  ├─ gui.py              #   Tabs: Settings / AI / Player / Roster / QQ / Reconnect·Kick / Appearance / Output
+│  ├─ controller.py       #   Controller (event dispatch, runtime config, auto reconnect / kick handling)
 │  ├─ ai_player.py        #   Trigger / context / filter logic of the AI player
 │  ├─ config.py           #   Config models (config.json / mcai_chat.json)
 │  ├─ llm.py              #   OpenAI-compatible / Anthropic client

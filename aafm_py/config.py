@@ -263,12 +263,148 @@ class AutoEatConfig:
 
 
 @dataclass
+class QqConfig:
+    """QQ group-chat relay via an OneBot 11 gateway (NapCat / Lagrange / go-cqhttp).
+
+    - ``mode`` ``forward`` connects out to the gateway's WebSocket server;
+      ``reverse`` listens and lets the gateway connect in.
+    - ``groups`` is the list of group ids to relay; empty means every group.
+    - ``format`` is the MC chat template with ``{group}`` / ``{name}`` /
+      ``{message}`` placeholders. The default uses the ``&7&o`` color codes
+      (dark gray, italic) requested for the relayed lines.
+    """
+    enabled: bool = False
+    mode: str = 'forward'
+    url: str = 'ws://127.0.0.1:3001'
+    accessToken: str = ''
+    listenHost: str = '0.0.0.0'
+    listenPort: int = 3002
+    groups: List[str] = field(default_factory=list)
+    format: str = '&7&o[{group}][{name}]：{message}'
+    maxLength: int = 220
+
+    # MC -> QQ relay: when an in-game chat message starts with ``mcTrigger``,
+    # send the rest to a QQ group. ``mcTargetGroup`` empty => first ``groups``
+    # entry; ``[sentQ:群号] 内容`` overrides the target for one message.
+    mcToQqEnabled: bool = False
+    mcTrigger: str = '[sentQ]'
+    mcTargetGroup: str = ''
+    mcFormat: str = '[MC] {player}：{message}'
+    mcCooldownSeconds: int = 3
+
+    def validate(self) -> None:
+        if self.mode not in ('forward', 'reverse'):
+            self.mode = 'forward'
+        if not self.url:
+            self.url = 'ws://127.0.0.1:3001'
+        if not self.listenHost:
+            self.listenHost = '0.0.0.0'
+        try:
+            self.listenPort = int(self.listenPort)
+        except (TypeError, ValueError):
+            self.listenPort = 3002
+        self.listenPort = _clamp_int(self.listenPort, 1, 65535)
+        if self.accessToken is None:
+            self.accessToken = ''
+        if not self.format:
+            self.format = '&7&o[{group}][{name}]：{message}'
+        self.maxLength = _clamp_int(self.maxLength, 20, 256)
+        if self.groups is None:
+            self.groups = []
+        norm = []
+        for g in self.groups:
+            s = str(g).strip()
+            if s and s not in norm:
+                norm.append(s)
+        self.groups = norm
+        if not self.mcTrigger:
+            self.mcTrigger = '[sentQ]'
+        self.mcTargetGroup = str(self.mcTargetGroup or '').strip()
+        if not self.mcFormat:
+            self.mcFormat = '[MC] {player}：{message}'
+        self.mcCooldownSeconds = _clamp_int(self.mcCooldownSeconds, 0, 3600)
+
+
+@dataclass
+class RosterConfig:
+    """Local "who is this player" fact table loaded from .xlsx / .csv files.
+
+    Columns: 玩家名 | 玩家描述 (authoritative, may be empty) | 描述1/描述2/....
+    | AI记录1..AI记录5 (personality notes the LLM writes after reading chat).
+    - "xxx是谁" answers the authoritative 玩家描述 when set, otherwise picks a
+      描述1..N at random.
+    - A triggered in-game statement "X是Y / X就是Y" (X or Y in the table) is
+      written back into that player's 玩家描述 cell of the source workbook.
+    - When ``personalityEnabled`` the AI periodically (and on an explicit
+      "研究X" request) reads recent chat of a player and rolls one concise
+      personality note into AI记录1..5 of that player's row.
+    """
+    enabled: bool = True
+    files: List[str] = field(default_factory=list)
+
+    personalityEnabled: bool = True
+    researchIntervalSeconds: int = 180
+    researchMinMessages: int = 6
+
+    # Independent alias analysis (reads chat, writes 别名1..3).
+    aliasEnabled: bool = True
+
+
+@dataclass
+class ReconnectConfig:
+    """Automatic recovery after a non-user disconnect / server kick.
+
+    - ``enabled``               : reconnect when the bot drops on its own.
+    - ``delaySeconds``          : wait before each reconnect attempt.
+    - ``maxAttempts``           : give up after this many tries (reset on spawn).
+    - ``kickLobbyEnabled``      : after being kicked and reconnecting, send /lobby.
+    - ``kickLobbyDelaySeconds`` : wait this long after spawn before sending /lobby.
+    """
+    enabled: bool = True
+    delaySeconds: int = 5
+    maxAttempts: int = 5
+    kickLobbyEnabled: bool = True
+    kickLobbyDelaySeconds: int = 2
+
+    def validate(self) -> None:
+        self.delaySeconds = _clamp_int(self.delaySeconds, 0, 600)
+        self.maxAttempts = _clamp_int(self.maxAttempts, 1, 100)
+        self.kickLobbyDelaySeconds = _clamp_int(self.kickLobbyDelaySeconds, 0, 600)
+
+
+@dataclass
+class AppearanceConfig:
+    """GUI look & feel: optional window background image + light/dark theme.
+
+    - ``backgroundImage``    : path to a PNG/JPG shown as the window background
+                               (panels stay a solid theme colour on top).
+    - ``backgroundDarkness`` : 0-100, dims the background image.
+    - ``textTheme``          : ``auto`` (pick from the image brightness) /
+                               ``light`` (light background -> black text) /
+                               ``dark`` (dark background -> white text).
+    """
+    backgroundImage: str = ''
+    backgroundDarkness: int = 40
+    textTheme: str = 'auto'
+
+    def validate(self) -> None:
+        self.backgroundImage = str(self.backgroundImage or '')
+        self.backgroundDarkness = _clamp_int(self.backgroundDarkness, 0, 100)
+        if self.textTheme not in ('auto', 'light', 'dark'):
+            self.textTheme = 'auto'
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     quiz: QuizConfig = field(default_factory=QuizConfig)
     autoeat: AutoEatConfig = field(default_factory=AutoEatConfig)
+    qq: QqConfig = field(default_factory=QqConfig)
+    roster: RosterConfig = field(default_factory=RosterConfig)
+    reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
+    appearance: AppearanceConfig = field(default_factory=AppearanceConfig)
 
     def validate(self) -> None:
         try:
@@ -285,6 +421,9 @@ class AppConfig:
         if not self.auth.username:
             self.auth.username = 'AI_Bot'
         self.auth.validate()
+        self.qq.validate()
+        self.reconnect.validate()
+        self.appearance.validate()
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -298,7 +437,8 @@ class AppConfig:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if isinstance(data, dict):
-                    for section in ('server', 'auth', 'llm', 'quiz', 'autoeat'):
+                    for section in ('server', 'auth', 'llm', 'quiz', 'autoeat', 'qq', 'roster',
+                                    'reconnect', 'appearance'):
                         sub = data.get(section)
                         if isinstance(sub, dict):
                             cur = getattr(cfg, section)

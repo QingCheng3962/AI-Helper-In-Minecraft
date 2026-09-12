@@ -26,6 +26,20 @@ def normalize_base_url(base_url: str) -> str:
     return s + '/'
 
 
+def clean_api_key(key) -> str:
+    """Keep only ASCII printable chars from an API key.
+
+    Keys must go into HTTP headers, which httpx encodes as ASCII. A pasted
+    key that accidentally contains Chinese/whitespace/junk is stripped here so
+    it can't raise UnicodeEncodeError mid-request.
+    """
+    cleaned = ''.join(ch for ch in str(key or '')
+                      if 0x21 <= ord(ch) <= 0x7E).strip()
+    if not cleaned:
+        raise LLMError('API 密钥为空或只包含无效字符，请重新粘贴。')
+    return cleaned
+
+
 def _message_pairs(messages: List[dict]) -> List[Tuple[str, str]]:
     """Normalize role/content pairs, defaulting missing content to ''. """
     out = []
@@ -41,7 +55,8 @@ def _message_pairs(messages: List[dict]) -> List[Tuple[str, str]]:
 class _BaseProvider:
     def __init__(self, cfg, api_key: str):
         self.cfg = cfg
-        self.api_key = api_key or cfg.apiKey or ''
+        raw = api_key if api_key is not None and str(api_key).strip() else cfg.apiKey
+        self.api_key = clean_api_key(raw)
         self.model = cfg.model or 'gpt-4o-mini'
         self.temperature = cfg.temperature
         self.max_tokens = cfg.maxTokens
@@ -50,11 +65,18 @@ class _BaseProvider:
         self._client = httpx.Client(timeout=self.timeout)
 
     def _post(self, endpoint: str, headers: dict, body: dict) -> str:
-        json_str = json.dumps(body, ensure_ascii=False)
+        # Encode to UTF-8 bytes ourselves so httpx never picks an ASCII codec
+        # from the Content-Type, and replace any stray/lone-surrogate chars
+        # instead of raising UnicodeEncodeError mid-request.
+        headers = dict(headers)
+        headers.setdefault('Content-Type', 'application/json; charset=utf-8')
+        json_bytes = json.dumps(body, ensure_ascii=False).encode(
+            'utf-8', errors='replace')
         last_err: Optional[Exception] = None
         for attempt in range(self.retry_count + 1):
             try:
-                resp = self._client.post(endpoint, headers=headers, content=json_str)
+                resp = self._client.post(endpoint, headers=headers,
+                                         content=json_bytes)
                 if 200 <= resp.status_code < 300:
                     return resp.text
                 last_err = LLMError(f'HTTP {resp.status_code}: {resp.text[:500]}')
