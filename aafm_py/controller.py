@@ -105,6 +105,7 @@ class Controller:
         self._qq_last_state: Optional[str] = None
         self._qq_pending_relays: List[str] = []
         self._last_mc_to_qq_time = 0.0
+        self._last_health_alert = 0.0
         self._photo = PhotoServer()
         self._public_base_cache = ''
 
@@ -893,6 +894,31 @@ class Controller:
         return out
 
     # ------------------------------------------------------------------
+    # Low-health alert
+    # ------------------------------------------------------------------
+    def _maybe_health_alert(self, health) -> None:
+        cfg = self.config.healthAlert
+        if not cfg.enabled or health is None:
+            return
+        try:
+            hp = float(health)
+        except (TypeError, ValueError):
+            return
+        if hp > int(cfg.threshold):
+            return
+        text = (cfg.message or '').strip()
+        if not text:
+            return
+        now = time.time()
+        cooldown = int(cfg.cooldownSeconds or 0)
+        if cooldown > 0 and now - self._last_health_alert < cooldown:
+            return
+        if self._engine.say(text):
+            self._last_health_alert = now
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': f'[血量] {hp:.0f} ≤ {int(cfg.threshold)}，已发送提醒。'})
+
+    # ------------------------------------------------------------------
     # Roster (local "who is this player" table)
     # ------------------------------------------------------------------
     def _load_roster_files(self) -> None:
@@ -1110,6 +1136,7 @@ class Controller:
         elif event == 'health':
             self._post_ui({'kind': 'health', 'health': ev.get('health'),
                            'food': ev.get('food')})
+            self._maybe_health_alert(ev.get('health'))
         elif event == 'spawn':
             self._connected = True
             self._connecting = False

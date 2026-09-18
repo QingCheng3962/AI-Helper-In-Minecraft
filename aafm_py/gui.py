@@ -814,6 +814,37 @@ class AiPlayerGUI:
         self._build_prompt_frame(frm)
         self._build_trigger_frame(frm)
         self._build_block_frame(frm)
+        self._build_health_frame(frm)
+
+    def _build_health_frame(self, parent) -> None:
+        frm = ttk.LabelFrame(parent, text='低血量报警', padding=8)
+        frm.pack(fill='x', pady=(0, 8))
+
+        self.var_health_enabled = tk.BooleanVar(value=False)
+        self.var_health_threshold = tk.StringVar()
+        self.var_health_cooldown = tk.StringVar()
+        self.var_health_msg = tk.StringVar()
+
+        ttk.Checkbutton(frm, text='启用：血量低于阈值时在公屏发言',
+                        variable=self.var_health_enabled).grid(
+            row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
+
+        ttk.Label(frm, text='预设血量').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_health_threshold, width=6).grid(
+            row=1, column=1, sticky='w', padx=4, pady=3)
+        ttk.Label(frm, text='（1-20，血量≤该值即触发）', foreground='#888888').grid(
+            row=1, column=2, sticky='w', padx=4)
+        ttk.Label(frm, text='冷却秒').grid(row=1, column=3, sticky='e', padx=4)
+        ttk.Entry(frm, textvariable=self.var_health_cooldown, width=6).grid(
+            row=1, column=4, sticky='w', padx=4)
+
+        ttk.Label(frm, text='预设话').grid(row=2, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_health_msg, width=60).grid(
+            row=2, column=1, columnspan=4, sticky='we', padx=4, pady=3)
+        ttk.Label(frm, text='支持 & 颜色码；冷却内不会重复发言。',
+                  foreground='#888888').grid(
+            row=3, column=0, columnspan=5, sticky='w', padx=4)
+        frm.columnconfigure(2, weight=1)
 
     def _build_prompt_frame(self, parent) -> None:
         frm = ttk.LabelFrame(parent, text='提示词与上下文', padding=8)
@@ -1043,6 +1074,10 @@ class AiPlayerGUI:
 
         self.var_quiz.set(cfg.quiz.enabled)
         self.var_autoeat.set(cfg.autoeat.enabled)
+        self.var_health_enabled.set(bool(cfg.healthAlert.enabled))
+        self.var_health_threshold.set(str(cfg.healthAlert.threshold))
+        self.var_health_cooldown.set(str(cfg.healthAlert.cooldownSeconds))
+        self.var_health_msg.set(cfg.healthAlert.message or '')
         self.var_roster.set(cfg.roster.enabled)
         self.var_roster_research.set(cfg.roster.personalityEnabled)
         self.var_roster_alias.set(cfg.roster.aliasEnabled)
@@ -1209,6 +1244,13 @@ class AiPlayerGUI:
 
         cfg.quiz.enabled = self.var_quiz.get()
         cfg.autoeat.enabled = self.var_autoeat.get()
+
+        cfg.healthAlert.enabled = self.var_health_enabled.get()
+        cfg.healthAlert.threshold = self._parse_int(self.var_health_threshold.get(), 6)
+        cfg.healthAlert.cooldownSeconds = self._parse_int(self.var_health_cooldown.get(), 30)
+        cfg.healthAlert.message = (self.var_health_msg.get().strip()
+                                   or '&c我血量过低了，快救救我！')
+        cfg.healthAlert.validate()
 
         cfg.roster.enabled = self.var_roster.get()
         cfg.roster.personalityEnabled = self.var_roster_research.get()

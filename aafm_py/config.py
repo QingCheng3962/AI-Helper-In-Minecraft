@@ -251,6 +251,21 @@ class LLMConfig:
 
 
 @dataclass
+class HealthAlertConfig:
+    """Say something in MC chat when the bot's health drops to/below a value."""
+    enabled: bool = False
+    threshold: int = 6
+    message: str = '&c我血量过低了，快救救我！'
+    cooldownSeconds: int = 30
+
+    def validate(self) -> None:
+        self.threshold = _clamp_int(self.threshold, 1, 20)
+        self.cooldownSeconds = _clamp_int(self.cooldownSeconds, 0, 3600)
+        if not self.message:
+            self.message = '&c我血量过低了，快救救我！'
+
+
+@dataclass
 class QuizConfig:
     enabled: bool = True
     minDelay: int = 3000
@@ -436,6 +451,7 @@ class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     quiz: QuizConfig = field(default_factory=QuizConfig)
     autoeat: AutoEatConfig = field(default_factory=AutoEatConfig)
+    healthAlert: HealthAlertConfig = field(default_factory=HealthAlertConfig)
     qq: QqConfig = field(default_factory=QqConfig)
     roster: RosterConfig = field(default_factory=RosterConfig)
     reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
@@ -456,6 +472,7 @@ class AppConfig:
         if not self.auth.username:
             self.auth.username = 'AI_Bot'
         self.auth.validate()
+        self.healthAlert.validate()
         self.qq.validate()
         self.reconnect.validate()
         self.appearance.validate()
@@ -472,8 +489,8 @@ class AppConfig:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if isinstance(data, dict):
-                    for section in ('server', 'auth', 'llm', 'quiz', 'autoeat', 'qq', 'roster',
-                                    'reconnect', 'appearance'):
+                    for section in ('server', 'auth', 'llm', 'quiz', 'autoeat', 'healthAlert',
+                                    'qq', 'roster', 'reconnect', 'appearance'):
                         sub = data.get(section)
                         if isinstance(sub, dict):
                             cur = getattr(cfg, section)
