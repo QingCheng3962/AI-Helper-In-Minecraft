@@ -655,6 +655,7 @@ class AiPlayerGUI:
         btns = ttk.Frame(frm)
         btns.grid(row=8, column=1, columnspan=4, sticky='w', padx=4, pady=(4, 2))
         ttk.Button(btns, text='启动', command=self._on_qq_launch_napcat).pack(side='left', padx=2)
+        ttk.Button(btns, text='快速登录', command=self._on_qq_quick_login).pack(side='left', padx=2)
         ttk.Button(btns, text='连接', command=self._on_qq_start).pack(side='left', padx=2)
         ttk.Button(btns, text='重连', command=self._on_qq_reconnect).pack(side='left', padx=2)
         ttk.Button(btns, text='断开', command=self._on_qq_stop).pack(side='left', padx=2)
@@ -1374,6 +1375,63 @@ class AiPlayerGUI:
     def _on_qq_launch_napcat(self):
         self._gather_config()
         self.controller.start_napcat()
+
+    def _on_qq_quick_login(self):
+        self._gather_config()
+        accounts = self.controller.list_qq_accounts()
+        last = (self.controller.config.qq.lastLoginUin or '').strip()
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title('快速登录 QQ')
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        ttk.Label(dlg, text='选择要快速登录的 QQ 号（本地已有配置的账号）：').pack(
+            anchor='w', padx=12, pady=(12, 4))
+        lb = tk.Listbox(dlg, height=8, width=30)
+        for a in accounts:
+            lb.insert('end', a)
+        lb.pack(padx=12, fill='x')
+        if last and last in accounts:
+            idx = accounts.index(last)
+            lb.selection_set(idx)
+            lb.see(idx)
+        elif accounts:
+            lb.selection_set(0)
+
+        ttk.Label(dlg, text='或手动输入 QQ 号：').pack(anchor='w', padx=12, pady=(8, 2))
+        var = tk.StringVar(value=last)
+        entry = ttk.Entry(dlg, textvariable=var, width=30)
+        entry.pack(padx=12, fill='x')
+
+        lb.bind('<<ListboxSelect>>', lambda e: (
+            var.set(lb.get(lb.curselection()[0])) if lb.curselection() else None))
+
+        def confirm(_e=None):
+            sel = lb.curselection()
+            uin = var.get().strip() or (lb.get(sel[0]) if sel else '')
+            if not uin:
+                messagebox.showwarning('快速登录', '请选择或输入一个 QQ 号。', parent=dlg)
+                return
+            dlg.destroy()
+            self.controller.start_napcat(uin)
+            self._append_log(f'已请求快速登录 QQ {uin}（若会话失效会自动转为扫码）。', 'info')
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill='x', padx=12, pady=12)
+        ttk.Button(btns, text='快速登录', command=confirm).pack(side='right')
+        ttk.Button(btns, text='取消', command=dlg.destroy).pack(side='right', padx=6)
+        entry.bind('<Return>', confirm)
+        entry.focus_set()
+
+        dlg.update_idletasks()
+        try:
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_width()) // 2
+            y = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_height()) // 2
+            dlg.geometry(f'+{max(0, x)}+{max(0, y)}')
+        except Exception:  # noqa: BLE001
+            pass
 
     def _on_qq_start(self):
         self._gather_config()

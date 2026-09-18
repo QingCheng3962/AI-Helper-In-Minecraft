@@ -513,20 +513,41 @@ class Controller:
     def stop_qq(self) -> None:
         self._stop_qq()
 
-    def start_napcat(self) -> None:
-        """Launch the bundled NapCat launcher and open its cache folder."""
+    def list_qq_accounts(self) -> List[str]:
+        """QQ numbers known locally (from NapCat per-account config files)."""
+        uins = set()
+        try:
+            for name in os.listdir(NAPCAT_CONFIG_DIR):
+                m = re.match(r'(?:napcat|onebot11|napcat_protocol)_(\d+)\.json$', name)
+                if m:
+                    uins.add(m.group(1))
+        except OSError:
+            pass
+        last = (self.config.qq.lastLoginUin or '').strip()
+        if last:
+            uins.add(last)
+        return sorted(uins)
+
+    def start_napcat(self, uin: str = '') -> None:
+        """Launch the bundled NapCat launcher (optionally quick-login a QQ)."""
         if not os.path.isfile(NAPCAT_LAUNCHER):
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': '未找到 NapCat 启动脚本：' + NAPCAT_LAUNCHER})
             return
+        uin = str(uin or '').strip()
+        args = ['cmd', '/c', NAPCAT_LAUNCHER]
+        if uin:
+            args += ['-q', uin]
+            self.config.qq.lastLoginUin = uin
+            self.config.save()
         try:
             kwargs = {}
             if os.name == 'nt':
                 kwargs['creationflags'] = subprocess.CREATE_NEW_CONSOLE
-            subprocess.Popen(['cmd', '/c', NAPCAT_LAUNCHER],
-                             cwd=NAPCAT_INNER_DIR, **kwargs)
+            subprocess.Popen(args, cwd=NAPCAT_INNER_DIR, **kwargs)
             self._post_ui({'kind': 'log', 'level': 'info',
-                           'message': '已启动 NapCat（会弹窗/UAC 提权，首次请扫码登录）。'})
+                           'message': ('已启动 NapCat 并请求快速登录 ' + uin) if uin
+                                      else '已启动 NapCat（会弹窗/UAC 提权，首次请扫码登录）。'})
         except Exception as e:  # noqa: BLE001
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': '启动 NapCat 失败: ' + str(e)})

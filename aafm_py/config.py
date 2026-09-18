@@ -327,6 +327,8 @@ class QqConfig:
     # Watch NapCat's config folder and auto-write the OneBot WS config for every
     # QQ number that logs in (so newly scanned accounts work without manual setup).
     autoConfigNewAccounts: bool = True
+    # Last QQ number used for quick login (-q), preselected in the picker.
+    lastLoginUin: str = ''
 
     def validate(self) -> None:
         if self.mode not in ('forward', 'reverse'):
