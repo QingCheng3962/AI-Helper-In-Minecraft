@@ -632,32 +632,78 @@ class AiPlayerGUI:
                   foreground='#888888').grid(row=5, column=4, sticky='w', padx=4)
 
         self.var_qq_format = tk.StringVar()
+        self.var_qq_image_link = tk.BooleanVar(value=False)
+        self.var_qq_autoreconnect = tk.BooleanVar(value=True)
+        self.var_qq_health = tk.StringVar()
+        self.var_qq_autoconfig = tk.BooleanVar(value=True)
         ttk.Label(frm, text='转述格式').grid(row=6, column=0, sticky='w', padx=4, pady=3)
         ttk.Entry(frm, textvariable=self.var_qq_format, width=42).grid(
             row=6, column=1, columnspan=3, sticky='we', padx=4, pady=3)
+        ttk.Checkbutton(frm, text='图片转链接', variable=self.var_qq_image_link).grid(
+            row=6, column=4, sticky='w', padx=4, pady=3)
 
         ttk.Label(frm,
                   text='占位符：{group}=群名 {name}=昵称 {message}=内容；默认 &7&o 为灰色斜体。'
-                       '图片/表情等非文本会以 [图片] / [表情] 等占位转述。',
+                       '图片/表情等非文本会以 [图片] / [表情] 等占位转述；'
+                       '勾选「图片转链接」后图片存到 pic_http/ 并发本地 HTTP 链接。',
                   foreground='#888888', wraplength=720, justify='left').grid(
             row=7, column=0, columnspan=5, sticky='w', padx=4, pady=(2, 0))
 
         self.qq_status_label = ttk.Label(frm, text='未连接', foreground='#999999')
-        self.qq_status_label.grid(row=8, column=0, columnspan=2, sticky='w', padx=4, pady=(4, 2))
-        ttk.Button(frm, text='启动/重连 QQ', command=self._on_qq_start).grid(
-            row=8, column=2, sticky='w', padx=4, pady=(4, 2))
-        ttk.Button(frm, text='停止 QQ', command=self._on_qq_stop).grid(
-            row=8, column=3, sticky='w', padx=4, pady=(4, 2))
+        self.qq_status_label.grid(row=8, column=0, sticky='w', padx=4, pady=(4, 2))
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=8, column=1, columnspan=4, sticky='w', padx=4, pady=(4, 2))
+        ttk.Button(btns, text='启动', command=self._on_qq_launch_napcat).pack(side='left', padx=2)
+        ttk.Button(btns, text='连接', command=self._on_qq_start).pack(side='left', padx=2)
+        ttk.Button(btns, text='重连', command=self._on_qq_reconnect).pack(side='left', padx=2)
+        ttk.Button(btns, text='断开', command=self._on_qq_stop).pack(side='left', padx=2)
+
+        # --- 账号安全（可选） ---
+        sec = ttk.LabelFrame(frm, text='账号安全（可选）', padding=6)
+        sec.grid(row=9, column=0, columnspan=5, sticky='we', padx=2, pady=(8, 2))
+        ttk.Checkbutton(sec, text='自动重连', variable=self.var_qq_autoreconnect).grid(
+            row=0, column=0, sticky='w', padx=4, pady=3)
+        ttk.Label(sec, text='在线检测秒').grid(row=0, column=1, sticky='e', padx=4)
+        ttk.Entry(sec, textvariable=self.var_qq_health, width=6).grid(
+            row=0, column=2, sticky='w', padx=4)
+        ttk.Checkbutton(sec, text='自动为新扫码账号写配置', variable=self.var_qq_autoconfig).grid(
+            row=0, column=3, columnspan=2, sticky='w', padx=12, pady=3)
+        ttk.Label(sec, text='连接因疑似风控被关闭、或在线检测连续失败时，会告警并停止自动重连，'
+                            '避免反复登录加重风控；恢复后点「重连」。',
+                  foreground='#888888', wraplength=720, justify='left').grid(
+            row=1, column=0, columnspan=5, sticky='w', padx=4, pady=(2, 0))
+
+        # --- 图片转本地链接 ---
+        img = ttk.LabelFrame(frm, text='图片转本地链接（Python HTTP 服务，仅暴露 /pic_http/）', padding=6)
+        img.grid(row=10, column=0, columnspan=5, sticky='we', padx=2, pady=(8, 2))
+        self.var_qq_img_port = tk.StringVar()
+        self.var_qq_img_base = tk.StringVar()
+        ttk.Label(img, text='监听端口').grid(row=0, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(img, textvariable=self.var_qq_img_port, width=8).grid(
+            row=0, column=1, sticky='w', padx=4)
+        ttk.Label(img, text='公网地址').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(img, textvariable=self.var_qq_img_base, width=38).grid(
+            row=1, column=1, columnspan=3, sticky='we', padx=4)
+        ttk.Label(img, text='留空=自动探测公网 IP，例 http://1.2.3.4:8765',
+                  foreground='#888888').grid(row=1, column=4, sticky='w', padx=4)
+        ttk.Label(img, text='图片保存到项目 pic_http/ 下、以时间戳命名；'
+                            '链接形如 http://公网地址:端口/pic_http/xxx.png。需在路由器把该端口转发到本机。',
+                  foreground='#888888', wraplength=720, justify='left').grid(
+            row=2, column=0, columnspan=5, sticky='w', padx=4, pady=(2, 0))
+        img.columnconfigure(1, weight=1)
 
         # --- MC -> QQ ---
         mc = ttk.LabelFrame(frm, text='MC → QQ 转述（公屏消息以触发词开头即发送到 QQ）', padding=6)
-        mc.grid(row=9, column=0, columnspan=5, sticky='we', padx=2, pady=(8, 2))
+        mc.grid(row=11, column=0, columnspan=5, sticky='we', padx=2, pady=(8, 2))
 
         self.var_mc2qq_enabled = tk.BooleanVar(value=False)
         self.var_mc2qq_trigger = tk.StringVar()
         self.var_mc2qq_group = tk.StringVar()
         self.var_mc2qq_format = tk.StringVar()
         self.var_mc2qq_cooldown = tk.StringVar()
+        self.var_mc2qq_ok = tk.StringVar()
+        self.var_mc2qq_fail = tk.StringVar()
 
         ttk.Checkbutton(mc, text='启用 MC → QQ', variable=self.var_mc2qq_enabled).grid(
             row=0, column=0, sticky='w', padx=4, pady=3)
@@ -682,6 +728,18 @@ class AiPlayerGUI:
             row=3, column=1, sticky='w', padx=4)
         ttk.Label(mc, text='发送前自动去掉 MC 颜色码；非法字符以 ? 代替',
                   foreground='#888888').grid(row=3, column=2, columnspan=2, sticky='w', padx=4)
+
+        ttk.Label(mc, text='成功提示').grid(row=4, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(mc, textvariable=self.var_mc2qq_ok, width=38).grid(
+            row=4, column=1, columnspan=2, sticky='we', padx=4)
+        ttk.Label(mc, text='{player}', foreground='#888888').grid(
+            row=4, column=3, sticky='w', padx=4)
+
+        ttk.Label(mc, text='失败提示').grid(row=5, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(mc, textvariable=self.var_mc2qq_fail, width=38).grid(
+            row=5, column=1, columnspan=2, sticky='we', padx=4)
+        ttk.Label(mc, text='{player}', foreground='#888888').grid(
+            row=5, column=3, sticky='w', padx=4)
         mc.columnconfigure(1, weight=1)
 
         frm.columnconfigure(1, weight=1)
@@ -860,11 +918,11 @@ class AiPlayerGUI:
         ttk.Entry(img, textvariable=self.var_image_model, width=22).pack(side='left')
 
     # ------------------------------------------------------------------
-    # Tab 3: 游戏输出页
+    # Tab: 日志页
     # ------------------------------------------------------------------
     def _build_output_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(tab, text=' 游戏输出 ')
+        self.notebook.add(tab, text=' 日志 ')
 
         self.log_text = tk.Text(tab, height=22, wrap='word', state='disabled',
                                 font=('Consolas', 9))
@@ -905,8 +963,9 @@ class AiPlayerGUI:
         return e
 
     def _append_log(self, text: str, tag: str = 'info') -> None:
+        stamp = time.strftime('[%H:%M:%S] ')
         self.log_text.configure(state='normal')
-        self.log_text.insert('end', text + '\n', tag)
+        self.log_text.insert('end', stamp + text + '\n', tag)
         self.log_text.see('end')
         self.log_text.configure(state='disabled')
 
@@ -997,12 +1056,20 @@ class AiPlayerGUI:
         self.var_qq_listen_port.set(str(cfg.qq.listenPort))
         self.var_qq_groups.set(', '.join(cfg.qq.groups or []))
         self.var_qq_format.set(cfg.qq.format or '')
+        self.var_qq_image_link.set(bool(cfg.qq.imageAsLink))
+        self.var_qq_img_port.set(str(cfg.qq.imageHttpPort))
+        self.var_qq_img_base.set(cfg.qq.imagePublicBase or '')
+        self.var_qq_autoreconnect.set(bool(cfg.qq.autoReconnect))
+        self.var_qq_health.set(str(cfg.qq.healthCheckSeconds))
+        self.var_qq_autoconfig.set(bool(cfg.qq.autoConfigNewAccounts))
 
         self.var_mc2qq_enabled.set(cfg.qq.mcToQqEnabled)
         self.var_mc2qq_trigger.set(cfg.qq.mcTrigger or '[sentQ]')
         self.var_mc2qq_group.set(cfg.qq.mcTargetGroup or '')
         self.var_mc2qq_format.set(cfg.qq.mcFormat or '[MC] {player}：{message}')
         self.var_mc2qq_cooldown.set(str(cfg.qq.mcCooldownSeconds))
+        self.var_mc2qq_ok.set(cfg.qq.mcSuccessMsg or '&a@{player}转述成功')
+        self.var_mc2qq_fail.set(cfg.qq.mcFailureMsg or '&c@{player}转述失败')
 
         self.var_reconnect_enabled.set(cfg.reconnect.enabled)
         self.var_reconnect_delay.set(str(cfg.reconnect.delaySeconds))
@@ -1161,11 +1228,19 @@ class AiPlayerGUI:
         qq.listenPort = self._parse_int(self.var_qq_listen_port.get(), 3002)
         qq.groups = [x for x in re.split(r'[,，;\s]+', self.var_qq_groups.get()) if x]
         qq.format = self.var_qq_format.get().strip() or '&7&o[{group}][{name}]：{message}'
+        qq.imageAsLink = self.var_qq_image_link.get()
+        qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8765)
+        qq.imagePublicBase = self.var_qq_img_base.get().strip()
+        qq.autoReconnect = self.var_qq_autoreconnect.get()
+        qq.healthCheckSeconds = self._parse_int(self.var_qq_health.get(), 30)
+        qq.autoConfigNewAccounts = self.var_qq_autoconfig.get()
         qq.mcToQqEnabled = self.var_mc2qq_enabled.get()
         qq.mcTrigger = self.var_mc2qq_trigger.get().strip() or '[sentQ]'
         qq.mcTargetGroup = self.var_mc2qq_group.get().strip()
         qq.mcFormat = self.var_mc2qq_format.get().strip() or '[MC] {player}：{message}'
         qq.mcCooldownSeconds = self._parse_int(self.var_mc2qq_cooldown.get(), 3)
+        qq.mcSuccessMsg = self.var_mc2qq_ok.get().strip() or '&a@{player}转述成功'
+        qq.mcFailureMsg = self.var_mc2qq_fail.get().strip() or '&c@{player}转述失败'
         qq.validate()
 
         rc = cfg.reconnect
@@ -1254,14 +1329,23 @@ class AiPlayerGUI:
         self._gather_config()
         self.controller.set_qq_enabled(self.var_qq_enabled.get())
 
+    def _on_qq_launch_napcat(self):
+        self._gather_config()
+        self.controller.start_napcat()
+
     def _on_qq_start(self):
         self._gather_config()
+        self.controller.start_qq()
+        self._append_log('正在连接 QQ 网关…', 'info')
+
+    def _on_qq_reconnect(self):
+        self._gather_config()
         self.controller.restart_qq()
-        self._append_log('正在按当前设置连接 QQ 网关…', 'info')
+        self._append_log('正在重连 QQ 网关…', 'info')
 
     def _on_qq_stop(self):
         self.controller.stop_qq()
-        self._append_log('已退出 QQ 转述。', 'info')
+        self._append_log('已断开 QQ 转述。', 'info')
 
     def _on_roster_enabled(self):
         enabled = self.var_roster.get()
@@ -1465,6 +1549,8 @@ class AiPlayerGUI:
                 color = '#7ddb7d'
             elif state == 'connecting':
                 text, color = 'QQ 连接中…', '#ffb74d'
+            elif state == 'restricted':
+                text, color = 'QQ 受限/离线（已停止重连）', '#ff6b6b'
             else:
                 text, color = 'QQ 未连接', '#999999'
             self.qq_status_label.config(text=text, foreground=color)

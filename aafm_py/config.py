@@ -282,6 +282,15 @@ class QqConfig:
     groups: List[str] = field(default_factory=list)
     format: str = '&7&o[{group}][{name}]：{message}'
     maxLength: int = 220
+    # When on, QQ images are downloaded, saved into the local ``pic_http/``
+    # folder, and relayed as a link served by the built-in Python HTTP server
+    # (only the ``/pic_http/`` path is exposed).
+    imageAsLink: bool = False
+    imageHttpHost: str = '0.0.0.0'
+    imageHttpPort: int = 8765
+    # Public base used in the link, e.g. http://1.2.3.4:8765 . Empty => try to
+    # auto-detect the machine's public IP, falling back to 127.0.0.1.
+    imagePublicBase: str = ''
 
     # MC -> QQ relay: when an in-game chat message starts with ``mcTrigger``,
     # send the rest to a QQ group. ``mcTargetGroup`` empty => first ``groups``
@@ -291,6 +300,18 @@ class QqConfig:
     mcTargetGroup: str = ''
     mcFormat: str = '[MC] {player}：{message}'
     mcCooldownSeconds: int = 3
+    # Feedback sent to MC public chat after a relay attempt. `{player}` is the
+    # in-game sender name; `&` color codes are allowed.
+    mcSuccessMsg: str = '&a@{player}转述成功'
+    mcFailureMsg: str = '&c@{player}转述失败'
+
+    # Reconnect / health. When the QQ account looks restricted the engine stops
+    # auto-reconnecting to avoid repeated logins that can worsen risk control.
+    autoReconnect: bool = True
+    healthCheckSeconds: int = 30
+    # Watch NapCat's config folder and auto-write the OneBot WS config for every
+    # QQ number that logs in (so newly scanned accounts work without manual setup).
+    autoConfigNewAccounts: bool = True
 
     def validate(self) -> None:
         if self.mode not in ('forward', 'reverse'):
@@ -323,6 +344,20 @@ class QqConfig:
         if not self.mcFormat:
             self.mcFormat = '[MC] {player}：{message}'
         self.mcCooldownSeconds = _clamp_int(self.mcCooldownSeconds, 0, 3600)
+        if not self.mcSuccessMsg:
+            self.mcSuccessMsg = '&a@{player}转述成功'
+        if not self.mcFailureMsg:
+            self.mcFailureMsg = '&c@{player}转述失败'
+        if not self.imageHttpHost:
+            self.imageHttpHost = '0.0.0.0'
+        try:
+            self.imageHttpPort = int(self.imageHttpPort)
+        except (TypeError, ValueError):
+            self.imageHttpPort = 8765
+        self.imageHttpPort = _clamp_int(self.imageHttpPort, 1, 65535)
+        self.autoReconnect = bool(self.autoReconnect)
+        self.healthCheckSeconds = _clamp_int(self.healthCheckSeconds, 0, 3600)
+        self.imagePublicBase = str(self.imagePublicBase or '').strip().rstrip('/')
 
 
 @dataclass

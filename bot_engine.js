@@ -55,10 +55,19 @@ function parseChat(message) {
         return { player: match[1].trim(), content: match[2].trim(), isPrivate: true, guild: null };
     }
 
-    // Guild / public with » or : separator, optional |[guild] prefix
-    match = message.match(/^(?:\|\[(.*?)\])?\s*([A-Za-z0-9_]{1,16})\s*[»>:]\s*(.+)$/);
+    // Guild / public with » / > / : separator.
+    // Allows an optional leading '|' and zero or more [title] prefixes,
+    // e.g. "|[工会]Name » hi", "|Name » hi", "[工会]Name » hi", "Name » hi".
+    match = message.match(/^\|?\s*((?:\[[^\]]*\]\s*)*)([A-Za-z0-9_]{1,16})\s*[»>:]\s*(.+)$/);
     if (match) {
-        return { player: match[2].trim().replace('|', ''), content: match[3].trim(), isPrivate: false, guild: match[1] || null };
+        const prefix = match[1] || '';
+        const gm = prefix.match(/\[([^\]]*)\]/);
+        return {
+            player: match[2].trim(),
+            content: match[3].trim(),
+            isPrivate: false,
+            guild: gm ? gm[1].trim() : null
+        };
     }
 
     // Standard vanilla: <player> content
@@ -219,6 +228,45 @@ if (AutoEat) {
 let spawnDone = false;
 let endEmitted = false;
 let unlockTimer = null;
+const chatQueue = [];
+
+// Some mineflayer / minecraft-protocol combinations don't set `client.chat`
+// when the server's configuration handshake is unusual (proxies, reconnects).
+// Patch a working implementation so sending never throws.
+function ensureClientChat() {
+    try {
+        if (!bot || !bot._client || typeof bot._client.chat === 'function') return;
+        if (typeof bot._client._signedChat === 'function') {
+            bot._client.chat = bot._client._signedChat;
+        } else {
+            bot._client.chat = (message) => {
+                try {
+                    bot._client.write('chat_message', {
+                        message,
+                        timestamp: BigInt(Date.now()),
+                        salt: 0n,
+                        signature: undefined,
+                        offset: 0
+                    });
+                } catch (e) {
+                    bot._client.write('chat', { message });
+                }
+            };
+        }
+        log('warn', '已为客户端补上 chat 发送接口。');
+    } catch (e) { /* ignore */ }
+}
+
+function sendChat(text) {
+    if (!text) return false;
+    ensureClientChat();
+    if (bot && typeof bot.chat === 'function'
+        && bot._client && typeof bot._client.chat === 'function') {
+        bot.chat(text);
+        return true;
+    }
+    return false;
+}
 
 function ensureEnd(reason) {
     if (spawnDone || endEmitted) return;
@@ -256,8 +304,13 @@ bot.on('actionBar', (jsonMsg) => {
 
 bot.once('spawn', () => {
     spawnDone = true;
+    ensureClientChat();
     if (unlockTimer) { clearTimeout(unlockTimer); unlockTimer = null; }
     emitEvent({ event: 'spawn', username: bot.username, players: Object.keys(bot.players) });
+    while (chatQueue.length) {
+        const queued = chatQueue.shift();
+        if (sendChat(queued)) emitEvent({ event: 'chatSent', text: queued });
+    }
 });
 
 bot.on('kicked', (reason, loggedIn) => {
@@ -293,9 +346,17 @@ function handleCommand(cmd) {
         case 'chat': {
             const text = String(cmd.text || '');
             if (!text) return;
-            if (bot && typeof bot.chat === 'function') {
-                bot.chat(text);
+            if (!spawnDone) {
+                // Not in play state yet: queue and send right after spawn.
+                chatQueue.push(text);
+                if (chatQueue.length > 50) chatQueue.shift();
+                log('info', '消息已排队（等待进入服务器后发送）。');
+                return;
+            }
+            if (sendChat(text)) {
                 emitEvent({ event: 'chatSent', text });
+            } else {
+                logError('发送失败：客户端聊天接口未就绪。');
             }
             break;
         }

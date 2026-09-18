@@ -2,9 +2,11 @@
 
 # AI Helper In Minecraft
 
+**当前版本：v2.1**
+
 一个"无客户端"的 Minecraft AI 玩家：不需要打开游戏本体，用 GUI 控制 mineflayer 引擎进入服务器，由大模型驱动它在游戏内与人聊天互动。
 
-- 入口为 Python tkinter GUI（多标签页：设置 / AI 配置 / 玩家配置 / 玩家资料库 / QQ 转述 / 重连·踢出 / 界面美化 / 游戏输出），后台由 Node.js（mineflayer）负责连接与协议。
+- 入口为 Python tkinter GUI（多标签页：设置 / AI 配置 / 玩家配置 / 玩家资料库 / QQ 转述 / 重连·踢出 / 界面美化 / 日志），后台由 Node.js（mineflayer）负责连接与协议。
 - 支持 **离线 / LittleSkin / 正版(微软账号)** 三种登录方式。
 - 登录失效时自动重新登录（LittleSkin 自动打开浏览器 OAuth，完成后自动重连）。
 - 附带可选辅助功能：Quiz 自动答题、AutoEat 自动进食（自旧 Cubex 机器人项目保留）。
@@ -24,10 +26,28 @@
   - 消息过滤正则、玩家黑名单。
   - 可选文生图（把图片 URL 发到聊天）。
 - 自动重登：LittleSkin 会话失效（如 "Invalid access token"）时自动拉起登录流程并重新连接。
-- QQ 群聊转述（OneBot 11）：配合 NapCat / Lagrange / go-cqhttp 等网关，在「QQ 转述」页填好网关地址/Token 与群号后，即可把群消息按 `&7&o[群名][昵称]：内容` 的灰色斜体格式发到服务器公共聊天；支持正向连接与反向监听两种模式，图片/表情等非文本以 `[图片]`/`[表情]` 占位。
-- MC → QQ 反向转述：公屏消息以触发词（默认 `[sentQ]`）开头即发送到 QQ 群，支持 `[sentQ:群号] 内容` 临时指定群、冷却时间、自动去除 MC 颜色码，非法字符以 `?` 代替。
+- QQ 群聊转述（OneBot 11）：配合 NapCat / Lagrange / go-cqhttp 等网关，在「QQ 转述」页填好网关地址/Token 与群号后，即可把群消息按 `&7&o[群名][昵称]：内容` 的灰色斜体格式发到服务器公共聊天；支持正向连接与反向监听两种模式，图片/表情等非文本以 `[图片]`/`[表情]` 占位；可选把图片保存到本地并由内置 Python HTTP 服务以链接形式发出。
+- MC → QQ 反向转述：公屏消息以触发词（默认 `[sentQ]`，可逗号分隔多个）开头即发送到 QQ 群，支持 `[sentQ:群号] 内容` 临时指定群、冷却时间、自动去除 MC 颜色码，非法字符以 `?` 代替；并在公屏回执「转述成功/失败」（话术可配置，支持 `{player}`）。
 - 自动重连与踢出处理（**重连/踢出** 页）：连接意外结束（掉线 / 被踢）时按设定延迟自动重连，可设最大次数（重连成功后重置）；被踢出并重连成功后可自动发送 `/lobby`。手动点「断开」不会触发重连。
 - 界面美化（**界面美化** 页）：可选择一张 PNG / JPG 作为窗口背景图片并调节暗度；字体主题支持「自动（按背景亮度）」/ 浅色背景黑字 / 深色背景白字。
+- 内置 NapCat：整个 NapCat 随项目携带（`NapCat/`），「QQ 转述」页的四个按钮 **启动 / 连接 / 重连 / 断开** ——「启动」调用 `NapCat/napcat/launcher-win10.bat` 并自动打开 `cache` 目录（二维码 `qrcode.png`）方便扫码。
+- 账号安全（**QQ 转述 → 账号安全**）：可选自动重连、在线检测间隔；连接因疑似风控被关闭或在线检测连续失败时，明确告警并停止自动重连，避免反复登录加重风控。
+- 联网更新提示：启动时后台检查 NapCat 与本程序的最新版本，结果写入**日志**页（NapCat 有新版本、本程序有新提交都会提示）。
+- 日志页：原「游戏输出」标签改名为「日志」，每行带 `[时:分:秒]` 时间戳。
+
+## 更新日志
+
+### v2.1
+
+- **QQ 转述增强**
+  - 内置 NapCat（`NapCat/`），QQ 转述页四按钮：启动 / 连接 / 重连 / 断开；「启动」调用 `launcher-win10.bat` 并自动打开 `cache` 目录方便扫码。
+  - OneBot 11 正/反向连接、群过滤、`access_token`。
+  - QQ 图片转本地链接：图片存入 `pic_http/`，由内置 Python HTTP 服务以 `http://公网地址:端口/pic_http/文件名` 发布（仅暴露 `/pic_http/`）。
+  - **MC → QQ**：公屏消息以触发词（默认 `[sentQ]`，可逗号分隔多个）开头即转发，支持 `[sentQ:群号] 内容` 指定群、冷却、自动去 MC 颜色码、非法字符替换为 `?`，并在公屏回执成功/失败话术（支持 `{player}`）。
+- **账号安全**：在线检测（默认 30s）、连接疑似风控或检测连续失败时告警并停止自动重连；可自动为每个新扫码登录的 QQ 号生成 OneBot 配置。
+- **联网更新提示**：启动时后台检查 NapCat 与本程序最新版本并写入日志。
+- **聊天解析修复**：玩家带 `[工会]` 等头衔前缀时能正常触发；无前缀的 `玩家 » 内容` 也能解析（此前只有 `|[工会]名 » 内容` 生效）。
+- **其他**：修 mineflayer/minecraft-protocol 下 `client.chat` 未就绪导致的发送报错（未进服时排队补发）；日志页时间戳；GUI 标签页整理；高 DPI 支持。
 
 ## 目录结构
 
@@ -35,11 +55,13 @@
 .
 ├─ main.py                # 启动入口（GUI）
 ├─ aafm_py/               # Python 端：GUI、配置、控制器、AI 玩家
-│  ├─ gui.py              #   多标签页：设置 / AI 配置 / 玩家配置 / 玩家资料库 / QQ 转述 / 重连·踢出 / 界面美化 / 游戏输出
-│  ├─ controller.py       #   控制器（事件分发、运行时配置、自动重连 / 踢出处理）
+│  ├─ gui.py              #   多标签页：设置 / AI 配置 / 玩家配置 / 玩家资料库 / QQ 转述 / 重连·踢出 / 界面美化 / 日志
+│  ├─ controller.py       #   控制器（事件分发、运行时配置、自动重连 / 踢出处理 / NapCat 启动）
 │  ├─ ai_player.py        #   AI 玩家触发/上下文/过滤逻辑
 │  ├─ config.py           #   配置模型（config.json / mcai_chat.json）
 │  ├─ llm.py              #   OpenAI 兼容 / Anthropic 客户端
+│  ├─ updater.py          #   启动时联网检查 NapCat / 本程序更新
+│  ├─ photo_server.py     #   本地图片 HTTP 服务（仅 /pic_http/）
 │  ├─ bot_engine.py       #   管理 mineflayer 子进程
 │  └─ qq_engine.py        #   管理 OneBot 11 QQ 转述子进程
 ├─ bot_engine.js          # Node 端无头引擎（三种登录 + 聊天解析 + quiz/autoeat）
@@ -48,11 +70,13 @@
 ├─ msa_auth.js            # 微软账号设备码登录
 ├─ quiz.js / autoeat.js   # 旧项目保留的答题 / 自动进食
 ├─ app.js                 # 旧版纯 Node 入口（不再需要，保留兼容）
+├─ NapCat/                # 随项目携带的 NapCat（含 launcher-win10.bat，gitignore）
 ├─ config.json            # 运行时配置（gitignore，本地生成）
 ├─ mcai_chat.json         # AI 玩家配置（gitignore，本地生成）
 ├─ auth_profile.json      # LittleSkin 会话（gitignore）
 ├─ runtime_config.json    # 连接时生成的临时配置（gitignore）
-└─ qq_runtime_config.json # QQ 转述临时配置（gitignore）
+├─ qq_runtime_config.json # QQ 转述临时配置（gitignore）
+└─ pic_http/              # QQ 图片本地发布目录（gitignore，本地生成）
 ```
 
 ## 环境要求
@@ -103,13 +127,13 @@ npm run login:msa          # 仅执行微软账号登录
 
 ## QQ 群聊转述
 
-通过 OneBot 11 网关（推荐 [NapCat](https://github.com/NapNeko/NapCatQQ)）把 QQ 群消息转发到 MC 服务器公共聊天。
+通过 OneBot 11 网关（[NapCat](https://github.com/NapNeko/NapCatQQ)）把 QQ 群消息转发到 MC 服务器公共聊天。NapCat 已随项目携带在 `NapCat/`。
 
-**NapCat 准备**
+**NapCat 准备**（在 **QQ 转述** 页用四个按钮操作）
 
-1. 下载并解压 NapCat（如 `NapCat.Shell.Windows.Node.zip`），运行其中的启动程序（`NapCatWinBootMain.exe` 或对应 bat）。
-2. 首次启动会输出 WebUI 地址（默认 `http://127.0.0.1:6099/webui`），在浏览器打开并用手机 QQ 扫码登录机器人账号。
-3. 在 WebUI 的「网络配置」中新建 **WebSocket 服务器（正向）**：主机 `0.0.0.0`、端口 `3001`（可自定），保存并启用。
+1. 点 **启动**：调用 `NapCat/napcat/launcher-win10.bat`（会弹窗/UAC 提权），并自动打开 `NapCat/napcat/cache` 目录——扫码二维码 `qrcode.png` 会出现在这里。也可在浏览器打开 WebUI（默认 `http://127.0.0.1:6099/webui`）用手机 QQ 扫码登录。
+2. 点 **连接**：按当前设置连接 OneBot 网关；连上后状态显示「QQ 已连接」。**重连** 为断开后再连，**断开** 为停止。
+3. NapCat 的网络配置已在 `NapCat/napcat/config/onebot11_<QQ>.json` 里预置为正向 WS `127.0.0.1:3001`。程序运行时会**自动为每个新扫码登录的 QQ 号生成配置**（`napcat_<QQ>.json` / `napcat_protocol_<QQ>.json` / 带 WS 的 `onebot11_<QQ>.json`），无需手动开；可在「QQ 转述 → 账号安全」用「自动为新扫码账号写配置」开关。
    - 也可选 **WebSocket 客户端（反向）**，地址指向本程序，如 `ws://127.0.0.1:3002/onebot/v11/ws`。
 4. 可用 `netstat -ano | findstr :3001` 确认端口处于 `LISTENING`。
 
@@ -120,11 +144,19 @@ npm run login:msa          # 仅执行微软账号登录
    - 反向模式：选 `reverse`，填「反向监听」地址与端口（与 NapCat 反向配置一致）。
    - 若 NapCat 设置了 Access Token，在「Access Token」里填同样的值。
    - 填「群号」（多个用逗号/空格分隔；留空则转述全部群）与「转述格式」，勾选启用。
-   - 点「启动/重连 QQ」连接网关；连上后状态显示「QQ 已连接」。
-2. **MC → QQ**：勾选启用，触发词默认 `[sentQ]`（可用逗号分隔多个，如 `[sentQ],[MC]`，命中任一即触发），在公屏发送 `[sentQ] 内容` 即转发到「目标群」（留空用群号列表第一个）；也可写 `[sentQ:群号] 内容` 指定群。发送前自动去掉 MC 颜色码，非法字符以 `?` 代替。
+   - 勾选「图片转链接」后，图片会被下载保存到项目 `pic_http/`（时间戳命名），并由内置 Python HTTP 服务以 `http://公网地址:端口/pic_http/文件名` 链接发出；端口默认 `8765`，公网地址留空会自动探测公网 IP，也可手填（如 `http://1.2.3.4:8765`）。需要在路由器把该端口转发到本机。
+   - 点「连接」连接网关；连上后状态显示「QQ 已连接」。
+2. **MC → QQ**：勾选启用，触发词默认 `[sentQ]`（可用逗号分隔多个，如 `[sentQ],[-]`，命中任一即触发），在公屏发送 `[sentQ] 内容` 即转发到「目标群」（留空用群号列表第一个）；也可写 `[sentQ:群号] 内容` 指定群。发送前自动去掉 MC 颜色码，非法字符以 `?` 代替。发送后在公屏回执「成功提示/失败提示」，话术可配置并支持 `{player}` 变量（默认 `&a@{player}转述成功` / `&c@{player}转述失败`）。
 3. 点顶部「连接」进入 MC 后，两个方向的转述即生效。
 
-> QQ → MC 的图片、表情、语音等非文本消息会分别以 `[图片]`、`[表情]`、`[语音]` 等占位符转述。
+> QQ → MC 的图片、表情、语音等非文本消息会分别以 `[图片]`、`[表情]`、`[语音]` 等占位符转述。勾选「图片转链接」后，图片会存到 `pic_http/` 并通过本机 Python HTTP 服务发布（只暴露 `/pic_http/` 路径，不会暴露项目根目录），转述文本为 `[图片] http://公网地址:端口/pic_http/文件名`。链接由你自己提供，稳定不过期（除非删文件）。
+
+**账号风控 / 掉线处理**
+
+- 程序会定期（默认每 30 秒，可关）调用 `get_login_info` 检测 QQ 是否在线。
+- 若连接因疑似风控/受限被关闭，或在线检测连续 3 次失败，会**明确告警并停止自动重连**，状态显示「QQ 受限/离线」，避免反复登录加重风控；处理完账号后点「启动/重连 QQ」即可恢复。
+- 「自动重连」可关闭：关闭后断开不再自动重连。
+- NapCat 核心配置（`napcat_<QQ>.json`）没有直接的风控开关；稳妥做法：保持 `autoTimeSync: true`、不要频繁重登、不要刷屏、使用官方 QQ + 较新 NapCat，被要求验证时按手机 QQ 提示完成。
 
 ## 本地文件与安全
 

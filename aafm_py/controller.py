@@ -1,18 +1,28 @@
 """Controller tying the bot engine, AI player and UI together."""
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
+import subprocess
 import threading
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from .ai_player import AiPlayer
 from .bot_engine import BotEngine, BASE_DIR
 from .config import (AiPlayerConfig, AppConfig, load_auth_profile)
+from .photo_server import PhotoServer, save_image_bytes
 from .qq_engine import QqEngine
 from .roster import Roster, RosterError
+
+NAPCAT_DIR = os.path.join(BASE_DIR, 'NapCat')
+NAPCAT_INNER_DIR = os.path.join(NAPCAT_DIR, 'napcat')
+NAPCAT_LAUNCHER = os.path.join(NAPCAT_INNER_DIR, 'launcher-win10.bat')
+NAPCAT_CACHE_DIR = os.path.join(NAPCAT_INNER_DIR, 'cache')
+NAPCAT_CONFIG_DIR = os.path.join(NAPCAT_INNER_DIR, 'config')
 
 # Phrases that indicate the LittleSkin / yggdrasil session became invalid and a
 # fresh login is needed. Matched (case-insensitively) against engine errors and
@@ -95,6 +105,8 @@ class Controller:
         self._qq_last_state: Optional[str] = None
         self._qq_pending_relays: List[str] = []
         self._last_mc_to_qq_time = 0.0
+        self._photo = PhotoServer()
+        self._public_base_cache = ''
 
         self._worker: Optional[threading.Thread] = None
         self._running = False
@@ -109,6 +121,176 @@ class Controller:
         self._reconnect_attempts = 0
         self._kick_lobby_pending = False
         self._lobby_at: Optional[float] = None
+
+        self.check_updates_async()
+        threading.Thread(target=self._napcat_config_loop, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Auto-configure OneBot network for newly scanned QQ accounts
+    # ------------------------------------------------------------------
+    def _napcat_config_loop(self) -> None:
+        # First pass shortly after startup, then poll for new accounts.
+        while True:
+            try:
+                if self.config.qq.autoConfigNewAccounts:
+                    self._ensure_napcat_configs()
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(5)
+
+    def _desired_network(self):
+        """Build the WS server/client entry from the current QQ settings."""
+        cfg = self.config.qq
+        if cfg.mode == 'reverse':
+            host = cfg.listenHost or '0.0.0.0'
+            if host in ('0.0.0.0', '::'):
+                host = '127.0.0.1'
+            client = {
+                'name': 'mc-relay',
+                'enable': True,
+                'url': f'ws://{host}:{int(cfg.listenPort)}/onebot/v11/ws',
+                'messagePostFormat': 'array',
+                'reportSelfMessage': False,
+                'reconnectInterval': 5000,
+                'token': cfg.accessToken or '',
+                'debug': False,
+                'heartInterval': 30000,
+                'verifyCertificate': True,
+            }
+            return None, client
+        # forward (default): NapCat runs the WS server we connect to.
+        parsed = urllib.parse.urlparse(cfg.url or 'ws://127.0.0.1:3001')
+        host = parsed.hostname or '127.0.0.1'
+        try:
+            port = parsed.port or 3001
+        except ValueError:
+            port = 3001
+        token = cfg.accessToken or ''
+        if not token and parsed.query:
+            for kv in parsed.query.split('&'):
+                if kv.startswith('access_token='):
+                    token = urllib.parse.unquote(kv.split('=', 1)[1])
+        server = {
+            'name': 'mc-relay',
+            'enable': True,
+            'host': host,
+            'port': int(port),
+            'messagePostFormat': 'array',
+            'reportSelfMessage': False,
+            'token': token,
+            'enableForcePushEvent': True,
+            'debug': False,
+            'heartInterval': 30000,
+        }
+        return server, None
+
+    def _ensure_napcat_configs(self) -> None:
+        d = NAPCAT_CONFIG_DIR
+        if not os.path.isdir(d):
+            return
+        uins = set()
+        for name in os.listdir(d):
+            m = re.match(r'(?:onebot11|napcat|napcat_protocol)_(\d+)\.json$', name)
+            if m:
+                uins.add(m.group(1))
+        for uin in uins:
+            self._ensure_account_config(d, uin)
+
+    def _ensure_account_config(self, d: str, uin: str) -> None:
+        # Core + protocol configs (NapCat normally creates these itself).
+        core_path = os.path.join(d, f'napcat_{uin}.json')
+        if not os.path.exists(core_path):
+            self._write_json(core_path, {
+                'fileLog': False, 'consoleLog': True, 'fileLogLevel': 'debug',
+                'consoleLogLevel': 'info', 'packetBackend': 'auto', 'packetServer': '',
+                'o3HookMode': 1, 'bypass': {
+                    'hook': False, 'window': False, 'module': False,
+                    'process': False, 'container': False, 'js': False},
+                'autoTimeSync': True,
+            })
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': f'[NapCat] 已为账号 {uin} 生成 napcat_{uin}.json'})
+        proto_path = os.path.join(d, f'napcat_protocol_{uin}.json')
+        if not os.path.exists(proto_path):
+            self._write_json(proto_path, {
+                'enable': False,
+                'network': {'httpServers': [], 'websocketServers': [], 'websocketClients': []},
+            })
+
+        # OneBot network config: make sure our relay is present and enabled.
+        path = os.path.join(d, f'onebot11_{uin}.json')
+        data = {}
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:  # noqa: BLE001
+                return  # never clobber a file we can't parse
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault('musicSignUrl', '')
+        data.setdefault('enableLocalFile2Url', False)
+        data.setdefault('parseMultMsg', False)
+        data.setdefault('imageDownloadProxy', '')
+        data.setdefault('timeout', {
+            'baseTimeout': 10000, 'uploadSpeedKBps': 256,
+            'downloadSpeedKBps': 256, 'maxTimeout': 1800000})
+        net = data.get('network')
+        if not isinstance(net, dict):
+            net = {}
+            data['network'] = net
+        for key in ('httpServers', 'httpSseServers', 'httpClients', 'websocketClients', 'plugins'):
+            if not isinstance(net.get(key), list):
+                net[key] = []
+        servers = net.get('websocketServers')
+        if not isinstance(servers, list):
+            servers = []
+            net['websocketServers'] = servers
+
+        server, client = self._desired_network()
+        changed = False
+        if server is not None:
+            exists = any(isinstance(s, dict) and s.get('name') == 'mc-relay'
+                         and int(s.get('port') or 0) == server['port']
+                         for s in servers)
+            if not exists:
+                servers.append(server)
+                changed = True
+        if client is not None:
+            clients = net['websocketClients']
+            exists = any(isinstance(c, dict) and c.get('name') == 'mc-relay'
+                         and c.get('url') == client['url']
+                         for c in clients)
+            if not exists:
+                clients.append(client)
+                changed = True
+
+        if changed or not os.path.exists(path):
+            self._write_json(path, data)
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': f'[NapCat] 已为账号 {uin} 写入 OneBot 转述配置。'})
+
+    @staticmethod
+    def _write_json(path: str, data: Dict[str, Any]) -> None:
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+
+    # ------------------------------------------------------------------
+    # Online update check
+    # ------------------------------------------------------------------
+    def check_updates_async(self) -> None:
+        """Check NapCat / this program for updates in the background."""
+        def worker():
+            try:
+                from . import updater
+                updater.check_updates(
+                    lambda level, msg: self._post_ui({'kind': 'log', 'level': level, 'message': msg}))
+            except Exception as e:  # noqa: BLE001
+                self._post_ui({'kind': 'log', 'level': 'info',
+                               'message': '[更新] 检查失败（可忽略）: ' + str(e)})
+        threading.Thread(target=worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Connection control
@@ -154,6 +336,10 @@ class Controller:
             self._start_qq()
 
         self._running = True
+        self._ensure_worker()
+
+    def _ensure_worker(self) -> None:
+        """Start the event loop if it is not already running."""
         if self._worker is None or not self._worker.is_alive():
             self._worker = threading.Thread(target=self._worker_loop, daemon=True)
             self._worker.start()
@@ -313,6 +499,9 @@ class Controller:
             'listenHost': cfg.listenHost or '0.0.0.0',
             'listenPort': cfg.listenPort,
             'groups': list(cfg.groups or []),
+            'imageAsLink': bool(cfg.imageAsLink),
+            'autoReconnect': bool(cfg.autoReconnect),
+            'healthCheckSeconds': int(cfg.healthCheckSeconds),
         }
 
     def start_qq(self) -> None:
@@ -323,8 +512,50 @@ class Controller:
     def stop_qq(self) -> None:
         self._stop_qq()
 
+    def start_napcat(self) -> None:
+        """Launch the bundled NapCat launcher and open its cache folder."""
+        if not os.path.isfile(NAPCAT_LAUNCHER):
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': '未找到 NapCat 启动脚本：' + NAPCAT_LAUNCHER})
+            return
+        try:
+            kwargs = {}
+            if os.name == 'nt':
+                kwargs['creationflags'] = subprocess.CREATE_NEW_CONSOLE
+            subprocess.Popen(['cmd', '/c', NAPCAT_LAUNCHER],
+                             cwd=NAPCAT_INNER_DIR, **kwargs)
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': '已启动 NapCat（会弹窗/UAC 提权，首次请扫码登录）。'})
+        except Exception as e:  # noqa: BLE001
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': '启动 NapCat 失败: ' + str(e)})
+            return
+        self._open_napcat_cache()
+
+    def _open_napcat_cache(self) -> None:
+        try:
+            os.makedirs(NAPCAT_CACHE_DIR, exist_ok=True)
+            if os.name == 'nt':
+                os.startfile(NAPCAT_CACHE_DIR)
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': '已打开 NapCat cache 目录（扫码二维码 qrcode.png 会出现在这里）。'})
+        except Exception as e:  # noqa: BLE001
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': '无法打开 cache 目录: ' + str(e)})
+
     def _start_qq(self) -> None:
         self._qq_connected = False
+        cfg = self.config.qq
+        if cfg.imageAsLink:
+            try:
+                self._public_base_cache = ''
+                self._photo.start(cfg.imageHttpHost, cfg.imageHttpPort)
+                base = self._image_base_url()
+                self._post_ui({'kind': 'log', 'level': 'info',
+                               'message': f'图片服务已启动：{base}/pic_http/（端口 {cfg.imageHttpPort}）'})
+            except Exception as e:  # noqa: BLE001
+                self._post_ui({'kind': 'log', 'level': 'error',
+                               'message': '启动图片服务失败: ' + str(e)})
         try:
             self._qq.start(self._build_qq_runtime_config())
         except Exception as e:  # noqa: BLE001
@@ -334,10 +565,14 @@ class Controller:
         self._post_ui({'kind': 'qqStatus', 'state': 'connecting'})
         self._post_ui({'kind': 'log', 'level': 'info',
                        'message': 'QQ 转述已启动（' + _qq_mode_label(self.config.qq) + '）。'})
+        # QQ can run without the MC connection, so make sure the event loop
+        # (which processes QQ engine events) is alive.
+        self._ensure_worker()
 
     def _stop_qq(self) -> None:
         was_running = self._qq.running
         self._qq.stop()
+        self._photo.stop()
         self._qq_connected = False
         self._qq_last_state = None
         if was_running:
@@ -379,6 +614,17 @@ class Controller:
                 self._qq_last_state = state
                 self._post_ui({'kind': 'log', 'level': 'info',
                                'message': '[QQ] ' + ('已连接网关' if self._qq_connected else '已断开')})
+        elif event == 'restricted':
+            self._qq_connected = False
+            self._post_ui({'kind': 'qqStatus', 'state': 'restricted'})
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': '[QQ] 账号可能受限/离线：' + str(ev.get('message') or '')
+                                      + '（已停止自动重连，请登录 NapCat 检查；修复后点「启动/重连 QQ」）'})
+        elif event == 'health':
+            if ev.get('online'):
+                self._post_ui({'kind': 'log', 'level': 'info',
+                               'message': '[QQ] 在线检测恢复：'
+                                          + str(ev.get('nickname') or ev.get('selfId') or '')})
         elif event == 'groups':
             names = ev.get('groups') or []
             if names:
@@ -394,7 +640,14 @@ class Controller:
     def _relay_qq_message(self, ev: Dict[str, Any]) -> None:
         if not self._engine.running:
             return
-        text = self._format_qq_message(ev)
+        content = ev.get('content') or ''
+        if self.config.qq.imageAsLink and ev.get('images'):
+            try:
+                content = self._attach_image_links(ev, content)
+            except Exception as e:  # noqa: BLE001
+                self._post_ui({'kind': 'log', 'level': 'error',
+                               'message': '[QQ] 图片处理失败: ' + str(e)})
+        text = self._format_qq_message(ev, content=content)
         if not text:
             return
         if not self._engine.say(text):
@@ -407,12 +660,12 @@ class Controller:
         if len(self._qq_pending_relays) > 50:
             del self._qq_pending_relays[:len(self._qq_pending_relays) - 50]
 
-    def _format_qq_message(self, ev: Dict[str, Any]) -> str:
+    def _format_qq_message(self, ev: Dict[str, Any], content: Optional[str] = None) -> str:
         cfg = self.config.qq
         template = cfg.format or '&7&o[{group}][{name}]：{message}'
         group = _sanitize_text(ev.get('groupName') or ev.get('groupId') or '')
         name = _sanitize_text(ev.get('sender') or '')
-        message = _sanitize_text(ev.get('content') or '')
+        message = _sanitize_text(content if content is not None else (ev.get('content') or ''))
         try:
             text = template.format(group=group, name=name, message=message)
         except (KeyError, IndexError, ValueError):
@@ -422,6 +675,104 @@ class Controller:
         if len(text) > limit:
             text = text[:limit - 1] + '…'
         return text
+
+    # ------------------------------------------------------------------
+    # QQ image -> local HTTP links
+    # ------------------------------------------------------------------
+    def _image_base_url(self) -> str:
+        cfg = self.config.qq
+        if cfg.imagePublicBase:
+            return cfg.imagePublicBase.rstrip('/')
+        if self._public_base_cache:
+            return self._public_base_cache
+        self._public_base_cache = self._detect_public_base(cfg.imageHttpPort)
+        return self._public_base_cache
+
+    def _detect_public_base(self, port: int) -> str:
+        fallback = f'http://127.0.0.1:{int(port)}'
+        try:
+            import httpx
+        except Exception:  # noqa: BLE001
+            return fallback
+        for url in ('https://api.ipify.org', 'https://ifconfig.me/ip',
+                    'https://ip.3322.net', 'https://api.ip.sb/ip'):
+            try:
+                r = httpx.get(url, timeout=4.0, headers={'User-Agent': 'curl/8'})
+                ip = (r.text or '').strip().split()[0]
+                # basic IPv4/IPv6 sanity
+                if ip and len(ip) <= 45 and all(
+                        c.isdigit() or c in '.:abcdefABCDEF' for c in ip):
+                    return f'http://{ip}:{int(port)}'
+            except Exception:  # noqa: BLE001
+                continue
+        return fallback
+
+    def _attach_image_links(self, ev: Dict[str, Any], content: str) -> str:
+        images = ev.get('images') or []
+        if not images:
+            return content
+        base = self._image_base_url()
+        out = content
+        for candidates in images:
+            data = None
+            for cand in (candidates or []):
+                data = self._fetch_image_bytes(cand)
+                if data:
+                    break
+            if not data:
+                continue
+            hint = ''
+            for cand in (candidates or []):
+                hint = str(cand.get('value') or '')
+                if hint:
+                    break
+            name = save_image_bytes(data, hint)
+            link = base + '/pic_http/' + name
+            out = out.replace('[图片]', '[图片] ' + link, 1)
+        return out
+
+    def _fetch_image_bytes(self, cand) -> Optional[bytes]:
+        if not isinstance(cand, dict):
+            return None
+        kind = cand.get('type')
+        value = str(cand.get('value') or '')
+        if not value:
+            return None
+
+        path = None
+        if kind == 'path':
+            path = value
+        elif kind == 'file':
+            if re.match(r'^https?://', value, re.IGNORECASE):
+                kind = 'url'
+            else:
+                path = value
+        if path:
+            p = path
+            if p.lower().startswith('file://'):
+                p = p[7:]
+            p = urllib.parse.unquote(p)
+            if re.match(r'^/[A-Za-z]:', p):
+                p = p[1:]
+            try:
+                if os.path.isfile(p):
+                    with open(p, 'rb') as f:
+                        return f.read()
+            except OSError:
+                pass
+            return None
+
+        if kind == 'url':
+            try:
+                import httpx
+                r = httpx.get(value, timeout=8.0, follow_redirects=True,
+                              headers={'User-Agent': 'Mozilla/5.0',
+                                       'Referer': 'https://qun.qq.com/'})
+                if r.status_code == 200 and r.content:
+                    return r.content
+            except Exception:  # noqa: BLE001
+                return None
+        return None
 
     # ------------------------------------------------------------------
     # MC -> QQ relay ("[sentQ] ..." in public chat)
@@ -441,33 +792,55 @@ class Controller:
         target, body = matched
         body = body.strip()
         if not body:
+            self._send_mc_feedback(player, False)
             return True
         if not self._qq.running:
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': '[MC→QQ] QQ 未连接，忽略：' + text})
+            self._send_mc_feedback(player, False)
             return True
         group_id = target or cfg.mcTargetGroup or (cfg.groups[0] if cfg.groups else '')
         if not group_id:
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': '[MC→QQ] 未配置目标群，忽略：' + text})
+            self._send_mc_feedback(player, False)
             return True
         now = time.time()
         cooldown = int(cfg.mcCooldownSeconds or 0)
         if cooldown > 0 and now - self._last_mc_to_qq_time < cooldown:
             self._post_ui({'kind': 'log', 'level': 'info',
                            'message': '[MC→QQ] 冷却中，忽略。'})
+            self._send_mc_feedback(player, False)
             return True
         out = self._format_mc_to_qq(player, body)
         if not out:
+            self._send_mc_feedback(player, False)
             return True
         if self._qq.send_group(group_id, out):
             self._last_mc_to_qq_time = now
             self._post_ui({'kind': 'log', 'level': 'qq',
                            'message': f'[MC→QQ] {group_id}: {out}'})
+            self._send_mc_feedback(player, True)
         else:
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': '[MC→QQ] 发送失败。'})
+            self._send_mc_feedback(player, False)
         return True
+
+    def _send_mc_feedback(self, player: str, ok: bool) -> None:
+        """Say a configurable success/failure line in MC public chat."""
+        cfg = self.config.qq
+        tmpl = cfg.mcSuccessMsg if ok else cfg.mcFailureMsg
+        if not tmpl or not self._engine.running:
+            return
+        who = _sanitize_text(player or '')
+        try:
+            text = tmpl.format(player=who)
+        except (KeyError, IndexError, ValueError):
+            text = tmpl.replace('{player}', who)
+        text = _sanitize_text(text.replace('\n', ' ').strip())
+        if text:
+            self._engine.say(text)
 
     def _match_mc_trigger(self, text: str, triggers: str):
         """Return (target_group_or_None, body) or None when not a trigger.
@@ -678,7 +1051,7 @@ class Controller:
 
     def _worker_loop(self) -> None:
         last_tick = time.time()
-        while self._running:
+        while self._running or self._qq.running:
             try:
                 ev = self._bot_events.get(timeout=0.3)
             except queue.Empty:

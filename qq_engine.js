@@ -104,6 +104,15 @@ let groupFilter = new Set((Array.isArray(config.groups) ? config.groups : [])
     .map((g) => String(g == null ? '' : g).trim())
     .filter(Boolean));
 
+let autoReconnect = config.autoReconnect !== false;
+const healthCheckSeconds = parseInt(config.healthCheckSeconds, 10) || 0;
+let restricted = false;
+let everOnline = false;
+let lastHealthOk = false;
+let healthFails = 0;
+let healthTimer = null;
+let healthBusy = false;
+
 const groupNames = new Map();
 let stopped = false;
 const activeMode = mode;
@@ -112,6 +121,68 @@ let retry = 0;
 let lastState = null;
 const clients = new Set();
 let forwardWs = null;
+
+const RESTRICT_HINTS = ['限制', '风控', '冻结', '封禁', '封号', '登录保护', '异常',
+    'restrict', 'risk', 'frozen', 'banned', 'forbidden', 'kickoff', '下线', 'safety'];
+
+function looksRestricted(text) {
+    if (!text) return false;
+    const low = String(text).toLowerCase();
+    return RESTRICT_HINTS.some((h) => low.indexOf(h) >= 0);
+}
+
+function declareRestricted(message) {
+    if (restricted) return;
+    restricted = true;
+    autoReconnect = false;
+    stopHealthCheck();
+    emitEvent({ event: 'restricted', message: String(message || '') });
+    setStatus('disconnected');
+}
+
+function startHealthCheck() {
+    stopHealthCheck();
+    healthFails = 0;
+    if (healthCheckSeconds <= 0 || restricted || stopped) return;
+    healthTimer = setInterval(async () => {
+        if (restricted || stopped || healthBusy) return;
+        healthBusy = true;
+        let res = null;
+        try {
+            res = await actionAsync('get_login_info', {}, 5000);
+        } finally {
+            healthBusy = false;
+        }
+        const d = res && res.data;
+        const ok = !!(d && (d.user_id || d.nickname));
+        if (ok) {
+            everOnline = true;
+            if (healthFails > 0 || !lastHealthOk) {
+                emitEvent({ event: 'health', online: true,
+                            selfId: String(d.user_id || ''), nickname: d.nickname || '' });
+            }
+            healthFails = 0;
+            lastHealthOk = true;
+        } else {
+            lastHealthOk = false;
+            healthFails += 1;
+            if (everOnline && healthFails >= 3) {
+                declareRestricted('QQ 账号可能已离线或被限制（在线检测连续失败）。'
+                    + '已停止自动重连，请登录 NapCat 检查账号状态。');
+            } else {
+                log('warn', '尚未检测到 QQ 在线（第 ' + healthFails
+                    + ' 次，可能未登录/未就绪），继续等待…');
+            }
+        }
+    }, healthCheckSeconds * 1000);
+}
+
+function stopHealthCheck() {
+    if (healthTimer) {
+        clearInterval(healthTimer);
+        healthTimer = null;
+    }
+}
 
 function setStatus(state, extra) {
     const payload = Object.assign({ event: 'status', state, mode: activeMode }, extra || {});
@@ -136,6 +207,7 @@ function segmentText(seg) {
         case 'at':
             return atText(data);
         case 'image':
+        case 'flash':
             return '[图片]';
         case 'face':
         case 'mface':
@@ -213,8 +285,65 @@ function sendAction(action, params, echo) {
     return payload.echo;
 }
 
+const pendingActions = new Map();
+let actionSeq = 0;
+
+function actionAsync(action, params, timeoutMs) {
+    return new Promise((resolve) => {
+        const echo = 'async_' + (++actionSeq);
+        pendingActions.set(echo, resolve);
+        sendAction(action, params, echo);
+        setTimeout(() => {
+            if (pendingActions.has(echo)) {
+                pendingActions.delete(echo);
+                resolve(null);
+            }
+        }, timeoutMs || 4000);
+    });
+}
+
 function requestGroupList() {
     sendAction('get_group_list', {}, 'get_group_list');
+}
+
+// --- Image candidates (for the Python-side photo server) ---
+function cand(type, value) {
+    return value ? { type, value: String(value) } : null;
+}
+
+async function resolveImage(data) {
+    if (!data) return [];
+    const list = [];
+    const push = (c) => { if (c) list.push(c); };
+    if (data.file_id) push(cand('file_id', data.file_id));
+    if (typeof data.file === 'string') {
+        if (/^https?:\/\//i.test(data.file)) push(cand('url', data.file));
+        else if (/^file:\/\//i.test(data.file)) push(cand('path', data.file));
+        else push(cand('file', data.file));
+    }
+    if (data.url) push(cand('url', data.url));
+    if (data.path) push(cand('path', data.path));
+
+    const fileParam = data.file || data.file_id;
+    if (fileParam) {
+        const res = await actionAsync('get_image', { file: fileParam }, 4000);
+        const d = res && res.data;
+        if (d) {
+            if (d.file) list.unshift(cand('path', d.file));
+            if (d.url) list.unshift(cand('url', d.url));
+        }
+    }
+    return list;
+}
+
+async function collectImages(message) {
+    const out = [];
+    if (!Array.isArray(message)) return out;
+    for (const seg of message) {
+        if (!seg || (seg.type !== 'image' && seg.type !== 'flash')) continue;
+        out.push(await resolveImage(seg.data || {}));
+    }
+    return out;
 }
 
 // --- Incoming OneBot events ---
@@ -233,9 +362,15 @@ function handleGroupList(data) {
     emitEvent({ event: 'groups', groups: list });
 }
 
-function handleObj(obj) {
+async function handleObj(obj) {
     if (!obj || typeof obj !== 'object') return;
 
+    if (obj.echo && pendingActions.has(obj.echo)) {
+        const resolve = pendingActions.get(obj.echo);
+        pendingActions.delete(obj.echo);
+        resolve(obj);
+        return;
+    }
     if (obj.echo === 'get_group_list') {
         handleGroupList(obj.data);
         return;
@@ -251,8 +386,18 @@ function handleObj(obj) {
     const groupId = String(obj.group_id);
     if (groupFilter.size && !groupFilter.has(groupId)) return;
 
-    const content = extractText(obj.message != null ? obj.message : obj.raw_message);
+    const message = obj.message != null ? obj.message : obj.raw_message;
+    const content = extractText(message);
     if (!content) return;
+
+    let images = [];
+    if (Array.isArray(message) && (config.imageAsLink || config.collectImages)) {
+        try {
+            images = await collectImages(message);
+        } catch (e) {
+            images = [];
+        }
+    }
 
     emitEvent({
         event: 'qqMessage',
@@ -260,9 +405,13 @@ function handleObj(obj) {
         groupName: sanitizeText(groupName(groupId)),
         sender: sanitizeText(senderName(obj)),
         content,
+        images,
         raw: sanitizeText(obj.raw_message || '')
     });
 }
+
+// Serialize event handling so get_image round-trips don't reorder messages.
+let processChain = Promise.resolve();
 
 function handleRaw(data) {
     if (data == null) return;
@@ -275,13 +424,30 @@ function handleRaw(data) {
     } catch (e) {
         return;
     }
-    if (Array.isArray(obj)) obj.forEach(handleObj);
-    else handleObj(obj);
+    // Action responses must resolve immediately, otherwise they'd be stuck
+    // behind the handler that is awaiting them in processChain.
+    if (!Array.isArray(obj) && obj.echo && pendingActions.has(obj.echo)) {
+        const resolve = pendingActions.get(obj.echo);
+        pendingActions.delete(obj.echo);
+        resolve(obj);
+        return;
+    }
+    processChain = processChain
+        .then(() => (Array.isArray(obj) ? Promise.all(obj.map(handleObj)) : handleObj(obj)))
+        .catch(() => {});
 }
 
 // --- Forward mode (we connect out to the OneBot WS server) ---
 function scheduleReconnect(reason) {
     if (stopped || activeMode !== 'forward') return;
+    if (restricted) {
+        log('warn', '检测到账号可能受限，已停止自动重连。');
+        return;
+    }
+    if (!autoReconnect) {
+        log('info', '自动重连已关闭，未重连（' + reason + '）。');
+        return;
+    }
     retry += 1;
     const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(retry, 5)));
     log('warn', 'QQ 连接断开（' + reason + '），' + Math.round(delay / 1000) + ' 秒后重连…');
@@ -313,11 +479,17 @@ function connectForward() {
         log('info', '已连接 OneBot 正向 WebSocket: ' + url);
         setStatus('connected');
         requestGroupList();
+        startHealthCheck();
     });
     ws.on('message', (data) => handleRaw(data));
     ws.on('close', (code, reason) => {
-        if (lastState !== 'disconnected') setStatus('disconnected');
+        stopHealthCheck();
         const why = reason ? reason.toString() : String(code);
+        if (looksRestricted(why)) {
+            declareRestricted('QQ 连接因疑似风控/受限被关闭：' + why);
+            return;
+        }
+        if (lastState !== 'disconnected') setStatus('disconnected');
         scheduleReconnect('closed ' + why);
     });
     ws.on('error', (err) => {
@@ -375,11 +547,15 @@ function startReverse() {
         log('info', 'OneBot 反向连接已建立。');
         setStatus('connected');
         requestGroupList();
+        startHealthCheck();
 
         ws.on('message', (data) => handleRaw(data));
         const drop = () => {
             clients.delete(ws);
-            if (clients.size === 0) setStatus('disconnected');
+            if (clients.size === 0) {
+                stopHealthCheck();
+                setStatus('disconnected');
+            }
         };
         ws.on('close', drop);
         ws.on('error', drop);
@@ -413,6 +589,7 @@ function handleCommand(cmd) {
             break;
         case 'quit':
             stopped = true;
+            stopHealthCheck();
             if (reconnectTimer) clearTimeout(reconnectTimer);
             try { if (forwardWs) forwardWs.close(); } catch (e) { /* ignore */ }
             for (const ws of clients) { try { ws.close(); } catch (e) { /* ignore */ } }

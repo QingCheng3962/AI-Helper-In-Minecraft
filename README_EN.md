@@ -2,9 +2,11 @@
 
 # AI Helper In Minecraft
 
+**Current version: v2.1**
+
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
-- The front end is a Python tkinter GUI with multiple tabs: **Settings / AI Config / Player Config / Roster / QQ Relay / Reconnect·Kick / Appearance / Game Output**. The Node.js (mineflayer) engine handles the connection and protocol in the background.
+- The front end is a Python tkinter GUI with multiple tabs: **Settings / AI Config / Player Config / Roster / QQ Relay / Reconnect·Kick / Appearance / Log**. The Node.js (mineflayer) engine handles the connection and protocol in the background.
 - Supports **Offline / LittleSkin / Premium (Microsoft account)** login.
 - Automatic re-login when a session expires (LittleSkin auto-opens the browser OAuth flow and reconnects when done).
 - Optional extras kept from the old Cubex bot: Quiz auto-answer, AutoEat.
@@ -26,6 +28,18 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - Auto re-login: when a LittleSkin session becomes invalid (e.g. "Invalid access token"), it launches the login flow automatically and reconnects.
 - Auto reconnect & kick handling (**Reconnect·Kick** tab): when the connection ends by itself (drop / kick) the bot reconnects after a configurable delay, up to a configurable number of attempts (reset on a successful spawn). After being kicked and reconnecting it can send `/lobby` automatically. Clicking **Disconnect** manually never triggers a reconnect.
 - Appearance (**Appearance** tab): pick a PNG / JPG as the window background image and dim it; the text theme can be **Auto (from background brightness)** / light background with black text / dark background with white text.
+
+## Changelog
+
+### v2.1
+
+- **QQ relay**: bundled NapCat (`NapCat/`) with four buttons on the QQ tab (Start / Connect / Reconnect / Disconnect); Start runs `launcher-win10.bat` and opens the `cache` folder for QR scanning. OneBot 11 forward/reverse, group filter, access token.
+- **QQ image → local link**: images are saved to `pic_http/` and published by a built-in Python HTTP server at `http://public-host:port/pic_http/<file>` (only `/pic_http/` is exposed).
+- **MC → QQ**: a public-chat message starting with a trigger (default `[sentQ]`, comma-separated supported) is forwarded to QQ; `[sentQ:group] content` targets a specific group; MC color codes are stripped and illegal chars become `?`; a configurable success/failure reply (with `{player}`) is sent.
+- **Account safety**: optional auto-reconnect and online health check; when the connection looks risk-controlled or the check fails repeatedly it warns and stops auto-reconnecting. New scanned QQ accounts get their OneBot config written automatically.
+- **Update notice**: on startup it checks the latest NapCat / program version and logs the result.
+- **Chat parsing fix**: messages trigger correctly whether or not the player has a `[guild]`-style title prefix.
+- **Misc**: fixed `client.chat is not a function` on some mineflayer/minecraft-protocol combos (messages are queued until the bot is ready); log tab with `[HH:MM:SS]` timestamps; GUI tab cleanup; high-DPI support.
 
 ## Project Layout
 
