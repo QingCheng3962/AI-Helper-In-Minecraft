@@ -157,7 +157,9 @@ function startHealthCheck() {
         const ok = !!(d && (d.user_id || d.nickname));
         if (ok) {
             everOnline = true;
-            if (healthFails > 0 || !lastHealthOk) {
+            if (!lastHealthOk) {
+                emitEvent({ event: 'loginInfo', uin: String(d.user_id || ''),
+                            nickname: d.nickname || '' });
                 emitEvent({ event: 'health', online: true,
                             selfId: String(d.user_id || ''), nickname: d.nickname || '' });
             }

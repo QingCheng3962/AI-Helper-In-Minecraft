@@ -23,6 +23,7 @@ NAPCAT_INNER_DIR = os.path.join(NAPCAT_DIR, 'napcat')
 NAPCAT_LAUNCHER = os.path.join(NAPCAT_INNER_DIR, 'launcher-win10.bat')
 NAPCAT_CACHE_DIR = os.path.join(NAPCAT_INNER_DIR, 'cache')
 NAPCAT_CONFIG_DIR = os.path.join(NAPCAT_INNER_DIR, 'config')
+QQ_ACCOUNTS_FILE = os.path.join(BASE_DIR, 'qq_accounts.json')
 
 # Phrases that indicate the LittleSkin / yggdrasil session became invalid and a
 # fresh login is needed. Matched (case-insensitively) against engine errors and
@@ -106,6 +107,8 @@ class Controller:
         self._qq_pending_relays: List[str] = []
         self._last_mc_to_qq_time = 0.0
         self._last_health_alert = 0.0
+        self._qq_nicknames: Dict[str, str] = {}
+        self._load_qq_accounts()
         self._photo = PhotoServer()
         self._public_base_cache = ''
 
@@ -513,9 +516,25 @@ class Controller:
     def stop_qq(self) -> None:
         self._stop_qq()
 
+    def _load_qq_accounts(self) -> None:
+        try:
+            with open(QQ_ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                self._qq_nicknames = {str(k): str(v) for k, v in data.items()}
+        except Exception:  # noqa: BLE001
+            self._qq_nicknames = {}
+
+    def _save_qq_accounts(self) -> None:
+        try:
+            with open(QQ_ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self._qq_nicknames, f, ensure_ascii=False, indent=2)
+        except Exception:  # noqa: BLE001
+            pass
+
     def list_qq_accounts(self) -> List[str]:
-        """QQ numbers known locally (from NapCat per-account config files)."""
-        uins = set()
+        """QQ numbers known locally (NapCat config files + remembered ones)."""
+        uins = set(self._qq_nicknames.keys())
         try:
             for name in os.listdir(NAPCAT_CONFIG_DIR):
                 m = re.match(r'(?:napcat|onebot11|napcat_protocol)_(\d+)\.json$', name)
@@ -527,6 +546,17 @@ class Controller:
         if last:
             uins.add(last)
         return sorted(uins)
+
+    def qq_account_choices(self):
+        """List of (uin, display_label) for the quick-login picker."""
+        choices = []
+        for uin in self.list_qq_accounts():
+            nick = self._qq_nicknames.get(uin, '')
+            label = f'{uin}  {nick}'.rstrip()
+            if uin == (self.config.qq.lastLoginUin or '').strip():
+                label = '★ ' + label
+            choices.append((uin, label))
+        return choices
 
     def start_napcat(self, uin: str = '') -> None:
         """Launch the bundled NapCat launcher (optionally quick-login a QQ)."""
@@ -642,6 +672,16 @@ class Controller:
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': '[QQ] 账号可能受限/离线：' + str(ev.get('message') or '')
                                       + '（已停止自动重连，请登录 NapCat 检查；修复后点「启动/重连 QQ」）'})
+        elif event == 'loginInfo':
+            uin = str(ev.get('uin') or '').strip()
+            nick = str(ev.get('nickname') or '').strip()
+            if uin:
+                if self._qq_nicknames.get(uin) != nick:
+                    self._qq_nicknames[uin] = nick
+                    self._save_qq_accounts()
+                if nick:
+                    self._post_ui({'kind': 'log', 'level': 'info',
+                                   'message': f'[QQ] 已登录 {nick}({uin})'})
         elif event == 'health':
             if ev.get('online'):
                 self._post_ui({'kind': 'log', 'level': 'info',

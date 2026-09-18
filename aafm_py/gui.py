@@ -1378,7 +1378,8 @@ class AiPlayerGUI:
 
     def _on_qq_quick_login(self):
         self._gather_config()
-        accounts = self.controller.list_qq_accounts()
+        choices = self.controller.qq_account_choices()  # [(uin, label), ...]
+        labels = [label for _, label in choices]
         last = (self.controller.config.qq.lastLoginUin or '').strip()
 
         dlg = tk.Toplevel(self.root)
@@ -1387,30 +1388,39 @@ class AiPlayerGUI:
         dlg.resizable(False, False)
         dlg.grab_set()
 
-        ttk.Label(dlg, text='选择要快速登录的 QQ 号（本地已有配置的账号）：').pack(
+        ttk.Label(dlg, text='选择要快速登录的 QQ 号（★ 为上次登录）：').pack(
             anchor='w', padx=12, pady=(12, 4))
-        lb = tk.Listbox(dlg, height=8, width=30)
-        for a in accounts:
-            lb.insert('end', a)
+        lb = tk.Listbox(dlg, height=8, width=34)
+        for label in labels:
+            lb.insert('end', label)
         lb.pack(padx=12, fill='x')
-        if last and last in accounts:
-            idx = accounts.index(last)
-            lb.selection_set(idx)
-            lb.see(idx)
-        elif accounts:
+
+        def uin_from_list():
+            sel = lb.curselection()
+            if not sel:
+                return ''
+            return choices[sel[0]][0]
+
+        last_idx = next((i for i, (u, _) in enumerate(choices) if u == last), None)
+        if last_idx is not None:
+            lb.selection_set(last_idx)
+            lb.see(last_idx)
+        elif choices:
             lb.selection_set(0)
 
         ttk.Label(dlg, text='或手动输入 QQ 号：').pack(anchor='w', padx=12, pady=(8, 2))
         var = tk.StringVar(value=last)
-        entry = ttk.Entry(dlg, textvariable=var, width=30)
+        entry = ttk.Entry(dlg, textvariable=var, width=34)
         entry.pack(padx=12, fill='x')
 
-        lb.bind('<<ListboxSelect>>', lambda e: (
-            var.set(lb.get(lb.curselection()[0])) if lb.curselection() else None))
+        def on_select(_e=None):
+            u = uin_from_list()
+            if u:
+                var.set(u)
+        lb.bind('<<ListboxSelect>>', on_select)
 
         def confirm(_e=None):
-            sel = lb.curselection()
-            uin = var.get().strip() or (lb.get(sel[0]) if sel else '')
+            uin = var.get().strip() or uin_from_list()
             if not uin:
                 messagebox.showwarning('快速登录', '请选择或输入一个 QQ 号。', parent=dlg)
                 return
