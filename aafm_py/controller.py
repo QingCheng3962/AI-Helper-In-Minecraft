@@ -1178,6 +1178,11 @@ class Controller:
             raw = ev.get('raw') or ''
             if raw.strip():
                 self._post_ui({'kind': 'log', 'level': 'server', 'message': raw})
+                if self.ai_player:
+                    try:
+                        self.ai_player.on_server_message(raw)
+                    except Exception:  # noqa: BLE001
+                        pass
         elif event == 'quizLog':
             self._post_ui({'kind': 'log', 'level': 'quiz',
                            'message': '[答题] ' + ev.get('message', '')})

@@ -77,6 +77,9 @@ class AiPlayerConfig:
 
     contextEnabled: bool = True
     contextLength: int = 20
+    # Also feed server/system messages (announcements, command output) into the
+    # AI context so replies can reference them.
+    serverMessagesInContext: bool = True
 
     triggerEnabled: bool = True
     triggerRegex: str = DEFAULT_TRIGGER_REGEX

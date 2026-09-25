@@ -887,6 +887,11 @@ class AiPlayerGUI:
         self._entry(frm, 2, '最多消息', self.var_max_msgs, col=2)
         self._entry(frm, 3, '单条字数', self.var_max_chars, col=1)
 
+        self.var_server_ctx = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frm, text='服务器消息加入上下文（供 AI 参考）',
+                        variable=self.var_server_ctx).grid(
+            row=3, column=2, columnspan=2, sticky='w', padx=4, pady=3)
+
     def _build_trigger_frame(self, parent) -> None:
         frm = ttk.LabelFrame(parent, text='触发回复（命中任一个正则即回复；用聊天完整原文检测，非触发保持静默）', padding=8)
         frm.pack(fill='x', pady=(0, 8))
@@ -1057,6 +1062,7 @@ class AiPlayerGUI:
         self.var_template.set(ai.templateName if ai.templateName in _build_templates() else '')
         self.var_context.set(ai.contextEnabled)
         self.var_context_len.set(str(ai.contextLength))
+        self.var_server_ctx.set(bool(getattr(ai, 'serverMessagesInContext', True)))
         self.var_max_msgs.set(str(ai.maxReplyMessages))
         self.var_max_chars.set(str(ai.maxCharsPerMessage))
 
@@ -1224,6 +1230,7 @@ class AiPlayerGUI:
         ai.templateName = self.var_template.get()
         ai.contextEnabled = self.var_context.get()
         ai.contextLength = self._parse_int(self.var_context_len.get(), 20)
+        ai.serverMessagesInContext = self.var_server_ctx.get()
         ai.maxReplyMessages = self._parse_int(self.var_max_msgs.get(), 3)
         ai.maxCharsPerMessage = self._parse_int(self.var_max_chars.get(), 100)
 

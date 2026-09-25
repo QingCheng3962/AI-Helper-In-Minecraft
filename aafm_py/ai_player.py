@@ -45,6 +45,14 @@ _IDENTITY_VERB_RE = re.compile(r'就是|其实是|实际上是|是')
 
 _ROSTER_LEARN_ACK = '好，我记住了。'
 
+# Prompt used to answer "xxx是谁" with the roster + recent context.
+_IDENTITY_SYSTEM_TMPL = (
+    '你是 Minecraft 服务器里熟悉大家的 AI。下面会给出关于「{subject}」的资料库记录、'
+    '该玩家的最近发言以及最近的聊天上下文。请用一到两句简短自然的中文回答「{subject}是谁」，'
+    '像在群里聊天一样。若资料里有别名/昵称，回答时一并带上；资料不足就结合上下文合理推断；'
+    '不要编造具体事实，不要解释推理过程，不要加引号。'
+)
+
 # Trailing particles allowed after the Y name in an identity statement, so
 # "老王" / "老王啊" both count but "老王挖的" does not.
 _Y_TAIL_OK = ' \u3000呀啊嘛呢哦喔吧呗啦咯哦'
@@ -625,7 +633,7 @@ class AiPlayer:
             self._error('记录身份失败: ' + str(e))
             return False
         self._log(f'玩家资料库学习: {store_name} => {statement}')
-        self._send_direct_reply(_ROSTER_LEARN_ACK)
+        self._send_direct_reply(f'{statement}，我记住了。')
         return True
 
     def _maybe_roster_reply(self, text: str) -> bool:
@@ -670,33 +678,88 @@ class AiPlayer:
         if entry is None:
             entry = roster.match_alias_at_end(prefix)
 
+        # Only treat a short bare "X是谁" as an identity question; longer
+        # sentences ("这坑是谁挖的") fall through to the normal AI flow.
+        if entry is None:
+            tail = text[idx + 2:]
+            if subject is None or tail.strip(_SUFFIX_PUNCT):
+                return False
+
+        who = str(entry.get('name')) if entry is not None else (subject or '')
+        info = self._identity_info(entry, subject, text)
+        reply = self._ai_identity_reply(who, info)
+        if reply:
+            self._send_direct_reply(reply)
+            self._log(f'AI 身份回答: {who}')
+            return True
+
+        # No AI available -> fall back to the raw table answer.
         if entry is not None:
             name = str(entry.get('name', ''))
-            # Authoritative 玩家描述 wins; the fixed 描述1..N columns only
-            # apply (at random) while it is still empty.
             main = str(entry.get('main') or '').strip()
             fixed = [d for d in (entry.get('fixed') or []) if str(d).strip()]
+            aliases = [a for a in (entry.get('aliases') or []) if str(a).strip()]
             if main:
                 reply = main
             elif fixed:
                 reply = str(random.choice(fixed))
+            elif aliases:
+                reply = f'{name}（别名：{"、".join(str(a) for a in aliases)}）'
             else:
                 reply = f'我没有找到关于 {name} 的描述。'
             self._send_direct_reply(reply)
             self._log(f'玩家资料库命中: {name}')
             return True
 
-        # Not in the table. Only answer "不认识" for a short bare question such
-        # as "小明是谁呀" — longer sentences ("这坑是谁挖的") fall through to
-        # the normal AI flow so we don't reply nonsense.
-        if subject is None:
-            return False
-        tail = text[idx + 2:]
-        if tail.strip(_SUFFIX_PUNCT):
-            return False
         self._send_direct_reply(f'我不认识{subject}。')
         self._log(f'玩家资料库未命中，回复不认识: {subject}')
         return True
+
+    def _identity_info(self, entry, subject: Optional[str], question: str) -> str:
+        """Assemble roster + recent-chat info for the identity AI answer."""
+        lines: List[str] = []
+        if entry is not None:
+            name = str(entry.get('name') or '')
+            lines.append('玩家名：' + name)
+            main = str(entry.get('main') or '').strip()
+            if main:
+                lines.append('玩家描述：' + main)
+            aliases = [str(a).strip() for a in (entry.get('aliases') or []) if str(a).strip()]
+            if aliases:
+                lines.append('别名：' + '、'.join(aliases))
+            fixed = [str(d).strip() for d in (entry.get('fixed') or []) if str(d).strip()]
+            if fixed:
+                lines.append('其它描述：' + '；'.join(fixed))
+            ai_recs = [str(d).strip() for d in (entry.get('ai') or []) if str(d).strip()]
+            if ai_recs:
+                lines.append('AI记录：' + '；'.join(ai_recs))
+            key = _norm(name).casefold()
+            logs = self._chat_logs.get(key) or []
+            spoken = [str(m.get('text', '')) for m in logs[-6:] if m.get('text')]
+            if spoken:
+                lines.append('该玩家最近发言：' + ' / '.join(spoken))
+        elif subject:
+            lines.append('玩家名：' + subject)
+
+        recent = [str(m.get('content', '')) for m in list(self._context)[-8:]
+                  if isinstance(m, dict) and m.get('content')]
+        if recent:
+            lines.append('最近聊天上下文：' + ' / '.join(recent))
+        return '\n'.join(lines)
+
+    def _ai_identity_reply(self, subject: str, info: str) -> Optional[str]:
+        provider = self._trigger_provider
+        if provider is None:
+            return None
+        system = _IDENTITY_SYSTEM_TMPL.format(subject=subject or 'TA')
+        user = info or ('询问对象：' + (subject or ''))
+        try:
+            out = provider.send(system, [{'role': 'user', 'content': user}])
+        except Exception as e:  # noqa: BLE001
+            self._error('身份 AI 回答失败: ' + str(e))
+            return None
+        out = str(out or '').strip().strip('"\'“”`')
+        return out or None
 
     def _send_direct_reply(self, reply: str) -> None:
         """Send a fixed answer, split into chat-sized chunks like AI replies."""
@@ -1098,6 +1161,18 @@ class AiPlayer:
         self._context.append(msg)
         while len(self._context) > cfg.contextLength:
             self._context.popleft()
+
+    def on_server_message(self, raw: str) -> None:
+        """Feed a server/system message into the AI context (no reply)."""
+        cfg = self.config
+        if not getattr(cfg, 'serverMessagesInContext', True):
+            return
+        if not cfg.enabled or not cfg.contextEnabled or cfg.contextLength <= 0:
+            return
+        text = (raw or '').strip()
+        if not text:
+            return
+        self._add_to_context({'role': 'user', 'content': '[服务器] ' + text})
 
     # ------------------------------------------------------------------
     # Matching / filtering helpers
