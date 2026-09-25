@@ -292,6 +292,13 @@ bot.on('message', (jsonMsg, position) => {
             guild: chat.guild,
             raw: raw
         });
+        return;
+    }
+    // Anything that is not a player chat (server announcements, command
+    // output, join/leave/death messages, plugin text...) is surfaced so the
+    // user can see it in the log instead of being silently dropped.
+    if (raw && raw.trim()) {
+        emitEvent({ event: 'serverMessage', raw: raw });
     }
 });
 

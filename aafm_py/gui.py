@@ -973,6 +973,7 @@ class AiPlayerGUI:
         self.log_text.tag_configure('private', foreground='#ff9ad8')
         self.log_text.tag_configure('msa', foreground='#b9f6ca')
         self.log_text.tag_configure('qq', foreground='#c792ea')
+        self.log_text.tag_configure('server', foreground='#90caf9')
 
         bottom = ttk.Frame(tab)
         bottom.pack(fill='x', pady=(6, 0))
@@ -1671,7 +1672,7 @@ class AiPlayerGUI:
     @staticmethod
     def _log_tag(level):
         return {'error': 'error', 'ai': 'ai', 'quiz': 'quiz', 'sent': 'sent',
-                'warn': 'warn', 'msa': 'msa', 'qq': 'qq'}.get(level, 'info')
+                'warn': 'warn', 'msa': 'msa', 'qq': 'qq', 'server': 'server'}.get(level, 'info')
 
     @staticmethod
     def _parse_int(s, default):

@@ -1172,8 +1172,12 @@ class Controller:
             self._post_ui({'kind': 'log', 'level': ev.get('level', 'info'),
                            'message': ev.get('message', '')})
         elif event == 'message':
-            # raw system chat; ignore by default
+            # raw system chat; the parsed forms are handled below
             pass
+        elif event == 'serverMessage':
+            raw = ev.get('raw') or ''
+            if raw.strip():
+                self._post_ui({'kind': 'log', 'level': 'server', 'message': raw})
         elif event == 'quizLog':
             self._post_ui({'kind': 'log', 'level': 'quiz',
                            'message': '[答题] ' + ev.get('message', '')})
