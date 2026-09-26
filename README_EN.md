@@ -33,13 +33,38 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v3.0
 
-- **QQ relay**: bundled NapCat (`NapCat/`) with four buttons on the QQ tab (Start / Connect / Reconnect / Disconnect); Start runs `launcher-win10.bat` and opens the `cache` folder for QR scanning. OneBot 11 forward/reverse, group filter, access token.
-- **QQ image → local link**: images are saved to `pic_http/` and published by a built-in Python HTTP server at `http://public-host:port/pic_http/<file>` (only `/pic_http/` is exposed).
-- **MC → QQ**: a public-chat message starting with a trigger (default `[sentQ]`, comma-separated supported) is forwarded to QQ; `[sentQ:group] content` targets a specific group; MC color codes are stripped and illegal chars become `?`; a configurable success/failure reply (with `{player}`) is sent.
-- **Account safety**: optional auto-reconnect and online health check; when the connection looks risk-controlled or the check fails repeatedly it warns and stops auto-reconnecting. New scanned QQ accounts get their OneBot config written automatically.
-- **Update notice**: on startup it checks the latest NapCat / program version and logs the result.
-- **Chat parsing fix**: messages trigger correctly whether or not the player has a `[guild]`-style title prefix.
-- **Misc**: fixed `client.chat is not a function` on some mineflayer/minecraft-protocol combos (messages are queued until the bot is ready); log tab with `[HH:MM:SS]` timestamps; GUI tab cleanup; high-DPI support.
+- **Reconnect improvements**
+  - Reconnect interval uses a value + unit (sec/min/hour/day) picker (up to 30 days).
+  - New "custom reconnect triggers" (one regex/substring per line): a matching server chat/announcement forces a reconnect (default includes `You were kicked from lobby`) — for being moved to a login/lobby server without dropping the connection.
+  - New "proactive reconnect": while online, drop + reconnect every configured interval.
+  - New "keep retrying until back": ignore maxAttempts while the server restarts (optional max minutes, 0 = unlimited).
+- **Random chat (new tab)**: enable; interval and per-fire count are both randomized within a min~max range; message list with "＋ add row" and per-row "Delete".
+- **Human-verification auto-pass**: reads the container after a delay (retries until items populate), clicks items by "target name" (`点击这里` / `点击这里步骤N` in step order); falls back to odd-slot detection.
+- **Quiz fixes**: also accepts chat-bar `[教育部]` questions (strips `新题目:`; settlement/scoring lines ignored); supports `无人答对`; sends only the final answer (thinking discarded); reuses the global AI config and auto-appends `…/chat/completions`.
+- **Server messages**: unparseable public chat (announcements, command output, joins/leaves) is shown in the log and can feed the AI context.
+- **Identity Q&A via AI**: answers "xxx 是谁" from the roster (descriptions/aliases/AI notes) + recent chat, including aliases; "X是Y" reply is now "X是Y，我记住了".
+- **Low-health alert**: say a configurable line when health ≤ threshold (with cooldown).
+- **Quick login**: picker listing local accounts with nicknames (last one preselected), quick-login via `-q`.
+- **Misc**: fixed `client.chat is not a function` (messages queued until ready).
+
+### v2.1
+
+- **QQ relay**: bundled NapCat with four buttons (Start / Connect / Reconnect / Disconnect); OneBot 11 forward/reverse, group filter, access token.
+- **MC → QQ**: messages starting with a trigger (default `[sentQ]`, multiple allowed) are forwarded; group targeting, cooldown, color-code stripping, `?` for illegal chars, success/failure reply.
+- **Image → local link**: images saved to `pic_http/` and served by the built-in Python HTTP server at `/pic_http/`.
+- **Account safety**: online health check, warning + stop-auto-reconnect on risk, auto OneBot config for new scanned accounts.
+- **Update notice**: checks latest NapCat / program version at startup.
+- **Chat parsing fix**: works with or without a `[guild]`-style title prefix.
+- **Misc**: log tab with `[HH:MM:SS]` timestamps; GUI tab cleanup; high-DPI.
+
+### v2.0
+
+- **Auto reconnect / kick handling**: reconnect after drops/kicks; auto `/lobby` after a successful kick-reconnect.
+- **Appearance**: window background image + dimming and auto/light/dark text theme.
+
+### v1.0
+
+- Initial release: client-less AI player (mineflayer), offline / LittleSkin / Microsoft login, AI chat with triggers/context/filters, Quiz auto-answer, AutoEat; bilingual README and disclaimer.
 
 ## Project Layout
 
