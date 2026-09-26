@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v3.0**
+**Current version: v3.1**
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -30,6 +30,12 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - Appearance (**Appearance** tab): pick a PNG / JPG as the window background image and dim it; the text theme can be **Auto (from background brightness)** / light background with black text / dark background with white text.
 
 ## Changelog
+
+### v3.1
+
+- **Command block (bottom of the Player Config tab)**: a table of commands to block (without the slash; defaults include `pay kick ban op stop whitelist kill give tp gamemode`). Any bot-sent message (AI replies / random chat) starting with `/` whose command name is listed is dropped and logged, preventing prompt-injection from running dangerous commands. Rows with "＋ add row" and per-row "Delete".
+- **Enable/disable buttons**: both command block and random chat have a toggle button — **green when enabled, red when disabled** — clicking it applies and saves immediately.
+- **Random chat moved into Player Config** (no longer its own tab), and **each line now has its own random interval** (per-row min~max seconds) instead of one fixed interval; rows can be added/removed.
 
 ### v3.0
 

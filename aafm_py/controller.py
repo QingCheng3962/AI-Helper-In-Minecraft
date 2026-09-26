@@ -1221,9 +1221,27 @@ class Controller:
         self._bot_events.put(ev)
 
     def _on_ai_send_chat(self, text: str) -> None:
+        blocked = self._blocked_command(text)
+        if blocked:
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': f'已屏蔽危险命令：/{blocked}（防注入）'})
+            return
         if not self._engine.say(text):
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': 'AI 回复发送失败（未连接）。'})
+
+    def _blocked_command(self, text: str) -> str:
+        """Return the blocked command name if ``text`` is a forbidden command."""
+        cfg = self.config.commandBlock
+        if not cfg.enabled:
+            return ''
+        s = (text or '').strip()
+        if not s.startswith('/'):
+            return ''
+        name = re.split(r'\s+', s[1:].strip(), 1)[0].lower()
+        if name and name in (cfg.commands or []):
+            return name
+        return ''
 
     def _worker_loop(self) -> None:
         last_tick = time.time()

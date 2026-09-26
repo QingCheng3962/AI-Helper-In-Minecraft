@@ -303,7 +303,6 @@ class AiPlayerGUI:
         self._build_ai_tab()
         self._build_player_tab()
         self._build_roster_tab()
-        self._build_random_tab()
         self._build_qq_tab()
         self._build_reconnect_tab()
         self._build_appearance_tab()
@@ -491,64 +490,111 @@ class AiPlayerGUI:
         self._build_roster_frame(sc.inner)
 
     # ------------------------------------------------------------------
-    # Tab: 随机发言
+    # 玩家配置内的：随机发言 / 屏蔽命令（表格 + 红绿启用按钮）
     # ------------------------------------------------------------------
-    def _build_random_tab(self) -> None:
-        host = ttk.Frame(self.notebook, padding=(8, 8))
-        self.notebook.add(host, text=' 随机发言 ')
-        sc = ScrollFrame(host)
-        sc.pack(fill='both', expand=True)
-        frm = sc.inner
+    def _make_toggle_button(self, parent, var, on_change=None):
+        """A green (enabled) / red (disabled) toggle button bound to ``var``."""
+        btn = tk.Button(parent, relief='flat', fg='white', font=('Segoe UI', 9, 'bold'),
+                        width=8, cursor='hand2')
 
-        box = ttk.LabelFrame(frm, text='定时随机发言（按随机间隔，从列表随机挑几句说）', padding=8)
-        box.pack(fill='x', pady=(0, 8))
+        def refresh():
+            if var.get():
+                btn.config(text='已启用', bg='#2e7d32', activebackground='#276b2a')
+            else:
+                btn.config(text='已禁用', bg='#c62828', activebackground='#a52222')
+
+        def toggle():
+            var.set(not var.get())
+            refresh()
+            if on_change:
+                try:
+                    on_change()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        btn.config(command=toggle)
+        refresh()
+        return btn, refresh
+
+    def _build_random_frame(self, parent) -> None:
+        frm = ttk.LabelFrame(parent, text='随机发言（每条独立随机时间，最小~最大秒）', padding=8)
+        frm.pack(fill='x', pady=(0, 8))
 
         self.var_idle_enabled = tk.BooleanVar(value=False)
-        self.var_idle_min = tk.StringVar()
-        self.var_idle_max = tk.StringVar()
-        self.var_idle_cmin = tk.StringVar()
-        self.var_idle_cmax = tk.StringVar()
+        head = ttk.Frame(frm)
+        head.pack(fill='x')
+        self.idle_toggle_btn, self._refresh_idle_toggle = self._make_toggle_button(
+            head, self.var_idle_enabled, on_change=self._on_idle_toggle)
+        self.idle_toggle_btn.pack(side='left')
+        ttk.Label(head, text='  文本', foreground='#888888').pack(side='left', padx=(8, 0))
+        ttk.Label(head, text='最小秒', foreground='#888888').pack(side='right', padx=(0, 56))
+        ttk.Label(head, text='最大秒', foreground='#888888').pack(side='right', padx=(0, 6))
 
-        ttk.Checkbutton(box, text='启用', variable=self.var_idle_enabled).grid(
-            row=0, column=0, sticky='w', padx=4, pady=3)
-        ttk.Label(box, text='间隔（秒）').grid(row=1, column=0, sticky='w', padx=4, pady=3)
-        ttk.Entry(box, textvariable=self.var_idle_min, width=8).grid(
-            row=1, column=1, sticky='w', padx=4)
-        ttk.Label(box, text='~').grid(row=1, column=2)
-        ttk.Entry(box, textvariable=self.var_idle_max, width=8).grid(
-            row=1, column=3, sticky='w', padx=4)
-        ttk.Label(box, text='每次条数').grid(row=2, column=0, sticky='w', padx=4, pady=3)
-        ttk.Entry(box, textvariable=self.var_idle_cmin, width=8).grid(
-            row=2, column=1, sticky='w', padx=4)
-        ttk.Label(box, text='~').grid(row=2, column=2)
-        ttk.Entry(box, textvariable=self.var_idle_cmax, width=8).grid(
-            row=2, column=3, sticky='w', padx=4)
-        ttk.Label(box, text='间隔与条数都在「最小~最大」间随机；支持 & 颜色码。',
-                  foreground='#888888').grid(row=3, column=0, columnspan=4, sticky='w', padx=4)
-
-        lst = ttk.LabelFrame(frm, text='话语列表', padding=8)
-        lst.pack(fill='both', expand=True)
-        self.random_rows_frame = ttk.Frame(lst)
+        self.random_rows_frame = ttk.Frame(frm)
         self.random_rows_frame.pack(fill='x')
         self._random_rows = []
-        ttk.Button(lst, text='＋ 添加一行', command=self._on_add_random_row).pack(
+        ttk.Button(frm, text='＋ 添加一行', command=lambda: self._add_random_row()).pack(
             anchor='w', pady=(6, 0))
+        ttk.Label(frm, text='每条按自己的「最小~最大秒」随机到点发言；支持 & 颜色码。',
+                  foreground='#888888').pack(anchor='w', pady=(2, 0))
 
-    def _on_add_random_row(self, text: str = ''):
-        var = tk.StringVar(value=text)
+    def _add_random_row(self, text: str = '', lo: int = 60, hi: int = 300):
         row = ttk.Frame(self.random_rows_frame)
         row.pack(fill='x', pady=2)
+        t_var = tk.StringVar(value=str(text))
+        lo_var = tk.StringVar(value=str(lo))
+        hi_var = tk.StringVar(value=str(hi))
+        ttk.Entry(row, textvariable=t_var).pack(side='left', fill='x', expand=True)
+        ttk.Entry(row, textvariable=hi_var, width=7).pack(side='right', padx=(4, 0))
+        ttk.Entry(row, textvariable=lo_var, width=7).pack(side='right', padx=(4, 0))
+
+        def remove():
+            try:
+                row.destroy()
+            finally:
+                self._random_rows = [r for r in self._random_rows if r['row'] is not row]
+
+        ttk.Button(row, text='删除', command=remove).pack(side='right', padx=(6, 0))
+        rec = {'text': t_var, 'min': lo_var, 'max': hi_var, 'row': row}
+        self._random_rows.append(rec)
+        return rec
+
+    def _build_command_block_frame(self, parent) -> None:
+        frm = ttk.LabelFrame(
+            parent, text='屏蔽命令（防止提示词注入执行危险命令，如 pay / kick / ban）', padding=8)
+        frm.pack(fill='x', pady=(0, 8))
+
+        self.var_cmdblock_enabled = tk.BooleanVar(value=True)
+        head = ttk.Frame(frm)
+        head.pack(fill='x')
+        self.cmd_toggle_btn, self._refresh_cmd_toggle = self._make_toggle_button(
+            head, self.var_cmdblock_enabled, on_change=self._on_cmdblock_toggle)
+        self.cmd_toggle_btn.pack(side='left')
+        ttk.Label(head, text='  机器人发出的这些命令会被拦截（不含斜杠）',
+                  foreground='#888888').pack(side='left', padx=(8, 0))
+
+        self.cmd_rows_frame = ttk.Frame(frm)
+        self.cmd_rows_frame.pack(fill='x')
+        self._cmd_rows = []
+        ttk.Button(frm, text='＋ 添加一行', command=lambda: self._add_command_row()).pack(
+            anchor='w', pady=(6, 0))
+
+    def _add_command_row(self, cmd: str = ''):
+        row = ttk.Frame(self.cmd_rows_frame)
+        row.pack(fill='x', pady=2)
+        var = tk.StringVar(value=str(cmd))
         ttk.Entry(row, textvariable=var).pack(side='left', fill='x', expand=True)
 
         def remove():
             try:
                 row.destroy()
             finally:
-                self._random_rows = [r for r in self._random_rows if r[1] is not row]
+                self._cmd_rows = [r for r in self._cmd_rows if r['row'] is not row]
 
-        ttk.Button(row, text='删除', command=remove).pack(side='left', padx=6)
-        self._random_rows.append((var, row))
-        return var
+        ttk.Button(row, text='删除', command=remove).pack(side='right', padx=(6, 0))
+        rec = {'cmd': var, 'row': row}
+        self._cmd_rows.append(rec)
+        return rec
 
     # ------------------------------------------------------------------
     # Tab: QQ 转述
@@ -935,6 +981,18 @@ class AiPlayerGUI:
         self._build_block_frame(frm)
         self._build_health_frame(frm)
         self._build_verify_frame(frm)
+        self._build_random_frame(frm)
+        self._build_command_block_frame(frm)
+
+    def _on_idle_toggle(self):
+        self._gather_config()
+        self._append_log('随机发言已' + ('启用' if self.var_idle_enabled.get() else '禁用')
+                         + '。', 'info')
+
+    def _on_cmdblock_toggle(self):
+        self._gather_config()
+        self._append_log('屏蔽命令已' + ('启用' if self.var_cmdblock_enabled.get() else '禁用')
+                         + '。', 'info')
 
     def _build_verify_frame(self, parent) -> None:
         frm = ttk.LabelFrame(parent, text='进服人机验证自动通过（箱子界面找异类）', padding=8)
@@ -1230,18 +1288,23 @@ class AiPlayerGUI:
 
         self.var_image.set(ai.imageGenerationEnabled)
         self.var_idle_enabled.set(bool(ai.idleChatEnabled))
-        self.var_idle_min.set(str(ai.idleChatMinSeconds))
-        self.var_idle_max.set(str(ai.idleChatMaxSeconds))
-        self.var_idle_cmin.set(str(ai.idleChatCountMin))
-        self.var_idle_cmax.set(str(ai.idleChatCountMax))
-        for _v, _row in list(getattr(self, '_random_rows', [])):
-            _row.destroy()
+        for _rec in list(getattr(self, '_random_rows', [])):
+            _rec['row'].destroy()
         self._random_rows = []
-        for _m in (ai.idleChatMessages or []):
-            self._on_add_random_row(_m)
-        if not self._random_rows:
-            self._on_add_random_row('')
+        for _it in (ai.idleChatItems or []):
+            self._add_random_row(_it.get('text', ''), _it.get('min', 60), _it.get('max', 300))
+        if hasattr(self, '_refresh_idle_toggle'):
+            self._refresh_idle_toggle()
         self.var_image_model.set(ai.imageModel)
+
+        self.var_cmdblock_enabled.set(bool(cfg.commandBlock.enabled))
+        for _rec in list(getattr(self, '_cmd_rows', [])):
+            _rec['row'].destroy()
+        self._cmd_rows = []
+        for _c in (cfg.commandBlock.commands or []):
+            self._add_command_row(_c)
+        if hasattr(self, '_refresh_cmd_toggle'):
+            self._refresh_cmd_toggle()
 
         self.var_quiz.set(cfg.quiz.enabled)
         self.var_autoeat.set(cfg.autoeat.enabled)
@@ -1447,11 +1510,21 @@ class AiPlayerGUI:
         ai.imageModel = self.var_image_model.get().strip() or 'gpt-image-1'
 
         ai.idleChatEnabled = self.var_idle_enabled.get()
-        ai.idleChatMinSeconds = self._parse_int(self.var_idle_min.get(), 60)
-        ai.idleChatMaxSeconds = self._parse_int(self.var_idle_max.get(), 300)
-        ai.idleChatCountMin = self._parse_int(self.var_idle_cmin.get(), 1)
-        ai.idleChatCountMax = self._parse_int(self.var_idle_cmax.get(), 1)
-        ai.idleChatMessages = [v.get().strip() for v, _ in self._random_rows if v.get().strip()]
+        _items = []
+        for _rec in self._random_rows:
+            _t = _rec['text'].get().strip()
+            if not _t:
+                continue
+            _lo = self._parse_int(_rec['min'].get(), 60)
+            _hi = self._parse_int(_rec['max'].get(), max(_lo, 60))
+            _items.append({'text': _t, 'min': _lo, 'max': _hi})
+        ai.idleChatItems = _items
+        ai.validate()
+
+        cfg.commandBlock.enabled = self.var_cmdblock_enabled.get()
+        cfg.commandBlock.commands = [r['cmd'].get().strip() for r in self._cmd_rows
+                                     if r['cmd'].get().strip()]
+        cfg.commandBlock.validate()
 
         cfg.quiz.enabled = self.var_quiz.get()
         cfg.autoeat.enabled = self.var_autoeat.get()

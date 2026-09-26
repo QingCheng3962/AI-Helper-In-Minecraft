@@ -205,7 +205,7 @@ class AiPlayer:
         self._next_scheduled_reply_time = 0
         self._next_trigger_reply_time = 0
         self._next_image_cooldown_time = 0
-        self._next_idle_chat_ms = 0
+        self._idle_next: List[int] = []
         self._online = False
 
         self._recent_ai_messages: Dict[str, int] = {}
@@ -294,7 +294,7 @@ class AiPlayer:
         self._next_scheduled_reply_time = _now_ms() + new_config.scheduleIntervalSeconds * 1000
         self._next_trigger_reply_time = _now_ms()
         self._next_image_cooldown_time = _now_ms()
-        self._next_idle_chat_ms = 0
+        self._idle_next = []
         self._recent_ai_messages.clear()
         self._recent_player_messages.clear()
         self._trigger_reply_in_progress = False
@@ -483,33 +483,28 @@ class AiPlayer:
         cfg = self.config
         if not cfg.enabled or not cfg.idleChatEnabled or self._stopped or not self._online:
             return
-        messages = [str(m) for m in (cfg.idleChatMessages or []) if str(m).strip()]
-        if not messages:
+        items = cfg.idleChatItems or []
+        if not items:
             return
         now = _now_ms()
-        lo_s = max(1, int(cfg.idleChatMinSeconds))
-        hi_s = max(lo_s, int(cfg.idleChatMaxSeconds))
-        if self._next_idle_chat_ms <= 0:
-            self._next_idle_chat_ms = now + random.randint(lo_s, hi_s) * 1000
-            return
-        if now < self._next_idle_chat_ms:
-            return
-
-        c_lo = max(1, int(cfg.idleChatCountMin))
-        c_hi = max(c_lo, int(cfg.idleChatCountMax))
-        count = random.randint(c_lo, c_hi)
-        picks = [random.choice(messages) for _ in range(count)]
-        for i, msg in enumerate(picks):
-            if self._stopped or not cfg.enabled:
-                break
-            if self._is_blocked(msg):
+        if len(self._idle_next) != len(items):
+            self._idle_next = [0] * len(items)
+        for i, it in enumerate(items):
+            text = str(it.get('text', '')).strip()
+            if not text:
                 continue
-            self.on_send_chat(msg)
-            self._log_activity('AI > ' + msg)
-            if i < len(picks) - 1 and self._chunk_delay_ms > 0:
-                time.sleep(self._chunk_delay_ms / 1000.0)
-        self._log(f'随机发言（{count} 条）。')
-        self._next_idle_chat_ms = now + random.randint(lo_s, hi_s) * 1000
+            lo_s = max(1, int(it.get('min', 60)))
+            hi_s = max(lo_s, int(it.get('max', lo_s)))
+            if self._idle_next[i] <= 0:
+                self._idle_next[i] = now + random.randint(lo_s, hi_s) * 1000
+                continue
+            if now < self._idle_next[i]:
+                continue
+            if not self._is_blocked(text):
+                self.on_send_chat(text)
+                self._log_activity('AI > ' + text)
+                self._log('随机发言。')
+            self._idle_next[i] = now + random.randint(lo_s, hi_s) * 1000
 
     # ------------------------------------------------------------------
     # AI reply

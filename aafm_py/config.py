@@ -97,13 +97,10 @@ class AiPlayerConfig:
     retryCount: int = 1
     debugLog: bool = True
 
-    # Periodic random chat: say random lines from a list at a random interval.
+    # Periodic random chat: each entry has its own random interval (min..max
+    # seconds); entries fire independently.
     idleChatEnabled: bool = False
-    idleChatMessages: List[str] = field(default_factory=list)
-    idleChatMinSeconds: int = 60
-    idleChatMaxSeconds: int = 300
-    idleChatCountMin: int = 1
-    idleChatCountMax: int = 1
+    idleChatItems: List[Dict[str, Any]] = field(default_factory=list)
 
     imageGenerationEnabled: bool = False
     imageModel: str = 'gpt-image-1'
@@ -153,15 +150,19 @@ class AiPlayerConfig:
         self.imageRetryCount = _clamp_int(self.imageRetryCount, 0, 3)
         self.imageCooldownSeconds = _clamp_int(self.imageCooldownSeconds, 5, 3600)
 
-        self.idleChatMinSeconds = _clamp_int(self.idleChatMinSeconds, 1, 86400)
-        self.idleChatMaxSeconds = _clamp_int(
-            self.idleChatMaxSeconds, self.idleChatMinSeconds, 86400)
-        self.idleChatCountMin = _clamp_int(self.idleChatCountMin, 1, 10)
-        self.idleChatCountMax = _clamp_int(
-            self.idleChatCountMax, self.idleChatCountMin, 10)
-        if self.idleChatMessages is None:
-            self.idleChatMessages = []
-        self.idleChatMessages = [str(m) for m in self.idleChatMessages if str(m).strip()]
+        if self.idleChatItems is None:
+            self.idleChatItems = []
+        items = []
+        for it in self.idleChatItems:
+            if not isinstance(it, dict):
+                continue
+            text = str(it.get('text', '')).strip()
+            if not text:
+                continue
+            lo = _clamp_int(it.get('min', 60), 1, 86400)
+            hi = _clamp_int(it.get('max', lo), lo, 86400)
+            items.append({'text': text, 'min': lo, 'max': hi})
+        self.idleChatItems = items
 
         if self.autoReplyEnabled:
             self.triggerEnabled = False
@@ -300,6 +301,26 @@ class VerifyConfig:
         self.minMajority = max(0.3, min(0.99, self.minMajority))
         self.maxTargets = _clamp_int(self.maxTargets, 1, 54)
         self.clickDelayMs = _clamp_int(self.clickDelayMs, 0, 5000)
+
+
+@dataclass
+class CommandBlockConfig:
+    """Block outgoing commands (from AI replies / random chat) whose name is in
+    the list, so prompt-injection can't run dangerous commands (pay/kick/ban...)."""
+    enabled: bool = True
+    commands: List[str] = field(default_factory=lambda: [
+        'pay', 'kick', 'ban', 'ban-ip', 'pardon', 'op', 'deop', 'stop',
+        'restart', 'whitelist', 'kill', 'give', 'tp', 'gamemode'])
+
+    def validate(self) -> None:
+        if self.commands is None:
+            self.commands = []
+        norm = []
+        for c in self.commands:
+            s = str(c).strip().lstrip('/').strip().lower()
+            if s and s not in norm:
+                norm.append(s)
+        self.commands = norm
 
 
 @dataclass
@@ -550,6 +571,7 @@ class AppConfig:
     autoeat: AutoEatConfig = field(default_factory=AutoEatConfig)
     healthAlert: HealthAlertConfig = field(default_factory=HealthAlertConfig)
     verify: VerifyConfig = field(default_factory=VerifyConfig)
+    commandBlock: CommandBlockConfig = field(default_factory=CommandBlockConfig)
     logForward: LogForwardConfig = field(default_factory=LogForwardConfig)
     qq: QqConfig = field(default_factory=QqConfig)
     roster: RosterConfig = field(default_factory=RosterConfig)
@@ -573,6 +595,7 @@ class AppConfig:
         self.auth.validate()
         self.healthAlert.validate()
         self.verify.validate()
+        self.commandBlock.validate()
         self.logForward.validate()
         self.qq.validate()
         self.reconnect.validate()
@@ -591,7 +614,8 @@ class AppConfig:
                     data = json.load(f)
                 if isinstance(data, dict):
                     for section in ('server', 'auth', 'llm', 'quiz', 'autoeat', 'healthAlert',
-                                    'verify', 'logForward', 'qq', 'roster', 'reconnect', 'appearance'):
+                                    'verify', 'commandBlock', 'logForward', 'qq', 'roster',
+                                    'reconnect', 'appearance'):
                         sub = data.get(section)
                         if isinstance(sub, dict):
                             cur = getattr(cfg, section)
