@@ -97,6 +97,14 @@ class AiPlayerConfig:
     retryCount: int = 1
     debugLog: bool = True
 
+    # Periodic random chat: say random lines from a list at a random interval.
+    idleChatEnabled: bool = False
+    idleChatMessages: List[str] = field(default_factory=list)
+    idleChatMinSeconds: int = 60
+    idleChatMaxSeconds: int = 300
+    idleChatCountMin: int = 1
+    idleChatCountMax: int = 1
+
     imageGenerationEnabled: bool = False
     imageModel: str = 'gpt-image-1'
     imageTriggerRegex: str = DEFAULT_IMAGE_TRIGGER_REGEX
@@ -144,6 +152,17 @@ class AiPlayerConfig:
         self.imageTimeoutSeconds = _clamp_int(self.imageTimeoutSeconds, 30, 3600)
         self.imageRetryCount = _clamp_int(self.imageRetryCount, 0, 3)
         self.imageCooldownSeconds = _clamp_int(self.imageCooldownSeconds, 5, 3600)
+
+        self.idleChatMinSeconds = _clamp_int(self.idleChatMinSeconds, 1, 86400)
+        self.idleChatMaxSeconds = _clamp_int(
+            self.idleChatMaxSeconds, self.idleChatMinSeconds, 86400)
+        self.idleChatCountMin = _clamp_int(self.idleChatCountMin, 1, 10)
+        self.idleChatCountMax = _clamp_int(
+            self.idleChatCountMax, self.idleChatCountMin, 10)
+        if self.idleChatMessages is None:
+            self.idleChatMessages = []
+        self.idleChatMessages = [str(m) for m in self.idleChatMessages if str(m).strip()]
+
         if self.autoReplyEnabled:
             self.triggerEnabled = False
             self.scheduleEnabled = False
@@ -251,6 +270,56 @@ class LLMConfig:
     maxTokens: int = 1024
     timeoutSeconds: int = 30
     retryCount: int = 1
+
+
+@dataclass
+class VerifyConfig:
+    """Auto-pass a chest-GUI "human verification" (find the odd slots).
+
+    The verifier opens a container filled mostly with one kind of block plus a
+    few different ones; we group slots by a signature (item name + metadata +
+    custom name), treat the majority as background and click the odd slots.
+    """
+    enabled: bool = False
+    titleKeyword: str = 'HumanVerify'   # only act when the title contains this
+    nameKeyword: str = '点击这里'        # click items whose name contains this
+    minMajority: float = 0.6            # fallback: required share of background sig
+    maxTargets: int = 12                # give up if more "odd" slots than this
+    clickDelayMs: int = 250             # delay (plus a random extra) between clicks
+    startDelayMs: int = 600             # wait for items to populate before reading
+    debug: bool = True                  # log window title + slot contents
+
+    def validate(self) -> None:
+        self.titleKeyword = str(self.titleKeyword or '').strip()
+        self.nameKeyword = str(self.nameKeyword or '').strip()
+        self.startDelayMs = _clamp_int(self.startDelayMs, 0, 10000)
+        try:
+            self.minMajority = float(self.minMajority)
+        except (TypeError, ValueError):
+            self.minMajority = 0.6
+        self.minMajority = max(0.3, min(0.99, self.minMajority))
+        self.maxTargets = _clamp_int(self.maxTargets, 1, 54)
+        self.clickDelayMs = _clamp_int(self.clickDelayMs, 0, 5000)
+
+
+@dataclass
+class LogForwardConfig:
+    """Forward program log lines (e.g. errors) to the MC public chat."""
+    enabled: bool = False
+    format: str = '&7Log -> &c{log}'
+    levels: List[str] = field(default_factory=lambda: ['error'])
+
+    def validate(self) -> None:
+        if not self.format:
+            self.format = '&7Log -> &c{log}'
+        if self.levels is None:
+            self.levels = ['error']
+        norm = []
+        for x in self.levels:
+            s = str(x).strip().lower()
+            if s and s not in norm:
+                norm.append(s)
+        self.levels = norm or ['error']
 
 
 @dataclass
@@ -420,11 +489,34 @@ class ReconnectConfig:
     maxAttempts: int = 5
     kickLobbyEnabled: bool = True
     kickLobbyDelaySeconds: int = 2
+    # Server phrases (regex, case-insensitive) that force a reconnect even when
+    # the connection did not visibly drop, e.g. a chat "You were kicked from lobby".
+    customTriggers: List[str] = field(
+        default_factory=lambda: ['You were kicked from lobby'])
+    # Proactive reconnect: while online, drop + reconnect every N seconds.
+    proactiveEnabled: bool = False
+    proactiveIntervalSeconds: int = 300
+    # Keep retrying past maxAttempts (e.g. while the server restarts) until it
+    # comes back. keepRetryMaxMinutes 0 = no time limit.
+    keepRetrying: bool = False
+    keepRetryMaxMinutes: int = 0
 
     def validate(self) -> None:
-        self.delaySeconds = _clamp_int(self.delaySeconds, 0, 600)
+        # Allow up to 30 days for the reconnect interval (value + unit picker).
+        self.delaySeconds = _clamp_int(self.delaySeconds, 0, 2592000)
         self.maxAttempts = _clamp_int(self.maxAttempts, 1, 100)
         self.kickLobbyDelaySeconds = _clamp_int(self.kickLobbyDelaySeconds, 0, 600)
+        self.proactiveIntervalSeconds = _clamp_int(
+            self.proactiveIntervalSeconds, 1, 2592000)
+        self.keepRetryMaxMinutes = _clamp_int(self.keepRetryMaxMinutes, 0, 100000)
+        if self.customTriggers is None:
+            self.customTriggers = []
+        norm = []
+        for p in self.customTriggers:
+            s = str(p).strip()
+            if s and s not in norm:
+                norm.append(s)
+        self.customTriggers = norm[:50]
 
 
 @dataclass
@@ -457,6 +549,8 @@ class AppConfig:
     quiz: QuizConfig = field(default_factory=QuizConfig)
     autoeat: AutoEatConfig = field(default_factory=AutoEatConfig)
     healthAlert: HealthAlertConfig = field(default_factory=HealthAlertConfig)
+    verify: VerifyConfig = field(default_factory=VerifyConfig)
+    logForward: LogForwardConfig = field(default_factory=LogForwardConfig)
     qq: QqConfig = field(default_factory=QqConfig)
     roster: RosterConfig = field(default_factory=RosterConfig)
     reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
@@ -478,6 +572,8 @@ class AppConfig:
             self.auth.username = 'AI_Bot'
         self.auth.validate()
         self.healthAlert.validate()
+        self.verify.validate()
+        self.logForward.validate()
         self.qq.validate()
         self.reconnect.validate()
         self.appearance.validate()
@@ -495,7 +591,7 @@ class AppConfig:
                     data = json.load(f)
                 if isinstance(data, dict):
                     for section in ('server', 'auth', 'llm', 'quiz', 'autoeat', 'healthAlert',
-                                    'qq', 'roster', 'reconnect', 'appearance'):
+                                    'verify', 'logForward', 'qq', 'roster', 'reconnect', 'appearance'):
                         sub = data.get(section)
                         if isinstance(sub, dict):
                             cur = getattr(cfg, section)

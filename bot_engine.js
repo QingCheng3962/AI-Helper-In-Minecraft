@@ -181,8 +181,10 @@ try {
 // --- Optional handlers (quiz / autoeat from the original small project) ---
 let QuizHandler = null;
 let AutoEat = null;
+let VerifyHandler = null;
 let quiz = null;
 let autoEat = null;
+let verify = null;
 
 try {
     QuizHandler = require('./quiz').QuizHandler;
@@ -193,6 +195,11 @@ try {
     AutoEat = require('./autoeat').AutoEat;
 } catch (e) {
     logError('autoeat module not available: ' + e.message);
+}
+try {
+    VerifyHandler = require('./verify').VerifyHandler;
+} catch (e) {
+    logError('verify module not available: ' + e.message);
 }
 
 const engineLogger = makeLogger();
@@ -221,6 +228,17 @@ if (AutoEat) {
         autoEat.enabled = runtime.autoeat.enabled;
     } catch (e) {
         logError('autoeat init: ' + e.message);
+    }
+}
+
+if (VerifyHandler) {
+    try {
+        verify = new VerifyHandler(bot, engineLogger, config);
+        if (verify && verify.enabled) {
+            log('info', '人机验证自动通过已启用。');
+        }
+    } catch (e) {
+        logError('verify init: ' + e.message);
     }
 }
 

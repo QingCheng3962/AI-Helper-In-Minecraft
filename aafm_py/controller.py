@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from .ai_player import AiPlayer
 from .bot_engine import BotEngine, BASE_DIR
-from .config import (AiPlayerConfig, AppConfig, load_auth_profile)
+from .config import (AiPlayerConfig, AppConfig, DEFAULT_BASE_URLS, load_auth_profile)
 from .photo_server import PhotoServer, save_image_bytes
 from .qq_engine import QqEngine
 from .roster import Roster, RosterError
@@ -52,6 +52,19 @@ def _qq_mode_label(qq) -> str:
     if qq.mode == 'reverse':
         return f'反向监听 {qq.listenHost}:{qq.listenPort}'
     return f'正向连接 {qq.url}'
+
+
+def _resolve_llm_endpoint(provider: str, base: str) -> str:
+    """Full chat endpoint mirroring llm.py (so the quiz uses the global config)."""
+    b = (base or '').strip().rstrip('/')
+    if not b:
+        return ''
+    provider = (provider or 'openai').lower()
+    if provider == 'anthropic':
+        return b if b.endswith('/v1/messages') else b + '/v1/messages'
+    if b.endswith('/chat/completions'):
+        return b
+    return b + '/chat/completions'
 
 
 _MC_COLOR_RE = re.compile(r'(?:&|§)[0-9a-fk-orA-FK-OR]|(?:&|§)x(?:[0-9a-fA-F](?:&|§)?){6}')
@@ -123,8 +136,10 @@ class Controller:
         self._manual_disconnect = False
         self._reconnect_at: Optional[float] = None
         self._reconnect_attempts = 0
+        self._keep_retry_deadline: Optional[float] = None
         self._kick_lobby_pending = False
         self._lobby_at: Optional[float] = None
+        self._proactive_at: Optional[float] = None
 
         self.check_updates_async()
         threading.Thread(target=self._napcat_config_loop, daemon=True).start()
@@ -313,6 +328,7 @@ class Controller:
         self._relogin_triggered = False
         self._manual_disconnect = False
         self._reconnect_at = None
+        self._keep_retry_deadline = None
         self.config.save()
         self.ai_config.save()
         self._connecting = True
@@ -358,6 +374,8 @@ class Controller:
         self._connected = False
         if self.ai_player:
             self.ai_player.stop_now()
+            self.ai_player.set_online(False)
+        self._proactive_at = None
         self._engine.stop()
         self._post_ui({'kind': 'status', 'text': '已断开连接'})
         self._post_ui({'kind': 'disconnected', 'reason': 'user'})
@@ -377,8 +395,14 @@ class Controller:
             return
         if self._reconnect_at is not None:
             return
+        # Start the keep-retrying window on the first schedule.
+        if (getattr(cfg, 'keepRetrying', False) and self._keep_retry_deadline is None
+                and int(cfg.keepRetryMaxMinutes or 0) > 0):
+            self._keep_retry_deadline = time.time() + int(cfg.keepRetryMaxMinutes) * 60
+
         max_attempts = max(1, cfg.maxAttempts)
-        if self._reconnect_attempts >= max_attempts:
+        keep = self._can_keep_retrying(cfg)
+        if self._reconnect_attempts >= max_attempts and not keep:
             self._post_ui({'kind': 'reconnect', 'state': 'giveup',
                            'attempts': self._reconnect_attempts})
             self._post_ui({'kind': 'log', 'level': 'warn',
@@ -394,9 +418,20 @@ class Controller:
         self._post_ui({'kind': 'reconnect', 'state': 'scheduled',
                        'attempt': self._reconnect_attempts, 'max': max_attempts,
                        'delay': delay})
+        suffix = '，持续重连中…' if keep and self._reconnect_attempts >= max_attempts else '…'
         self._post_ui({'kind': 'log', 'level': 'warn',
                        'message': f'检测到{"被踢出" if kicked else "非主动断线"}，'
-                                  f'{delay}s 后自动重连（第 {self._reconnect_attempts}/{max_attempts} 次）…'})
+                                  f'{delay}s 后自动重连（第 {self._reconnect_attempts} 次）{suffix}'})
+
+    def _can_keep_retrying(self, cfg) -> bool:
+        if not getattr(cfg, 'keepRetrying', False):
+            return False
+        total = int(cfg.keepRetryMaxMinutes or 0)
+        if total <= 0:
+            return True  # unlimited
+        if self._keep_retry_deadline is None:
+            return True
+        return time.time() < self._keep_retry_deadline
 
     def _run_reconnect(self) -> None:
         self._reconnect_at = None
@@ -425,6 +460,46 @@ class Controller:
         else:
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': '自动发送 /lobby 失败（未连接）。'})
+
+    def _check_reconnect_triggers(self, text) -> bool:
+        """Force a reconnect when a server line matches a configured trigger."""
+        cfg = self.config.reconnect
+        if not cfg.enabled or self._manual_disconnect:
+            return False
+        patterns = cfg.customTriggers or []
+        s = str(text or '')
+        if not patterns or not s:
+            return False
+        for p in patterns:
+            try:
+                matched = re.search(p, s, re.IGNORECASE) is not None
+            except re.error:
+                matched = p.lower() in s.lower()
+            if not matched:
+                continue
+            if self._reconnect_at is None:
+                self._post_ui({'kind': 'log', 'level': 'warn',
+                               'message': f'命中重连触发词「{p}」，将自动重连…'})
+                self._schedule_reconnect(kicked=True)
+            return True
+        return False
+
+    def _maybe_proactive_reconnect(self) -> None:
+        """While online, drop + reconnect every configured interval."""
+        cfg = self.config.reconnect
+        if (not cfg.enabled or not cfg.proactiveEnabled or self._manual_disconnect
+                or not self.connected or self._reconnect_at is not None or self._connecting):
+            return
+        now = time.time()
+        interval = max(1, int(cfg.proactiveIntervalSeconds or 0))
+        if self._proactive_at is None:
+            self._proactive_at = now + interval
+            return
+        if now >= self._proactive_at:
+            self._proactive_at = None
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': f'主动重连：每 {interval}s 刷新一次连接…'})
+            self._schedule_reconnect(kicked=False)
 
     # ------------------------------------------------------------------
     # Actions
@@ -1104,8 +1179,14 @@ class Controller:
                 'username': cfg.auth.username or 'MSA_Account',
                 'profilesFolder': (cfg.auth.profilesFolder or '').strip(),
             }
+        # Resolve the same OpenAI-compatible endpoint the AI player uses, so the
+        # quiz answers with the global AI config (base URL auto-appended path).
+        provider = (self.ai_config.provider or cfg.llm.provider or 'openai').lower()
+        base = (self.ai_config.baseUrl or cfg.llm.baseUrl or '').strip()
+        if not base:
+            base = DEFAULT_BASE_URLS.get(provider, '')
         llm = {
-            'endpoint': (self.ai_config.baseUrl or cfg.llm.baseUrl),
+            'endpoint': _resolve_llm_endpoint(provider, base),
             'model': self.ai_config.model or cfg.llm.model,
             'apiKey': self.ai_config.apiKey or cfg.llm.apiKey,
             'headers': {},
@@ -1123,6 +1204,14 @@ class Controller:
             'autoeat': {'enabled': cfg.autoeat.enabled},
             'quiz': {'enabled': cfg.quiz.enabled, 'minDelay': cfg.quiz.minDelay,
                      'questionBank': cfg.quiz.questionBank},
+            'verify': {'enabled': cfg.verify.enabled,
+                       'titleKeyword': cfg.verify.titleKeyword,
+                       'nameKeyword': cfg.verify.nameKeyword,
+                       'minMajority': cfg.verify.minMajority,
+                       'maxTargets': cfg.verify.maxTargets,
+                       'clickDelayMs': cfg.verify.clickDelayMs,
+                       'startDelayMs': cfg.verify.startDelayMs,
+                       'debug': cfg.verify.debug},
         }
 
     # ------------------------------------------------------------------
@@ -1157,6 +1246,7 @@ class Controller:
             if self._lobby_at is not None and now >= self._lobby_at:
                 self._run_kick_lobby()
             if now - last_tick >= 1.0:
+                self._maybe_proactive_reconnect()
                 if self.ai_player:
                     try:
                         self.ai_player.tick()
@@ -1183,6 +1273,7 @@ class Controller:
                         self.ai_player.on_server_message(raw)
                     except Exception:  # noqa: BLE001
                         pass
+                self._check_reconnect_triggers(raw)
         elif event == 'quizLog':
             self._post_ui({'kind': 'log', 'level': 'quiz',
                            'message': '[答题] ' + ev.get('message', '')})
@@ -1193,6 +1284,8 @@ class Controller:
             raw = ev.get('raw') or ''
             self._post_ui({'kind': 'chat', 'player': player, 'content': content,
                            'private': bool(private)})
+            if not private and self._check_reconnect_triggers(raw or content):
+                return
             if not private and self._maybe_relay_mc_to_qq(player, content):
                 return
             if self.ai_player:
@@ -1203,6 +1296,7 @@ class Controller:
                                    'message': 'AI 处理消息出错: ' + str(e)})
         elif event == 'actionBar':
             self._post_ui({'kind': 'actionBar', 'text': ev.get('text', '')})
+            self._check_reconnect_triggers(ev.get('text', ''))
         elif event == 'health':
             self._post_ui({'kind': 'health', 'health': ev.get('health'),
                            'food': ev.get('food')})
@@ -1212,21 +1306,30 @@ class Controller:
             self._connecting = False
             self._reconnect_attempts = 0
             self._reconnect_at = None
+            self._keep_retry_deadline = None
             username = ev.get('username') or ''
             if username:
                 self._bot_username = username
                 if self.ai_player:
                     self.ai_player.set_bot_username(username)
+                self.ai_player.set_online(True)
             players = ev.get('players') or []
             self._post_ui({'kind': 'status', 'text': f'已连接（{username}）'})
             self._post_ui({'kind': 'spawn', 'username': username, 'players': players})
             self._post_ui({'kind': 'log', 'level': 'info',
                            'message': f'已进入服务器，在线玩家: {", ".join(players) or "无"}'})
             self._schedule_kick_lobby()
+            if self.config.reconnect.proactiveEnabled:
+                self._proactive_at = (time.time()
+                                      + max(1, self.config.reconnect.proactiveIntervalSeconds))
+            else:
+                self._proactive_at = None
         elif event == 'kicked':
             was_connected = self._connected
             self._connected = False
             self._connecting = False
+            if self.ai_player:
+                self.ai_player.set_online(False)
             self._post_ui({'kind': 'status', 'text': '被踢出服务器'})
             self._post_ui({'kind': 'log', 'level': 'error',
                            'message': '被踢出: ' + ev.get('reason', '')})
@@ -1240,6 +1343,8 @@ class Controller:
         elif event == 'end':
             self._connected = False
             self._connecting = False
+            if self.ai_player:
+                self.ai_player.set_online(False)
             reason = ev.get('reason') or ''
             self._post_ui({'kind': 'status', 'text': '连接已结束'})
             self._post_ui({'kind': 'disconnected', 'reason': reason})
@@ -1280,7 +1385,29 @@ class Controller:
         return True
 
     def _post_ui(self, ev: Dict[str, Any]) -> None:
+        if isinstance(ev, dict) and ev.get('kind') == 'log':
+            try:
+                self._maybe_forward_log_to_mc(ev.get('level'), ev.get('message'))
+            except Exception:  # noqa: BLE001
+                pass
         self.ui_queue.put(ev)
+
+    def _maybe_forward_log_to_mc(self, level: Optional[str], message) -> None:
+        """Forward selected log lines (default: errors) to the MC public chat."""
+        cfg = self.config.logForward
+        if not cfg.enabled or not self._engine.running:
+            return
+        if (level or 'info') not in (cfg.levels or []):
+            return
+        text = re.sub(r'\s+', ' ', str(message or '')).strip()
+        if not text:
+            return
+        tmpl = cfg.format or '&7Log -> &c{log}'
+        try:
+            out = tmpl.format(log=text)
+        except (KeyError, IndexError, ValueError):
+            out = '&7Log -> &c' + text
+        self._engine.say(out)
 
     def drain_ui(self, max_items: int = 500) -> List[Dict[str, Any]]:
         items = []

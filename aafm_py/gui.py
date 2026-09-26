@@ -303,6 +303,7 @@ class AiPlayerGUI:
         self._build_ai_tab()
         self._build_player_tab()
         self._build_roster_tab()
+        self._build_random_tab()
         self._build_qq_tab()
         self._build_reconnect_tab()
         self._build_appearance_tab()
@@ -398,6 +399,35 @@ class AiPlayerGUI:
 
         auth.columnconfigure(1, weight=1)
 
+        self._build_logforward_frame(frm)
+
+    def _build_logforward_frame(self, parent) -> None:
+        frm = ttk.LabelFrame(parent, text='日志转发到 MC（可选项）', padding=8)
+        frm.pack(fill='x', pady=(8, 0))
+
+        self.var_logfwd_enabled = tk.BooleanVar(value=False)
+        self.var_logfwd_format = tk.StringVar()
+        self.var_logfwd_error = tk.BooleanVar(value=True)
+        self.var_logfwd_warn = tk.BooleanVar(value=False)
+
+        ttk.Checkbutton(frm, text='启用：把日志转发到 MC 公共聊天',
+                        variable=self.var_logfwd_enabled).grid(
+            row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
+
+        ttk.Label(frm, text='转发级别').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Checkbutton(frm, text='错误', variable=self.var_logfwd_error).grid(
+            row=1, column=1, sticky='w', padx=4)
+        ttk.Checkbutton(frm, text='警告', variable=self.var_logfwd_warn).grid(
+            row=1, column=2, sticky='w', padx=4)
+
+        ttk.Label(frm, text='播报格式').grid(row=2, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_logfwd_format, width=46).grid(
+            row=2, column=1, columnspan=3, sticky='we', padx=4, pady=3)
+        ttk.Label(frm, text='占位符 {log}=日志内容；默认 &7Log -> &c{log}',
+                  foreground='#888888').grid(
+            row=3, column=0, columnspan=4, sticky='w', padx=4)
+        frm.columnconfigure(1, weight=1)
+
     # ------------------------------------------------------------------
     # Tab 2: AI 配置 (AI API + 辅助功能)
     # ------------------------------------------------------------------
@@ -461,6 +491,66 @@ class AiPlayerGUI:
         self._build_roster_frame(sc.inner)
 
     # ------------------------------------------------------------------
+    # Tab: 随机发言
+    # ------------------------------------------------------------------
+    def _build_random_tab(self) -> None:
+        host = ttk.Frame(self.notebook, padding=(8, 8))
+        self.notebook.add(host, text=' 随机发言 ')
+        sc = ScrollFrame(host)
+        sc.pack(fill='both', expand=True)
+        frm = sc.inner
+
+        box = ttk.LabelFrame(frm, text='定时随机发言（按随机间隔，从列表随机挑几句说）', padding=8)
+        box.pack(fill='x', pady=(0, 8))
+
+        self.var_idle_enabled = tk.BooleanVar(value=False)
+        self.var_idle_min = tk.StringVar()
+        self.var_idle_max = tk.StringVar()
+        self.var_idle_cmin = tk.StringVar()
+        self.var_idle_cmax = tk.StringVar()
+
+        ttk.Checkbutton(box, text='启用', variable=self.var_idle_enabled).grid(
+            row=0, column=0, sticky='w', padx=4, pady=3)
+        ttk.Label(box, text='间隔（秒）').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(box, textvariable=self.var_idle_min, width=8).grid(
+            row=1, column=1, sticky='w', padx=4)
+        ttk.Label(box, text='~').grid(row=1, column=2)
+        ttk.Entry(box, textvariable=self.var_idle_max, width=8).grid(
+            row=1, column=3, sticky='w', padx=4)
+        ttk.Label(box, text='每次条数').grid(row=2, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(box, textvariable=self.var_idle_cmin, width=8).grid(
+            row=2, column=1, sticky='w', padx=4)
+        ttk.Label(box, text='~').grid(row=2, column=2)
+        ttk.Entry(box, textvariable=self.var_idle_cmax, width=8).grid(
+            row=2, column=3, sticky='w', padx=4)
+        ttk.Label(box, text='间隔与条数都在「最小~最大」间随机；支持 & 颜色码。',
+                  foreground='#888888').grid(row=3, column=0, columnspan=4, sticky='w', padx=4)
+
+        lst = ttk.LabelFrame(frm, text='话语列表', padding=8)
+        lst.pack(fill='both', expand=True)
+        self.random_rows_frame = ttk.Frame(lst)
+        self.random_rows_frame.pack(fill='x')
+        self._random_rows = []
+        ttk.Button(lst, text='＋ 添加一行', command=self._on_add_random_row).pack(
+            anchor='w', pady=(6, 0))
+
+    def _on_add_random_row(self, text: str = ''):
+        var = tk.StringVar(value=text)
+        row = ttk.Frame(self.random_rows_frame)
+        row.pack(fill='x', pady=2)
+        ttk.Entry(row, textvariable=var).pack(side='left', fill='x', expand=True)
+
+        def remove():
+            try:
+                row.destroy()
+            finally:
+                self._random_rows = [r for r in self._random_rows if r[1] is not row]
+
+        ttk.Button(row, text='删除', command=remove).pack(side='left', padx=6)
+        self._random_rows.append((var, row))
+        return var
+
+    # ------------------------------------------------------------------
     # Tab: QQ 转述
     # ------------------------------------------------------------------
     def _build_qq_tab(self) -> None:
@@ -483,27 +573,55 @@ class AiPlayerGUI:
 
         self.var_reconnect_enabled = tk.BooleanVar(value=True)
         self.var_reconnect_delay = tk.StringVar()
+        self.var_reconnect_unit = tk.StringVar(value='秒')
         self.var_reconnect_max = tk.StringVar()
+        self.var_keep_retry = tk.BooleanVar(value=False)
+        self.var_keep_retry_max = tk.StringVar()
         self.var_kick_lobby = tk.BooleanVar(value=True)
         self.var_kick_lobby_delay = tk.StringVar()
 
-        ttk.Checkbutton(frm, text='启用自动重连（服务器掉线 / 被踢出时；手动点「断开」不会重连）',
+        ttk.Checkbutton(frm, text='启用自动重连（服务器掉线 / 被踢出 / 命中触发语时；手动点「断开」不会重连）',
                         variable=self.var_reconnect_enabled).grid(
             row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
-        self._entry(frm, 1, '重连延迟（秒）', self.var_reconnect_delay)
+        ttk.Label(frm, text='重连间隔').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_reconnect_delay, width=8).grid(
+            row=1, column=1, sticky='w', padx=4, pady=3)
+        ttk.Combobox(frm, textvariable=self.var_reconnect_unit, state='readonly',
+                     values=['秒', '分钟', '小时', '天'], width=6).grid(
+            row=1, column=2, sticky='w', padx=4, pady=3)
         self._entry(frm, 2, '最大重连次数（重连成功后重置）', self.var_reconnect_max)
+
+        self.var_proactive_enabled = tk.BooleanVar(value=False)
+        self.var_proactive_value = tk.StringVar()
+        self.var_proactive_unit = tk.StringVar(value='分钟')
+        ttk.Checkbutton(frm, text='在线定时主动重连（每隔设定时间断开重连一次）',
+                        variable=self.var_proactive_enabled).grid(
+            row=3, column=0, columnspan=2, sticky='w', padx=4, pady=(8, 3))
+        ttk.Entry(frm, textvariable=self.var_proactive_value, width=8).grid(
+            row=3, column=2, sticky='w', padx=4, pady=(8, 3))
+        ttk.Combobox(frm, textvariable=self.var_proactive_unit, state='readonly',
+                     values=['秒', '分钟', '小时', '天'], width=6).grid(
+            row=3, column=3, sticky='w', padx=4, pady=(8, 3))
 
         ttk.Checkbutton(frm, text='被踢出并重连成功后自动发送 /lobby',
                         variable=self.var_kick_lobby).grid(
-            row=3, column=0, columnspan=4, sticky='w', padx=4, pady=(8, 3))
-        self._entry(frm, 4, '/lobby 延迟（秒）', self.var_kick_lobby_delay)
+            row=4, column=0, columnspan=4, sticky='w', padx=4, pady=(8, 3))
+        self._entry(frm, 5, '/lobby 延迟（秒）', self.var_kick_lobby_delay)
+
+        ttk.Label(frm, text='自定义重连触发语（每行一个，正则/包含，命中即自动重连）').grid(
+            row=6, column=0, columnspan=5, sticky='w', padx=4, pady=(8, 2))
+        self.reconnect_triggers_text = tk.Text(frm, height=4, width=72, wrap='word')
+        self.reconnect_triggers_text.grid(row=7, column=0, columnspan=5, sticky='we', padx=4)
+        ttk.Label(frm, text='例：You were kicked from lobby  —— 服务器聊天/公告里出现该句就重连。',
+                  foreground='#888888', wraplength=720, justify='left').grid(
+            row=8, column=0, columnspan=5, sticky='w', padx=4, pady=(2, 0))
 
         ttk.Label(frm,
                   text='说明：连接意外结束（被踢/掉线）时按上面设置自动重连；若属于 LittleSkin '
                        '登录失效，则走自动重新登录流程，不做普通重连。重连成功进入服务器后，'
                        '等待「/lobby 延迟」再发送 /lobby。',
                   foreground='#888888', wraplength=720, justify='left').grid(
-            row=5, column=0, columnspan=5, sticky='w', padx=4, pady=(6, 0))
+            row=9, column=0, columnspan=5, sticky='w', padx=4, pady=(6, 0))
 
     # ------------------------------------------------------------------
     # Tab: 界面美化
@@ -816,6 +934,39 @@ class AiPlayerGUI:
         self._build_trigger_frame(frm)
         self._build_block_frame(frm)
         self._build_health_frame(frm)
+        self._build_verify_frame(frm)
+
+    def _build_verify_frame(self, parent) -> None:
+        frm = ttk.LabelFrame(parent, text='进服人机验证自动通过（箱子界面找异类）', padding=8)
+        frm.pack(fill='x', pady=(0, 8))
+
+        self.var_verify_enabled = tk.BooleanVar(value=False)
+        self.var_verify_title = tk.StringVar()
+        self.var_verify_name = tk.StringVar()
+        self.var_verify_delay = tk.StringVar()
+
+        ttk.Checkbutton(frm, text='启用：打开验证界面时自动点击目标物品',
+                        variable=self.var_verify_enabled).grid(
+            row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
+
+        ttk.Label(frm, text='标题关键词').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_verify_title, width=30).grid(
+            row=1, column=1, columnspan=2, sticky='we', padx=4, pady=3)
+        ttk.Label(frm, text='例 HumanVerify', foreground='#888888').grid(
+            row=1, column=3, sticky='w', padx=4)
+
+        ttk.Label(frm, text='目标物品名').grid(row=2, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_verify_name, width=30).grid(
+            row=2, column=1, columnspan=2, sticky='we', padx=4, pady=3)
+        ttk.Label(frm, text='含此名的物品会被点击；有“步骤N”则按序号顺序',
+                  foreground='#888888').grid(row=2, column=3, sticky='w', padx=4)
+
+        ttk.Label(frm, text='点击间隔(ms)').grid(row=3, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_verify_delay, width=8).grid(
+            row=3, column=1, sticky='w', padx=4, pady=3)
+        ttk.Label(frm, text='找不到命名目标时，回退为“找异类”判定（多数=背景，少数=目标）',
+                  foreground='#888888').grid(row=4, column=0, columnspan=4, sticky='w', padx=4)
+        frm.columnconfigure(1, weight=1)
 
     def _build_health_frame(self, parent) -> None:
         frm = ttk.LabelFrame(parent, text='低血量报警', padding=8)
@@ -1078,6 +1229,18 @@ class AiPlayerGUI:
         self._refresh_blocked_list()
 
         self.var_image.set(ai.imageGenerationEnabled)
+        self.var_idle_enabled.set(bool(ai.idleChatEnabled))
+        self.var_idle_min.set(str(ai.idleChatMinSeconds))
+        self.var_idle_max.set(str(ai.idleChatMaxSeconds))
+        self.var_idle_cmin.set(str(ai.idleChatCountMin))
+        self.var_idle_cmax.set(str(ai.idleChatCountMax))
+        for _v, _row in list(getattr(self, '_random_rows', [])):
+            _row.destroy()
+        self._random_rows = []
+        for _m in (ai.idleChatMessages or []):
+            self._on_add_random_row(_m)
+        if not self._random_rows:
+            self._on_add_random_row('')
         self.var_image_model.set(ai.imageModel)
 
         self.var_quiz.set(cfg.quiz.enabled)
@@ -1086,6 +1249,16 @@ class AiPlayerGUI:
         self.var_health_threshold.set(str(cfg.healthAlert.threshold))
         self.var_health_cooldown.set(str(cfg.healthAlert.cooldownSeconds))
         self.var_health_msg.set(cfg.healthAlert.message or '')
+        self.var_verify_enabled.set(bool(cfg.verify.enabled))
+        self.var_verify_title.set(cfg.verify.titleKeyword or '')
+        self.var_verify_name.set(cfg.verify.nameKeyword or '')
+        self.var_verify_delay.set(str(cfg.verify.clickDelayMs))
+        lf = cfg.logForward
+        self.var_logfwd_enabled.set(bool(lf.enabled))
+        self.var_logfwd_format.set(lf.format or '&7Log -> &c{log}')
+        _lf_levels = [str(x).lower() for x in (lf.levels or [])]
+        self.var_logfwd_error.set('error' in _lf_levels)
+        self.var_logfwd_warn.set('warn' in _lf_levels)
         self.var_roster.set(cfg.roster.enabled)
         self.var_roster_research.set(cfg.roster.personalityEnabled)
         self.var_roster_alias.set(cfg.roster.aliasEnabled)
@@ -1115,10 +1288,32 @@ class AiPlayerGUI:
         self.var_mc2qq_fail.set(cfg.qq.mcFailureMsg or '&c@{player}转述失败')
 
         self.var_reconnect_enabled.set(cfg.reconnect.enabled)
-        self.var_reconnect_delay.set(str(cfg.reconnect.delaySeconds))
+        _secs = int(cfg.reconnect.delaySeconds or 0)
+        if _secs >= 86400 and _secs % 86400 == 0:
+            self.var_reconnect_delay.set(str(_secs // 86400)); self.var_reconnect_unit.set('天')
+        elif _secs >= 3600 and _secs % 3600 == 0:
+            self.var_reconnect_delay.set(str(_secs // 3600)); self.var_reconnect_unit.set('小时')
+        elif _secs >= 60 and _secs % 60 == 0:
+            self.var_reconnect_delay.set(str(_secs // 60)); self.var_reconnect_unit.set('分钟')
+        else:
+            self.var_reconnect_delay.set(str(_secs)); self.var_reconnect_unit.set('秒')
         self.var_reconnect_max.set(str(cfg.reconnect.maxAttempts))
         self.var_kick_lobby.set(cfg.reconnect.kickLobbyEnabled)
         self.var_kick_lobby_delay.set(str(cfg.reconnect.kickLobbyDelaySeconds))
+        self.reconnect_triggers_text.delete('1.0', 'end')
+        if cfg.reconnect.customTriggers:
+            self.reconnect_triggers_text.insert('1.0', '\n'.join(cfg.reconnect.customTriggers))
+
+        self.var_proactive_enabled.set(bool(cfg.reconnect.proactiveEnabled))
+        _ps = int(cfg.reconnect.proactiveIntervalSeconds or 0)
+        if _ps >= 86400 and _ps % 86400 == 0:
+            self.var_proactive_value.set(str(_ps // 86400)); self.var_proactive_unit.set('天')
+        elif _ps >= 3600 and _ps % 3600 == 0:
+            self.var_proactive_value.set(str(_ps // 3600)); self.var_proactive_unit.set('小时')
+        elif _ps >= 60 and _ps % 60 == 0:
+            self.var_proactive_value.set(str(_ps // 60)); self.var_proactive_unit.set('分钟')
+        else:
+            self.var_proactive_value.set(str(_ps)); self.var_proactive_unit.set('秒')
 
         self.var_bg_image.set(cfg.appearance.backgroundImage or '')
         self.var_bg_darkness.set(cfg.appearance.backgroundDarkness)
@@ -1251,6 +1446,13 @@ class AiPlayerGUI:
         ai.imageGenerationEnabled = self.var_image.get()
         ai.imageModel = self.var_image_model.get().strip() or 'gpt-image-1'
 
+        ai.idleChatEnabled = self.var_idle_enabled.get()
+        ai.idleChatMinSeconds = self._parse_int(self.var_idle_min.get(), 60)
+        ai.idleChatMaxSeconds = self._parse_int(self.var_idle_max.get(), 300)
+        ai.idleChatCountMin = self._parse_int(self.var_idle_cmin.get(), 1)
+        ai.idleChatCountMax = self._parse_int(self.var_idle_cmax.get(), 1)
+        ai.idleChatMessages = [v.get().strip() for v, _ in self._random_rows if v.get().strip()]
+
         cfg.quiz.enabled = self.var_quiz.get()
         cfg.autoeat.enabled = self.var_autoeat.get()
 
@@ -1260,6 +1462,23 @@ class AiPlayerGUI:
         cfg.healthAlert.message = (self.var_health_msg.get().strip()
                                    or '&c我血量过低了，快救救我！')
         cfg.healthAlert.validate()
+
+        cfg.verify.enabled = self.var_verify_enabled.get()
+        cfg.verify.titleKeyword = self.var_verify_title.get().strip()
+        cfg.verify.nameKeyword = self.var_verify_name.get().strip()
+        cfg.verify.clickDelayMs = self._parse_int(self.var_verify_delay.get(), 250)
+        cfg.verify.validate()
+
+        cfg.logForward.enabled = self.var_logfwd_enabled.get()
+        cfg.logForward.format = (self.var_logfwd_format.get().strip()
+                                 or '&7Log -> &c{log}')
+        _levels = []
+        if self.var_logfwd_error.get():
+            _levels.append('error')
+        if self.var_logfwd_warn.get():
+            _levels.append('warn')
+        cfg.logForward.levels = _levels or ['error']
+        cfg.logForward.validate()
 
         cfg.roster.enabled = self.var_roster.get()
         cfg.roster.personalityEnabled = self.var_roster_research.get()
@@ -1296,10 +1515,20 @@ class AiPlayerGUI:
 
         rc = cfg.reconnect
         rc.enabled = self.var_reconnect_enabled.get()
-        rc.delaySeconds = self._parse_int(self.var_reconnect_delay.get(), 5)
+        _units = {'秒': 1, '分钟': 60, '小时': 3600, '天': 86400}
+        rc.delaySeconds = max(0, self._parse_int(self.var_reconnect_delay.get(), 5)
+                              * _units.get(self.var_reconnect_unit.get(), 1))
         rc.maxAttempts = self._parse_int(self.var_reconnect_max.get(), 5)
         rc.kickLobbyEnabled = self.var_kick_lobby.get()
         rc.kickLobbyDelaySeconds = self._parse_int(self.var_kick_lobby_delay.get(), 2)
+        _trigs = [x.strip() for x in
+                  self.reconnect_triggers_text.get('1.0', 'end').splitlines() if x.strip()]
+        rc.customTriggers = _trigs or ['You were kicked from lobby']
+        rc.proactiveEnabled = self.var_proactive_enabled.get()
+        _punits = {'秒': 1, '分钟': 60, '小时': 3600, '天': 86400}
+        rc.proactiveIntervalSeconds = max(
+            1, self._parse_int(self.var_proactive_value.get(), 5)
+            * _punits.get(self.var_proactive_unit.get(), 60))
         rc.validate()
 
         ap = cfg.appearance

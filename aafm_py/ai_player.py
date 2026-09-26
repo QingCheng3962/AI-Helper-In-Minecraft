@@ -205,6 +205,8 @@ class AiPlayer:
         self._next_scheduled_reply_time = 0
         self._next_trigger_reply_time = 0
         self._next_image_cooldown_time = 0
+        self._next_idle_chat_ms = 0
+        self._online = False
 
         self._recent_ai_messages: Dict[str, int] = {}
         self._recent_player_messages: Dict[str, int] = {}
@@ -292,6 +294,7 @@ class AiPlayer:
         self._next_scheduled_reply_time = _now_ms() + new_config.scheduleIntervalSeconds * 1000
         self._next_trigger_reply_time = _now_ms()
         self._next_image_cooldown_time = _now_ms()
+        self._next_idle_chat_ms = 0
         self._recent_ai_messages.clear()
         self._recent_player_messages.clear()
         self._trigger_reply_in_progress = False
@@ -428,7 +431,8 @@ class AiPlayer:
             self._last_handled_user_message_time = now
 
     def tick(self) -> None:
-        """Called periodically (>=1s): auto alias/personality research + scheduled replies."""
+        """Called periodically (>=1s): idle chat + research + scheduled replies."""
+        self._maybe_idle_chat()
         self._maybe_auto_alias()
         self._maybe_auto_research()
         cfg = self.config
@@ -468,6 +472,44 @@ class AiPlayer:
                     self._start_ai_reply(latest, self._last_player_message_time, False)
             finally:
                 self._scheduled_request_queued = False
+
+    # ------------------------------------------------------------------
+    # Periodic random chat
+    # ------------------------------------------------------------------
+    def set_online(self, online: bool) -> None:
+        self._online = bool(online)
+
+    def _maybe_idle_chat(self) -> None:
+        cfg = self.config
+        if not cfg.enabled or not cfg.idleChatEnabled or self._stopped or not self._online:
+            return
+        messages = [str(m) for m in (cfg.idleChatMessages or []) if str(m).strip()]
+        if not messages:
+            return
+        now = _now_ms()
+        lo_s = max(1, int(cfg.idleChatMinSeconds))
+        hi_s = max(lo_s, int(cfg.idleChatMaxSeconds))
+        if self._next_idle_chat_ms <= 0:
+            self._next_idle_chat_ms = now + random.randint(lo_s, hi_s) * 1000
+            return
+        if now < self._next_idle_chat_ms:
+            return
+
+        c_lo = max(1, int(cfg.idleChatCountMin))
+        c_hi = max(c_lo, int(cfg.idleChatCountMax))
+        count = random.randint(c_lo, c_hi)
+        picks = [random.choice(messages) for _ in range(count)]
+        for i, msg in enumerate(picks):
+            if self._stopped or not cfg.enabled:
+                break
+            if self._is_blocked(msg):
+                continue
+            self.on_send_chat(msg)
+            self._log_activity('AI > ' + msg)
+            if i < len(picks) - 1 and self._chunk_delay_ms > 0:
+                time.sleep(self._chunk_delay_ms / 1000.0)
+        self._log(f'随机发言（{count} 条）。')
+        self._next_idle_chat_ms = now + random.randint(lo_s, hi_s) * 1000
 
     # ------------------------------------------------------------------
     # AI reply
