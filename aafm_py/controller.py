@@ -1300,16 +1300,27 @@ class Controller:
                            'message': 'AI 回复发送失败（未连接）。'})
 
     def _blocked_command(self, text: str) -> str:
-        """Return the blocked command name if ``text`` is a forbidden command."""
+        """Return the blocked command entry if ``text`` starts with one.
+
+        Matches the command *path*, so multi-word entries work too:
+        entry ``land`` blocks ``/land create ...``; entry ``land create``
+        blocks ``/land create ...`` but not ``/land claim``.
+        """
         cfg = self.config.commandBlock
         if not cfg.enabled:
             return ''
         s = (text or '').strip()
         if not s.startswith('/'):
             return ''
-        name = re.split(r'\s+', s[1:].strip(), 1)[0].lower()
-        if name and name in (cfg.commands or []):
-            return name
+        rest = s[1:].strip().lower()
+        if not rest:
+            return ''
+        for entry in (cfg.commands or []):
+            e = str(entry).strip().lower().lstrip('/').strip()
+            if not e:
+                continue
+            if rest == e or rest.startswith(e + ' '):
+                return e
         return ''
 
     def _worker_loop(self) -> None:
