@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**当前版本：v2.1**
+**当前版本：v3.0**
 
 一个"无客户端"的 Minecraft AI 玩家：不需要打开游戏本体，用 GUI 控制 mineflayer 引擎进入服务器，由大模型驱动它在游戏内与人聊天互动。
 
@@ -38,7 +38,7 @@
 
 ## 更新日志
 
-### v2.1
+### v3.0
 
 - **QQ 转述增强**
   - 内置 NapCat（`NapCat/`），QQ 转述页四按钮：启动 / 连接 / 重连 / 断开；「启动」调用 `launcher-win10.bat` 并自动打开 `cache` 目录方便扫码。

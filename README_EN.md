@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v2.1**
+**Current version: v3.0**
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,7 +31,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-### v2.1
+### v3.0
 
 - **QQ relay**: bundled NapCat (`NapCat/`) with four buttons on the QQ tab (Start / Connect / Reconnect / Disconnect); Start runs `launcher-win10.bat` and opens the `cache` folder for QR scanning. OneBot 11 forward/reverse, group filter, access token.
 - **QQ image → local link**: images are saved to `pic_http/` and published by a built-in Python HTTP server at `http://public-host:port/pic_http/<file>` (only `/pic_http/` is exposed).
