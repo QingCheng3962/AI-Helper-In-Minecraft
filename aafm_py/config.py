@@ -315,8 +315,9 @@ class CommandBlockConfig:
     commands: List[str] = field(default_factory=lambda: [
         'pay', 'kick', 'ban', 'ban-ip', 'pardon', 'op', 'deop', 'stop',
         'restart', 'whitelist', 'kill', 'give', 'tp', 'gamemode'])
-    # Message sent to the server after a command is blocked; {cmd} = command name.
-    message: str = '&c已拦截危险命令：/{cmd}'
+    # Message sent to the server after a command is blocked.
+    # Placeholders: {command}=command name, {player}=who requested it, {cmd}=alias.
+    message: str = '&c已拦截危险命令：/{command}'
 
     def validate(self) -> None:
         if self.commands is None:
@@ -328,7 +329,7 @@ class CommandBlockConfig:
                 norm.append(s)
         self.commands = norm
         if self.message is None:
-            self.message = '&c已拦截危险命令：/{cmd}'
+            self.message = '&c已拦截危险命令：/{command}'
 
 
 @dataclass
@@ -529,6 +530,15 @@ class ReconnectConfig:
     # comes back. keepRetryMaxMinutes 0 = no time limit.
     keepRetrying: bool = False
     keepRetryMaxMinutes: int = 0
+    # Active reconnect helpers (below the reconnect section).
+    # 1) send /lobby every N seconds while online;
+    # 2) check online every N seconds; if offline, retry connecting every M
+    #    seconds until it is back.
+    autoLobbyEnabled: bool = False
+    autoLobbyIntervalSeconds: int = 300
+    onlineCheckEnabled: bool = False
+    onlineCheckIntervalSeconds: int = 60
+    onlineReconnectIntervalSeconds: int = 30
 
     def validate(self) -> None:
         # Allow up to 30 days for the reconnect interval (value + unit picker).
@@ -538,6 +548,11 @@ class ReconnectConfig:
         self.proactiveIntervalSeconds = _clamp_int(
             self.proactiveIntervalSeconds, 1, 2592000)
         self.keepRetryMaxMinutes = _clamp_int(self.keepRetryMaxMinutes, 0, 100000)
+        self.autoLobbyIntervalSeconds = _clamp_int(self.autoLobbyIntervalSeconds, 1, 2592000)
+        self.onlineCheckIntervalSeconds = _clamp_int(
+            self.onlineCheckIntervalSeconds, 1, 2592000)
+        self.onlineReconnectIntervalSeconds = _clamp_int(
+            self.onlineReconnectIntervalSeconds, 1, 86400)
         if self.customTriggers is None:
             self.customTriggers = []
         norm = []

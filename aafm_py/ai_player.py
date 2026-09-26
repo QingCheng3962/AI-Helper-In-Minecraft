@@ -207,6 +207,7 @@ class AiPlayer:
         self._next_image_cooldown_time = 0
         self._idle_next: List[int] = []
         self._online = False
+        self._current_player: Optional[str] = None
 
         self._recent_ai_messages: Dict[str, int] = {}
         self._recent_player_messages: Dict[str, int] = {}
@@ -341,6 +342,7 @@ class AiPlayer:
         original = text
         if player_name is None:
             player_name = self._extract_player_name(original)
+        self._current_player = player_name
 
         if self._is_self(player_name):
             if cfg.debugLog:
@@ -501,6 +503,7 @@ class AiPlayer:
             if now < self._idle_next[i]:
                 continue
             if not self._is_blocked(text):
+                self._current_player = None
                 c_lo = max(1, int(cfg.idleChatCountMin or 1))
                 c_hi = max(c_lo, int(cfg.idleChatCountMax or c_lo))
                 count = random.randint(c_lo, c_hi)

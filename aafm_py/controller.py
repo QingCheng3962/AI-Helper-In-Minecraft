@@ -140,6 +140,9 @@ class Controller:
         self._kick_lobby_pending = False
         self._lobby_at: Optional[float] = None
         self._proactive_at: Optional[float] = None
+        self._auto_lobby_at: Optional[float] = None
+        self._online_next_check: Optional[float] = None
+        self._online_retry_at: Optional[float] = None
 
         self.check_updates_async()
         threading.Thread(target=self._napcat_config_loop, daemon=True).start()
@@ -376,6 +379,9 @@ class Controller:
             self.ai_player.stop_now()
             self.ai_player.set_online(False)
         self._proactive_at = None
+        self._auto_lobby_at = None
+        self._online_next_check = None
+        self._online_retry_at = None
         self._engine.stop()
         self._post_ui({'kind': 'status', 'text': '已断开连接'})
         self._post_ui({'kind': 'disconnected', 'reason': 'user'})
@@ -500,6 +506,59 @@ class Controller:
             self._post_ui({'kind': 'log', 'level': 'info',
                            'message': f'主动重连：每 {interval}s 刷新一次连接…'})
             self._schedule_reconnect(kicked=False)
+
+    def _maybe_auto_lobby(self) -> None:
+        """Send /lobby every configured interval while online."""
+        cfg = self.config.reconnect
+        if not cfg.autoLobbyEnabled or self._manual_disconnect or not self.connected:
+            return
+        now = time.time()
+        interval = max(1, int(cfg.autoLobbyIntervalSeconds or 0))
+        if self._auto_lobby_at is None:
+            self._auto_lobby_at = now + interval
+            return
+        if now >= self._auto_lobby_at:
+            if self._engine.say('/lobby'):
+                self._post_ui({'kind': 'log', 'level': 'sent',
+                               'message': '» /lobby （定时）'})
+            else:
+                self._post_ui({'kind': 'log', 'level': 'warn',
+                               'message': '定时 /lobby 发送失败（未连接）。'})
+            self._auto_lobby_at = now + interval
+
+    def _maybe_online_check(self) -> None:
+        """Check online every interval; if offline, retry connecting until back."""
+        cfg = self.config.reconnect
+        if not cfg.onlineCheckEnabled or self._manual_disconnect:
+            return
+        now = time.time()
+        interval = max(1, int(cfg.onlineCheckIntervalSeconds or 0))
+        retry = max(1, int(cfg.onlineReconnectIntervalSeconds or 0))
+        if self.connected:
+            self._online_retry_at = None
+            self._online_next_check = now + interval
+            return
+        # Offline: start the retry loop at the next check tick, then retry.
+        if self._online_retry_at is None:
+            if self._online_next_check is None:
+                self._online_next_check = now + interval
+                return
+            if now < self._online_next_check:
+                return
+            self._online_next_check = now + interval
+            if self._connecting or self._engine.running or self._reconnect_at is not None:
+                return
+            self._online_retry_at = now + retry
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': f'主动连接：检测到离线，每 {retry}s 重试（直到连上）。'})
+            return
+        if self._connecting or self._engine.running or self._reconnect_at is not None:
+            return
+        if now >= self._online_retry_at:
+            self._online_retry_at = now + retry
+            self._post_ui({'kind': 'log', 'level': 'warn', 'message': '主动连接：尝试重连…'})
+            self._connecting = False
+            self.connect()
 
     # ------------------------------------------------------------------
     # Actions
@@ -1228,10 +1287,12 @@ class Controller:
                            'message': f'已屏蔽危险命令：/{blocked}（防注入）'})
             note = (cfg.message or '').strip()
             if note:
+                who = getattr(self.ai_player, '_current_player', None) or '未知'
                 try:
-                    note = note.format(cmd=blocked)
+                    note = note.format(player=who, command=blocked, cmd=blocked)
                 except (KeyError, IndexError, ValueError):
-                    note = note.replace('{cmd}', blocked)
+                    note = (note.replace('{player}', who)
+                            .replace('{command}', blocked).replace('{cmd}', blocked))
                 self._engine.say(note)
             return
         if not self._engine.say(text):
@@ -1273,6 +1334,8 @@ class Controller:
                 self._run_kick_lobby()
             if now - last_tick >= 1.0:
                 self._maybe_proactive_reconnect()
+                self._maybe_auto_lobby()
+                self._maybe_online_check()
                 if self.ai_player:
                     try:
                         self.ai_player.tick()
@@ -1350,6 +1413,9 @@ class Controller:
                                       + max(1, self.config.reconnect.proactiveIntervalSeconds))
             else:
                 self._proactive_at = None
+            self._auto_lobby_at = None
+            self._online_next_check = None
+            self._online_retry_at = None
         elif event == 'kicked':
             was_connected = self._connected
             self._connected = False

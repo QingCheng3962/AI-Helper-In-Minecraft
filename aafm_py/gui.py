@@ -718,6 +718,44 @@ class AiPlayerGUI:
                   foreground='#888888', wraplength=720, justify='left').grid(
             row=9, column=0, columnspan=5, sticky='w', padx=4, pady=(6, 0))
 
+        active = ttk.LabelFrame(sc.inner, text='主动连接', padding=8)
+        active.pack(fill='x', pady=(8, 0))
+
+        self.var_autolobby_enabled = tk.BooleanVar(value=False)
+        self.var_autolobby_value = tk.StringVar()
+        self.var_autolobby_unit = tk.StringVar(value='分钟')
+        r1 = ttk.Frame(active)
+        r1.pack(fill='x')
+        b1, _ = self._make_toggle_button(r1, self.var_autolobby_enabled,
+                                         on_change=self._on_active_toggle)
+        b1.pack(side='left')
+        ttk.Label(r1, text='  每隔').pack(side='left', padx=(8, 2))
+        ttk.Entry(r1, textvariable=self.var_autolobby_value, width=6).pack(side='left')
+        ttk.Combobox(r1, textvariable=self.var_autolobby_unit, state='readonly',
+                     values=['秒', '分钟', '小时'], width=6).pack(side='left', padx=4)
+        ttk.Label(r1, text='主动发送 /lobby 进入服务器大厅').pack(side='left', padx=4)
+
+        self.var_onlinecheck_enabled = tk.BooleanVar(value=False)
+        self.var_onlinecheck_value = tk.StringVar()
+        self.var_onlinecheck_unit = tk.StringVar(value='分钟')
+        self.var_onlinecheck_retry = tk.StringVar()
+        r2 = ttk.Frame(active)
+        r2.pack(fill='x', pady=(6, 0))
+        b2, _ = self._make_toggle_button(r2, self.var_onlinecheck_enabled,
+                                         on_change=self._on_active_toggle)
+        b2.pack(side='left')
+        ttk.Label(r2, text='  每隔').pack(side='left', padx=(8, 2))
+        ttk.Entry(r2, textvariable=self.var_onlinecheck_value, width=6).pack(side='left')
+        ttk.Combobox(r2, textvariable=self.var_onlinecheck_unit, state='readonly',
+                     values=['秒', '分钟', '小时'], width=6).pack(side='left', padx=4)
+        ttk.Label(r2, text='检测在线；离线时每').pack(side='left', padx=4)
+        ttk.Entry(r2, textvariable=self.var_onlinecheck_retry, width=6).pack(side='left')
+        ttk.Label(r2, text='秒重试，直到连上').pack(side='left', padx=4)
+
+    def _on_active_toggle(self):
+        self._gather_config()
+        self._append_log('主动连接设置已更新。', 'info')
+
     # ------------------------------------------------------------------
     # Tab: 界面美化
     # ------------------------------------------------------------------
@@ -1430,6 +1468,24 @@ class AiPlayerGUI:
         else:
             self.var_proactive_value.set(str(_ps)); self.var_proactive_unit.set('秒')
 
+        self.var_autolobby_enabled.set(bool(cfg.reconnect.autoLobbyEnabled))
+        _al = int(cfg.reconnect.autoLobbyIntervalSeconds or 0)
+        if _al >= 3600 and _al % 3600 == 0:
+            self.var_autolobby_value.set(str(_al // 3600)); self.var_autolobby_unit.set('小时')
+        elif _al >= 60 and _al % 60 == 0:
+            self.var_autolobby_value.set(str(_al // 60)); self.var_autolobby_unit.set('分钟')
+        else:
+            self.var_autolobby_value.set(str(_al)); self.var_autolobby_unit.set('秒')
+        self.var_onlinecheck_enabled.set(bool(cfg.reconnect.onlineCheckEnabled))
+        _oc = int(cfg.reconnect.onlineCheckIntervalSeconds or 0)
+        if _oc >= 3600 and _oc % 3600 == 0:
+            self.var_onlinecheck_value.set(str(_oc // 3600)); self.var_onlinecheck_unit.set('小时')
+        elif _oc >= 60 and _oc % 60 == 0:
+            self.var_onlinecheck_value.set(str(_oc // 60)); self.var_onlinecheck_unit.set('分钟')
+        else:
+            self.var_onlinecheck_value.set(str(_oc)); self.var_onlinecheck_unit.set('秒')
+        self.var_onlinecheck_retry.set(str(cfg.reconnect.onlineReconnectIntervalSeconds))
+
         self.var_bg_image.set(cfg.appearance.backgroundImage or '')
         self.var_bg_darkness.set(cfg.appearance.backgroundDarkness)
         self.var_text_theme.set(_THEME_VALUE_TO_LABEL.get(cfg.appearance.textTheme, _THEME_AUTO))
@@ -1657,6 +1713,16 @@ class AiPlayerGUI:
         rc.proactiveIntervalSeconds = max(
             1, self._parse_int(self.var_proactive_value.get(), 5)
             * _punits.get(self.var_proactive_unit.get(), 60))
+        _aunits = {'秒': 1, '分钟': 60, '小时': 3600}
+        rc.autoLobbyEnabled = self.var_autolobby_enabled.get()
+        rc.autoLobbyIntervalSeconds = max(
+            1, self._parse_int(self.var_autolobby_value.get(), 5)
+            * _aunits.get(self.var_autolobby_unit.get(), 60))
+        rc.onlineCheckEnabled = self.var_onlinecheck_enabled.get()
+        rc.onlineCheckIntervalSeconds = max(
+            1, self._parse_int(self.var_onlinecheck_value.get(), 1)
+            * _aunits.get(self.var_onlinecheck_unit.get(), 60))
+        rc.onlineReconnectIntervalSeconds = self._parse_int(self.var_onlinecheck_retry.get(), 30)
         rc.validate()
 
         ap = cfg.appearance
