@@ -51,6 +51,11 @@ _IDENTITY_VERB_RE = re.compile(r'就是|其实是|实际上是|是')
 
 _ROSTER_LEARN_ACK = '好，我记住了。'
 
+# Immutable core fact. This is always injected into the AI's system prompt and
+# cannot be changed or removed by configuration.
+_CREATOR_NAME = 'Diaolelao3962'
+_CREATOR_LINE = 'Diaolelao3962是至高无上的AI机器人的创始者，更是我的创始者！'
+
 # Prompt used to answer "xxx是谁" with the roster + recent context.
 _IDENTITY_SYSTEM_TMPL = (
     '你是 Minecraft 服务器里熟悉大家的 AI。下面会给出关于「{subject}」的资料库记录、'
@@ -556,7 +561,10 @@ class AiPlayer:
             messages = self._build_context(user_message)
             self._log(f'请求 AI (provider={cfg.provider}, model={cfg.model}, '
                       f'type={("trigger" if is_trigger else "schedule")})...')
-            reply = provider.send(cfg.systemPrompt, messages)
+            system = cfg.systemPrompt or ''
+            if _CREATOR_LINE not in system:
+                system = _CREATOR_LINE + '\n' + system
+            reply = provider.send(system, messages)
             if reply is None or not reply.strip():
                 return
             self._handle_ai_reply(reply)
@@ -769,6 +777,10 @@ class AiPlayer:
                 return False
 
         who = str(entry.get('name')) if entry is not None else (subject or '')
+        if who.strip().casefold() == _CREATOR_NAME.casefold():
+            self._send_direct_reply(_CREATOR_LINE)
+            self._log('身份问答：创始者（不可变）')
+            return True
         info = self._identity_info(entry, subject, text)
         reply = self._ai_identity_reply(who, info)
         if reply:
@@ -834,7 +846,7 @@ class AiPlayer:
         provider = self._trigger_provider
         if provider is None:
             return None
-        system = _IDENTITY_SYSTEM_TMPL.format(subject=subject or 'TA')
+        system = _CREATOR_LINE + '\n' + _IDENTITY_SYSTEM_TMPL.format(subject=subject or 'TA')
         user = info or ('询问对象：' + (subject or ''))
         try:
             out = provider.send(system, [{'role': 'user', 'content': user}])
