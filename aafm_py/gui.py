@@ -290,7 +290,7 @@ class AiPlayerGUI:
         ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=12)
 
         self.ai_enabled = tk.BooleanVar(value=False)
-        self._chk(bar, text='AI 玩家开关', variable=self.ai_enabled,
+        ttk.Checkbutton(bar, text='AI 玩家开关', variable=self.ai_enabled,
                         command=self._on_ai_enabled).pack(side='left', padx=4)
         ttk.Button(bar, text='重开上下文', command=self._on_clear_context).pack(side='left', padx=4)
         ttk.Button(bar, text='保存设置', command=self._on_save).pack(side='left', padx=4)
@@ -409,14 +409,14 @@ class AiPlayerGUI:
         self.var_logfwd_error = tk.BooleanVar(value=True)
         self.var_logfwd_warn = tk.BooleanVar(value=False)
 
-        self._chk(frm, text='启用：把日志转发到 MC 公共聊天',
+        ttk.Checkbutton(frm, text='启用：把日志转发到 MC 公共聊天',
                         variable=self.var_logfwd_enabled).grid(
             row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
 
         ttk.Label(frm, text='转发级别').grid(row=1, column=0, sticky='w', padx=4, pady=3)
-        self._chk(frm, text='错误', variable=self.var_logfwd_error).grid(
+        ttk.Checkbutton(frm, text='错误', variable=self.var_logfwd_error).grid(
             row=1, column=1, sticky='w', padx=4)
-        self._chk(frm, text='警告', variable=self.var_logfwd_warn).grid(
+        ttk.Checkbutton(frm, text='警告', variable=self.var_logfwd_warn).grid(
             row=1, column=2, sticky='w', padx=4)
 
         ttk.Label(frm, text='播报格式').grid(row=2, column=0, sticky='w', padx=4, pady=3)
@@ -473,9 +473,9 @@ class AiPlayerGUI:
         extra.pack(fill='x')
         self.var_quiz = tk.BooleanVar(value=True)
         self.var_autoeat = tk.BooleanVar(value=True)
-        self._chk(extra, text='答题（Quiz 自动答题）', variable=self.var_quiz,
+        ttk.Checkbutton(extra, text='答题（Quiz 自动答题）', variable=self.var_quiz,
                         command=lambda: self._on_extra('quiz', self.var_quiz.get())).pack(side='left')
-        self._chk(extra, text='自动进食（AutoEat）', variable=self.var_autoeat,
+        ttk.Checkbutton(extra, text='自动进食（AutoEat）', variable=self.var_autoeat,
                         command=lambda: self._on_extra('autoeat', self.var_autoeat.get())).pack(
             side='left', padx=16)
 
@@ -675,7 +675,7 @@ class AiPlayerGUI:
         self.var_kick_lobby = tk.BooleanVar(value=True)
         self.var_kick_lobby_delay = tk.StringVar()
 
-        self._chk(frm, text='启用自动重连（服务器掉线 / 被踢出 / 命中触发语时；手动点「断开」不会重连）',
+        ttk.Checkbutton(frm, text='启用自动重连（服务器掉线 / 被踢出 / 命中触发语时；手动点「断开」不会重连）',
                         variable=self.var_reconnect_enabled).grid(
             row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
         ttk.Label(frm, text='重连间隔').grid(row=1, column=0, sticky='w', padx=4, pady=3)
@@ -689,7 +689,7 @@ class AiPlayerGUI:
         self.var_proactive_enabled = tk.BooleanVar(value=False)
         self.var_proactive_value = tk.StringVar()
         self.var_proactive_unit = tk.StringVar(value='分钟')
-        self._chk(frm, text='在线定时主动重连（每隔设定时间断开重连一次）',
+        ttk.Checkbutton(frm, text='在线定时主动重连（每隔设定时间断开重连一次）',
                         variable=self.var_proactive_enabled).grid(
             row=3, column=0, columnspan=2, sticky='w', padx=4, pady=(8, 3))
         ttk.Entry(frm, textvariable=self.var_proactive_value, width=8).grid(
@@ -698,7 +698,7 @@ class AiPlayerGUI:
                      values=['秒', '分钟', '小时', '天'], width=6).grid(
             row=3, column=3, sticky='w', padx=4, pady=(8, 3))
 
-        self._chk(frm, text='被踢出并重连成功后自动发送 /lobby',
+        ttk.Checkbutton(frm, text='被踢出并重连成功后自动发送 /lobby',
                         variable=self.var_kick_lobby).grid(
             row=4, column=0, columnspan=4, sticky='w', padx=4, pady=(8, 3))
         self._entry(frm, 5, '/lobby 延迟（秒）', self.var_kick_lobby_delay)
@@ -806,7 +806,7 @@ class AiPlayerGUI:
         frm.pack(fill='x', pady=(8, 0))
 
         self.var_qq_enabled = tk.BooleanVar(value=False)
-        self._chk(frm, text='启用：把指定 QQ 群的消息转述到 MC 公共聊天',
+        ttk.Checkbutton(frm, text='启用：把指定 QQ 群的消息转述到 MC 公共聊天',
                         variable=self.var_qq_enabled,
                         command=self._on_qq_enabled).grid(
             row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
@@ -852,7 +852,7 @@ class AiPlayerGUI:
         ttk.Label(frm, text='转述格式').grid(row=6, column=0, sticky='w', padx=4, pady=3)
         ttk.Entry(frm, textvariable=self.var_qq_format, width=42).grid(
             row=6, column=1, columnspan=3, sticky='we', padx=4, pady=3)
-        self._chk(frm, text='图片转链接', variable=self.var_qq_image_link).grid(
+        ttk.Checkbutton(frm, text='图片转链接', variable=self.var_qq_image_link).grid(
             row=6, column=4, sticky='w', padx=4, pady=3)
 
         ttk.Label(frm,
@@ -876,12 +876,12 @@ class AiPlayerGUI:
         # --- 账号安全（可选） ---
         sec = ttk.LabelFrame(frm, text='账号安全（可选）', padding=6)
         sec.grid(row=9, column=0, columnspan=5, sticky='we', padx=2, pady=(8, 2))
-        self._chk(sec, text='自动重连', variable=self.var_qq_autoreconnect).grid(
+        ttk.Checkbutton(sec, text='自动重连', variable=self.var_qq_autoreconnect).grid(
             row=0, column=0, sticky='w', padx=4, pady=3)
         ttk.Label(sec, text='在线检测秒').grid(row=0, column=1, sticky='e', padx=4)
         ttk.Entry(sec, textvariable=self.var_qq_health, width=6).grid(
             row=0, column=2, sticky='w', padx=4)
-        self._chk(sec, text='自动为新扫码账号写配置', variable=self.var_qq_autoconfig).grid(
+        ttk.Checkbutton(sec, text='自动为新扫码账号写配置', variable=self.var_qq_autoconfig).grid(
             row=0, column=3, columnspan=2, sticky='w', padx=12, pady=3)
         ttk.Label(sec, text='连接因疑似风控被关闭、或在线检测连续失败时，会告警并停止自动重连，'
                             '避免反复登录加重风控；恢复后点「重连」。',
@@ -919,7 +919,7 @@ class AiPlayerGUI:
         self.var_mc2qq_ok = tk.StringVar()
         self.var_mc2qq_fail = tk.StringVar()
 
-        self._chk(mc, text='启用 MC → QQ', variable=self.var_mc2qq_enabled).grid(
+        ttk.Checkbutton(mc, text='启用 MC → QQ', variable=self.var_mc2qq_enabled).grid(
             row=0, column=0, sticky='w', padx=4, pady=3)
         ttk.Label(mc, text='触发词（, 分隔）').grid(row=0, column=1, sticky='e', padx=4)
         ttk.Entry(mc, textvariable=self.var_mc2qq_trigger, width=24).grid(
@@ -964,7 +964,7 @@ class AiPlayerGUI:
         frm.pack(fill='x', pady=(8, 0))
 
         self.var_roster = tk.BooleanVar(value=True)
-        self._chk(frm, text='启用身份问答：问「xxx是谁」直接查表；玩家说「X就是Y/X是Y」会写入其「玩家描述」',
+        ttk.Checkbutton(frm, text='启用身份问答：问「xxx是谁」直接查表；玩家说「X就是Y/X是Y」会写入其「玩家描述」',
                         variable=self.var_roster,
                         command=self._on_roster_enabled).grid(
             row=0, column=0, columnspan=3, sticky='w', padx=4, pady=3)
@@ -986,12 +986,12 @@ class AiPlayerGUI:
 
         # --- AI 性格研究 / 别名分析 ---
         self.var_roster_research = tk.BooleanVar(value=True)
-        self._chk(frm, text='AI 性格研究：阅读聊天自动研究并写入 AI记录1..5（滚动最新5条）；说「研究X」可手动',
+        ttk.Checkbutton(frm, text='AI 性格研究：阅读聊天自动研究并写入 AI记录1..5（滚动最新5条）；说「研究X」可手动',
                         variable=self.var_roster_research,
                         command=self._on_roster_research).grid(
             row=3, column=0, columnspan=4, sticky='w', padx=4, pady=3)
         self.var_roster_alias = tk.BooleanVar(value=True)
-        self._chk(frm, text='AI 别名分析：读聊天识别别名，写入 别名1..3 空格（不覆盖手填）；说「X的别名」可手动',
+        ttk.Checkbutton(frm, text='AI 别名分析：读聊天识别别名，写入 别名1..3 空格（不覆盖手填）；说「X的别名」可手动',
                         variable=self.var_roster_alias,
                         command=self._on_roster_alias).grid(
             row=4, column=0, columnspan=4, sticky='w', padx=4, pady=3)
@@ -1052,7 +1052,7 @@ class AiPlayerGUI:
         self.var_verify_name = tk.StringVar()
         self.var_verify_delay = tk.StringVar()
 
-        self._chk(frm, text='启用：打开验证界面时自动点击目标物品',
+        ttk.Checkbutton(frm, text='启用：打开验证界面时自动点击目标物品',
                         variable=self.var_verify_enabled).grid(
             row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
 
@@ -1084,7 +1084,7 @@ class AiPlayerGUI:
         self.var_health_cooldown = tk.StringVar()
         self.var_health_msg = tk.StringVar()
 
-        self._chk(frm, text='启用：血量低于阈值时在公屏发言',
+        ttk.Checkbutton(frm, text='启用：血量低于阈值时在公屏发言',
                         variable=self.var_health_enabled).grid(
             row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
 
@@ -1137,7 +1137,7 @@ class AiPlayerGUI:
 
         self.var_context = tk.BooleanVar(value=True)
         self.var_context_len = tk.StringVar()
-        self._chk(frm, text='启用上下文', variable=self.var_context).grid(
+        ttk.Checkbutton(frm, text='启用上下文', variable=self.var_context).grid(
             row=2, column=0, sticky='w', padx=4, pady=3)
         self._entry(frm, 2, '长度', self.var_context_len, col=1)
         self.var_max_msgs = tk.StringVar()
@@ -1146,7 +1146,7 @@ class AiPlayerGUI:
         self._entry(frm, 3, '单条字数', self.var_max_chars, col=1)
 
         self.var_server_ctx = tk.BooleanVar(value=True)
-        self._chk(frm, text='服务器消息加入上下文（供 AI 参考）',
+        ttk.Checkbutton(frm, text='服务器消息加入上下文（供 AI 参考）',
                         variable=self.var_server_ctx).grid(
             row=3, column=2, columnspan=2, sticky='w', padx=4, pady=3)
 
@@ -1161,16 +1161,16 @@ class AiPlayerGUI:
         self.var_schedule = tk.BooleanVar(value=False)
         self.var_schedule_interval = tk.StringVar()
 
-        self._chk(frm, text='启用触发回复', variable=self.var_trigger).grid(
+        ttk.Checkbutton(frm, text='启用触发回复', variable=self.var_trigger).grid(
             row=0, column=0, sticky='w', padx=4, pady=3)
         ttk.Label(frm, text='触发正则（, 分隔）').grid(row=0, column=1, sticky='w', padx=4, pady=3)
         ttk.Entry(frm, textvariable=self.var_trigger_regex, width=46).grid(
             row=0, column=2, columnspan=3, sticky='we', padx=4, pady=3)
         self._entry(frm, 1, '冷却秒', self.var_cooldown, col=1)
 
-        self._chk(frm, text='自动回复（对每条消息回复）', variable=self.var_auto).grid(
+        ttk.Checkbutton(frm, text='自动回复（对每条消息回复）', variable=self.var_auto).grid(
             row=2, column=0, sticky='w', padx=4, pady=3)
-        self._chk(frm, text='定时回复（需有匹配消息）', variable=self.var_schedule).grid(
+        ttk.Checkbutton(frm, text='定时回复（需有匹配消息）', variable=self.var_schedule).grid(
             row=2, column=1, sticky='w', padx=4)
         self._entry(frm, 2, '间隔秒', self.var_schedule_interval, col=2)
 
@@ -1186,7 +1186,7 @@ class AiPlayerGUI:
         frm.pack(fill='x', pady=(0, 8))
 
         self.var_restrict = tk.BooleanVar(value=True)
-        self._chk(frm, text='启用消息过滤', variable=self.var_restrict).grid(
+        ttk.Checkbutton(frm, text='启用消息过滤', variable=self.var_restrict).grid(
             row=0, column=0, columnspan=3, sticky='w', padx=4, pady=3)
 
         self.var_block_regex = tk.StringVar()
@@ -1208,7 +1208,7 @@ class AiPlayerGUI:
         img.pack(fill='x')
         self.var_image = tk.BooleanVar(value=False)
         self.var_image_model = tk.StringVar()
-        self._chk(img, text='启用文生图', variable=self.var_image).pack(side='left', padx=4)
+        ttk.Checkbutton(img, text='启用文生图', variable=self.var_image).pack(side='left', padx=4)
         ttk.Label(img, text='模型').pack(side='left', padx=(12, 2))
         ttk.Entry(img, textvariable=self.var_image_model, width=22).pack(side='left')
 
