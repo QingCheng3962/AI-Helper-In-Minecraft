@@ -35,6 +35,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 - **Command block (bottom of the Player Config tab)**: a table of commands to block (without the slash; defaults include `pay kick ban op stop whitelist kill give tp gamemode`). Any bot-sent message (AI replies / random chat) starting with `/` whose command name is listed is dropped and logged, preventing prompt-injection from running dangerous commands. Rows with "＋ add row" and per-row "Delete".
 - **Message after blocking**: when a command is blocked, an optional configurable line can be sent; placeholders `{player}` = who requested it, `{command}` = command name (`{cmd}` alias); empty = block silently.
+- **Identity-learn fix**: "我是X / 俺是X / 本人就是X" no longer records "我" as a name; the statement is stored for the **speaker**, with X as an alias/description. Ignored when the speaker is unknown.
 - **Active connect (bottom of the Reconnect tab)**: ① every s/min/hour **send `/lobby`** to enter the lobby; ② every s/min/hour **check online**, and while offline retry connecting every N seconds **until it is back**. Each has its own red/green toggle.
 - **Enable/disable buttons**: command block and random chat each have a **red/green button** (green enabled / red disabled) that toggles and saves instantly.
 - **Random chat moved into Player Config** (no longer its own tab): **each line has its own random interval** (per-row min~max seconds) and there is a **random count per fire (min~max)** that picks lines from the list; rows can be added/removed.

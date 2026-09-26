@@ -30,6 +30,12 @@ _STOP_SUBJECTS = {
     '他们', '她们', '它们', '这个', '那个', '自己',
 }
 
+# First-person subjects: "我是X / 俺就是X / 本人是X" refer to the SPEAKER, so
+# they must never be stored as a name called "我".
+_FIRST_PERSON = {
+    '我', '俺', '咱', '咱们', '我们', '本人', '自己', '咱家', '在下', '吾',
+}
+
 # Leading chatter that may be glued onto the subject, e.g. "请问小明是谁".
 _NOISE_PREFIXES = (
     '请问一下', '请问', '你知道', '有人知道', '有谁知道', '谁知道', '帮我问一下',
@@ -422,7 +428,7 @@ class AiPlayer:
                 return
             if self._maybe_roster_research(text):
                 return
-            if self._maybe_roster_learn(text):
+            if self._maybe_roster_learn(text, player_name):
                 return
             if self._maybe_roster_reply(text):
                 return
@@ -619,7 +625,7 @@ class AiPlayer:
                 return e
         return None
 
-    def _maybe_roster_learn(self, text: str) -> bool:
+    def _maybe_roster_learn(self, text: str, player_name: Optional[str] = None) -> bool:
         """Learn "X是Y / X就是Y / X其实是Y" statements from triggered chat.
 
         When a server player tells the bot who is who (X or Y already in the
@@ -654,6 +660,28 @@ class AiPlayer:
             return False
 
         cleaned_left = _clean_roster_prefix(left)
+        # "我是X" refers to the speaker: record the SPEAKER, never a name "我".
+        lp = cleaned_left.strip(' \u3000:：@').casefold()
+        if lp in _FIRST_PERSON:
+            if not player_name:
+                return False
+            paths = roster.file_paths()
+            if not paths:
+                return False
+            entry = roster.find(player_name)
+            source = str(entry.get('source') or '') if entry else ''
+            if not source:
+                source = paths[0]
+            statement = s.strip().rstrip(' \u3000。.!！?？～~…，,；;')
+            try:
+                roster.learn_identity(source, player_name, statement)
+            except RosterError as e:
+                self._error('记录身份失败: ' + str(e))
+                return False
+            self._log(f'玩家资料库学习(本人): {player_name} => {statement}')
+            self._send_direct_reply(f'{statement}，我记住了。')
+            return True
+
         x_entry = roster.match_at_end(left)
         if x_entry is None and cleaned_left:
             x_entry = roster.find(cleaned_left)
