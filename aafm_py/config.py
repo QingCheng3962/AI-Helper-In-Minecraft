@@ -101,6 +101,8 @@ class AiPlayerConfig:
     # seconds); entries fire independently.
     idleChatEnabled: bool = False
     idleChatItems: List[Dict[str, Any]] = field(default_factory=list)
+    idleChatCountMin: int = 1
+    idleChatCountMax: int = 1
 
     imageGenerationEnabled: bool = False
     imageModel: str = 'gpt-image-1'
@@ -163,6 +165,8 @@ class AiPlayerConfig:
             hi = _clamp_int(it.get('max', lo), lo, 86400)
             items.append({'text': text, 'min': lo, 'max': hi})
         self.idleChatItems = items
+        self.idleChatCountMin = _clamp_int(self.idleChatCountMin, 1, 10)
+        self.idleChatCountMax = _clamp_int(self.idleChatCountMax, self.idleChatCountMin, 10)
 
         if self.autoReplyEnabled:
             self.triggerEnabled = False
@@ -311,6 +315,8 @@ class CommandBlockConfig:
     commands: List[str] = field(default_factory=lambda: [
         'pay', 'kick', 'ban', 'ban-ip', 'pardon', 'op', 'deop', 'stop',
         'restart', 'whitelist', 'kill', 'give', 'tp', 'gamemode'])
+    # Message sent to the server after a command is blocked; {cmd} = command name.
+    message: str = '&c已拦截危险命令：/{cmd}'
 
     def validate(self) -> None:
         if self.commands is None:
@@ -321,6 +327,8 @@ class CommandBlockConfig:
             if s and s not in norm:
                 norm.append(s)
         self.commands = norm
+        if self.message is None:
+            self.message = '&c已拦截危险命令：/{cmd}'
 
 
 @dataclass

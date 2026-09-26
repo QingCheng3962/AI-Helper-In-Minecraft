@@ -1223,8 +1223,16 @@ class Controller:
     def _on_ai_send_chat(self, text: str) -> None:
         blocked = self._blocked_command(text)
         if blocked:
+            cfg = self.config.commandBlock
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': f'已屏蔽危险命令：/{blocked}（防注入）'})
+            note = (cfg.message or '').strip()
+            if note:
+                try:
+                    note = note.format(cmd=blocked)
+                except (KeyError, IndexError, ValueError):
+                    note = note.replace('{cmd}', blocked)
+                self._engine.say(note)
             return
         if not self._engine.say(text):
             self._post_ui({'kind': 'log', 'level': 'error',

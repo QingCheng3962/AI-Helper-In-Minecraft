@@ -34,8 +34,9 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ### v3.1
 
 - **Command block (bottom of the Player Config tab)**: a table of commands to block (without the slash; defaults include `pay kick ban op stop whitelist kill give tp gamemode`). Any bot-sent message (AI replies / random chat) starting with `/` whose command name is listed is dropped and logged, preventing prompt-injection from running dangerous commands. Rows with "＋ add row" and per-row "Delete".
-- **Enable/disable buttons**: both command block and random chat have a toggle button — **green when enabled, red when disabled** — clicking it applies and saves immediately.
-- **Random chat moved into Player Config** (no longer its own tab), and **each line now has its own random interval** (per-row min~max seconds) instead of one fixed interval; rows can be added/removed.
+- **Message after blocking**: when a command is blocked, an optional configurable line can be sent (`{cmd}` = command name; empty = block silently).
+- **Enable/disable buttons (global)**: all "enable" checkboxes are replaced by **red/green buttons** (green enabled / red disabled) that toggle and save instantly; command block and random chat each have one too.
+- **Random chat moved into Player Config** (no longer its own tab): **each line has its own random interval** (per-row min~max seconds) and there is a **random count per fire (min~max)** that picks lines from the list; rows can be added/removed.
 
 ### v3.0
 

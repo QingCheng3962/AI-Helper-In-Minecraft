@@ -501,9 +501,24 @@ class AiPlayer:
             if now < self._idle_next[i]:
                 continue
             if not self._is_blocked(text):
-                self.on_send_chat(text)
-                self._log_activity('AI > ' + text)
-                self._log('随机发言。')
+                c_lo = max(1, int(cfg.idleChatCountMin or 1))
+                c_hi = max(c_lo, int(cfg.idleChatCountMax or c_lo))
+                count = random.randint(c_lo, c_hi)
+                pool = [str(x.get('text', '')) for x in items if str(x.get('text', '')).strip()]
+                picks = [text]
+                for _ in range(max(0, count - 1)):
+                    if pool:
+                        picks.append(random.choice(pool))
+                for j, msg in enumerate(picks):
+                    if self._stopped or not cfg.enabled:
+                        break
+                    if self._is_blocked(msg):
+                        continue
+                    self.on_send_chat(msg)
+                    self._log_activity('AI > ' + msg)
+                    if j < len(picks) - 1 and self._chunk_delay_ms > 0:
+                        time.sleep(self._chunk_delay_ms / 1000.0)
+                self._log(f'随机发言（{len(picks)} 条）。')
             self._idle_next[i] = now + random.randint(lo_s, hi_s) * 1000
 
     # ------------------------------------------------------------------
