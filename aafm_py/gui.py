@@ -479,6 +479,40 @@ class AiPlayerGUI:
                         command=lambda: self._on_extra('autoeat', self.var_autoeat.get())).pack(
             side='left', padx=16)
 
+        self._build_search_frame(frm)
+
+    def _build_search_frame(self, parent) -> None:
+        frm = ttk.LabelFrame(parent, text='联网搜索（AI 需要时自动搜并参考）', padding=8)
+        frm.pack(fill='x', pady=(8, 0))
+
+        self.var_search_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text='启用联网搜索', variable=self.var_search_enabled).grid(
+            row=0, column=0, columnspan=4, sticky='w', padx=4, pady=3)
+
+        self.var_search_provider = tk.StringVar(value='bing')
+        ttk.Label(frm, text='后端').grid(row=1, column=0, sticky='w', padx=4, pady=3)
+        ttk.Combobox(frm, textvariable=self.var_search_provider, state='readonly',
+                     values=['bing', 'duckduckgo', 'custom'], width=12).grid(
+            row=1, column=1, sticky='w', padx=4, pady=3)
+        ttk.Label(frm, text='bing/duckduckgo=免Key；custom=填下面的 API（国内推荐 bing）',
+                  foreground='#888888').grid(row=1, column=2, columnspan=2, sticky='w', padx=4)
+
+        self.var_search_url = tk.StringVar()
+        self.var_search_key = tk.StringVar()
+        self._entry(frm, 2, 'API 地址', self.var_search_url, hint='custom 时才需要')
+        self._entry(frm, 3, 'API 密钥', self.var_search_key, show='*')
+
+        self.var_search_n = tk.StringVar()
+        self._entry(frm, 4, '结果条数', self.var_search_n)
+
+        self.var_search_regex = tk.StringVar()
+        ttk.Label(frm, text='触发正则').grid(row=5, column=0, sticky='w', padx=4, pady=3)
+        ttk.Entry(frm, textvariable=self.var_search_regex, width=64).grid(
+            row=5, column=1, columnspan=3, sticky='we', padx=4, pady=3)
+        ttk.Label(frm, text='命中该正则的消息会先联网搜索（留空=默认关键词）',
+                  foreground='#888888').grid(row=6, column=0, columnspan=4, sticky='w', padx=4)
+        frm.columnconfigure(1, weight=1)
+
     # ------------------------------------------------------------------
     # Tab: 玩家资料库
     # ------------------------------------------------------------------
@@ -1385,6 +1419,12 @@ class AiPlayerGUI:
         if hasattr(self, '_refresh_idle_toggle'):
             self._refresh_idle_toggle()
         self.var_image_model.set(ai.imageModel)
+        self.var_search_enabled.set(bool(ai.searchEnabled))
+        self.var_search_provider.set(ai.searchProvider or 'duckduckgo')
+        self.var_search_url.set(ai.searchApiUrl or '')
+        self.var_search_key.set(ai.searchApiKey or '')
+        self.var_search_n.set(str(ai.searchMaxResults))
+        self.var_search_regex.set(ai.searchTriggerRegex or '')
 
         self.var_cmdblock_enabled.set(bool(cfg.commandBlock.enabled))
         for _rec in list(getattr(self, '_cmd_rows', [])):
@@ -1616,6 +1656,13 @@ class AiPlayerGUI:
 
         ai.imageGenerationEnabled = self.var_image.get()
         ai.imageModel = self.var_image_model.get().strip() or 'gpt-image-1'
+
+        ai.searchEnabled = self.var_search_enabled.get()
+        ai.searchProvider = self.var_search_provider.get().strip() or 'duckduckgo'
+        ai.searchApiUrl = self.var_search_url.get().strip()
+        ai.searchApiKey = self.var_search_key.get()
+        ai.searchMaxResults = self._parse_int(self.var_search_n.get(), 5)
+        ai.searchTriggerRegex = self.var_search_regex.get().strip()
 
         ai.idleChatEnabled = self.var_idle_enabled.get()
         _items = []

@@ -48,6 +48,10 @@ TEMPLATE_BUDDY = (
 
 DEFAULT_TRIGGER_REGEX = r'(?i)^(ai|@ai)[，, ]'
 DEFAULT_IMAGE_TRIGGER_REGEX = r'(?i)^(?:画|生成图片|img)[：: ]?(.*)$'
+DEFAULT_SEARCH_TRIGGER_REGEX = (
+    r'(?i)(搜索|搜一下|搜下|帮我搜|查一下|查查|帮我查|最新|最近|现在|今天|'
+    r'新闻|天气|股价|价格|汇率|比分|几点|什么时候|什么是|是谁'
+    r'|latest|news|weather|price|score|current|today|who is|what is)')
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +107,14 @@ class AiPlayerConfig:
     idleChatItems: List[Dict[str, Any]] = field(default_factory=list)
     idleChatCountMin: int = 1
     idleChatCountMax: int = 1
+
+    # Web search (auto when a message looks like it needs live info).
+    searchEnabled: bool = False
+    searchProvider: str = 'bing'            # bing | duckduckgo | custom
+    searchApiUrl: str = ''
+    searchApiKey: str = ''
+    searchMaxResults: int = 5
+    searchTriggerRegex: str = DEFAULT_SEARCH_TRIGGER_REGEX
 
     imageGenerationEnabled: bool = False
     imageModel: str = 'gpt-image-1'
@@ -167,6 +179,15 @@ class AiPlayerConfig:
         self.idleChatItems = items
         self.idleChatCountMin = _clamp_int(self.idleChatCountMin, 1, 10)
         self.idleChatCountMax = _clamp_int(self.idleChatCountMax, self.idleChatCountMin, 10)
+
+        self.searchProvider = (self.searchProvider or 'bing').lower()
+        if self.searchProvider not in ('duckduckgo', 'bing', 'custom'):
+            self.searchProvider = 'bing'
+        self.searchApiUrl = str(self.searchApiUrl or '').strip()
+        self.searchApiKey = str(self.searchApiKey or '').strip()
+        self.searchMaxResults = _clamp_int(self.searchMaxResults, 1, 10)
+        if not self.searchTriggerRegex:
+            self.searchTriggerRegex = DEFAULT_SEARCH_TRIGGER_REGEX
 
         if self.autoReplyEnabled:
             self.triggerEnabled = False

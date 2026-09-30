@@ -14,6 +14,7 @@ from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 from . import llm
+from . import websearch
 from .config import AiPlayerConfig
 from .roster import RosterError, split_aliases
 
@@ -238,6 +239,7 @@ class AiPlayer:
         self._trigger_patterns: List[re.Pattern] = []
         self._image_trigger_pattern: Optional[re.Pattern] = None
         self._blocked_patterns: List[re.Pattern] = []
+        self._search_pattern: Optional[re.Pattern] = None
 
         self._chunk_delay_ms = 600  # spacing between reply chunks
 
@@ -293,6 +295,11 @@ class AiPlayer:
             except re.error as e:
                 self._error(f"无效的拦截正则: '{pat}' -> {e}")
         self._blocked_patterns = patterns
+        try:
+            self._search_pattern = re.compile(cfg.searchTriggerRegex)
+        except re.error as e:
+            self._search_pattern = None
+            self._error(f"无效的联网搜索触发正则: '{cfg.searchTriggerRegex}' -> {e}")
 
     def reload(self, new_config: AiPlayerConfig) -> None:
         self.config = new_config
@@ -564,6 +571,16 @@ class AiPlayer:
             system = cfg.systemPrompt or ''
             if _CREATOR_LINE not in system:
                 system = _CREATOR_LINE + '\n' + system
+            if self._needs_search(user_message):
+                try:
+                    results = websearch.search(user_message, cfg)
+                except Exception as e:  # noqa: BLE001
+                    results = []
+                    self._error('联网搜索失败: ' + str(e))
+                if results:
+                    system += ('\n\n[联网搜索结果，可能有时效性，仅供参考]\n'
+                               + websearch.format_results(results))
+                    self._log(f'联网搜索：{len(results)} 条')
             reply = provider.send(system, messages)
             if reply is None or not reply.strip():
                 return
@@ -1279,6 +1296,11 @@ class AiPlayer:
             if pattern.search(text):
                 return True
         return False
+
+    def _needs_search(self, text: str) -> bool:
+        if not self.config.searchEnabled or self._search_pattern is None:
+            return False
+        return bool(self._search_pattern.search(text or ''))
 
     def _matches_image_trigger(self, text: str) -> bool:
         if self._image_trigger_pattern is None:
