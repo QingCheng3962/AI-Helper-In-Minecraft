@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// 變更說明：寫入、重試與兜底均未獲確認時停止，僅推進已確認完成的續寫進度。
 'use strict';
 
 // Document -> in-game "book and quill" (书与笔) writer.
@@ -115,9 +117,8 @@ function writePagesToHeldBook(bot, pages, title) {
     }
 }
 
-// Send the packet and wait for the server to echo the updated slot. Returns
-// true when the server applied the change, so a silent rejection can be told
-// apart from a success.
+// Send the packet and wait for the server to echo the updated slot. A slot
+// update is the existing confirmation signal; it does not validate page content.
 async function writePagesAndConfirm(bot, pages, title) {
     const heldSlot = HOTBAR0 + (bot.quickBarSlot || 0);
     const event = `updateSlot:${heldSlot}`;
@@ -330,7 +331,6 @@ async function writeBooks(bot, opts, logger, sendChat) {
 
     const used = new Set();
     let done = 0;
-    let unconfirmed = 0;
     let stopped = false;
     let nextPage = startPage;
     try {
@@ -374,8 +374,10 @@ async function writeBooks(bot, opts, logger, sendChat) {
                 applied = await setBookNbtInCreative(bot, bookPages, title);
             }
             if (!applied) {
-                unconfirmed++;
-                logger.log('warn', '书与笔：未收到服务器回执，可能被服务器/反作弊拦截，或机器人未持有书与笔。');
+                // Preserve the last confirmed position and keep this book for inspection.
+                const message = `已確認完成 ${done} 本；第 ${bookNumber} 本寫入未獲確認，已停止並保留續寫進度：下次從第 ${nextPage + 1} 頁繼續。請核對遊戲內書籍後重試。`;
+                logger.log('warn', message);
+                return { ok: false, stopped: true, nextPage, message };
             }
             await sleep(150);
             done++;
@@ -394,8 +396,6 @@ async function writeBooks(bot, opts, logger, sendChat) {
         let message;
         if (!finished) {
             message = `已写入 ${done} 本（暂停/停止，已记录进度：下次从第 ${nextPage + 1} 页继续）。`;
-        } else if (unconfirmed) {
-            message = `已写入书与笔：${pages.length} 页，共 ${done} 本（其中 ${unconfirmed} 本未收到服务器回执，可能被拦截）。`;
         } else {
             message = `已写入书与笔：${pages.length} 页，共 ${done} 本${signBook ? '（成书）' : ''}。`;
         }
