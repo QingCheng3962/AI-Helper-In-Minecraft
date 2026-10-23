@@ -13,6 +13,8 @@
 
 > 本项目仅供学习与个人使用。使用前请阅读文末[免责声明](#免责声明)。
 
+
+
 ## 功能特性
 
 - 三种登录方式
@@ -341,6 +343,11 @@ npm run login:msa          # 仅执行微软账号登录
 
 > 说明：Mod 里内嵌的 MP3 解码库 **JLayer** 是 LGPL 授权的第三方组件（`com.googlecode.soundlibs:jlayer`），
 > 与本项目自身的 Apache-2.0 授权相互独立；二次分发时请一并遵守其许可。
+
+## 致谢 / Acknowledgements
+
+- 感谢 [@HU-TAO-520](https://github.com/HU-TAO-520) 报告并协助定位了「写入未确认仍推进进度」的问题（[#2](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/2)）。
+  Thanks to [@HU-TAO-520](https://github.com/HU-TAO-520) for reporting and helping pin down the "progress advanced before the write was confirmed" bug ([#2](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/2)).
 
 ## 贡献者 / Contributors
 
