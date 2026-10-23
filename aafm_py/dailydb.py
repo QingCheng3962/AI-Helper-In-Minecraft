@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 import shutil
 import sqlite3
 import threading
@@ -232,40 +233,34 @@ class DailyDB:
                 return False
 
     def sign(self, player: str, day: Optional[str] = None) -> Dict[str, Any]:
-        """签一次。``ok=False`` 表示今天已经签过了。"""
+        """只在交易提交成功後回報成功；reason 區分重複與儲存失敗。"""
         key = str(player or '').strip()
         day = day or today_str()
         if not key:
-            return {'ok': False, 'streak': 0, 'total': 0, 'day': day}
+            return {'ok': False, 'reason': 'invalid_player', 'streak': 0, 'total': 0, 'day': day}
         with self._lock:
-            self.ensure_day(day)
             try:
+                self.ensure_day(day)
+                self.conn.execute('BEGIN IMMEDIATE')
                 row = self.conn.execute(
                     'SELECT streak, total FROM checkin WHERE day=? AND player=?',
                     (day, key)).fetchone()
-            except Exception:  # noqa: BLE001
-                row = None
-            if row is not None:
-                return {'ok': False, 'streak': int(row[0] or 0),
-                        'total': int(row[1] or 0), 'day': day}
-            # 连签：昨天签过就 +1，否则从 1 开始
-            prev = None
-            try:
+                if row is not None:
+                    self.conn.rollback()
+                    return {'ok': False, 'reason': 'already_signed', 'streak': int(row[0] or 0),
+                            'total': int(row[1] or 0), 'day': day}
                 prev = self.conn.execute(
                     'SELECT last_day, streak, total FROM player_stats WHERE player=?',
                     (key,)).fetchone()
-            except Exception:  # noqa: BLE001
-                prev = None
-            yday = time.strftime('%Y-%m-%d', time.localtime(time.time() - 86400))
-            streak = 1
-            total = 1
-            if prev is not None:
-                last_day = str(prev[0] or '')
-                streak = int(prev[1] or 0) + 1 if last_day == yday else 1
-                total = int(prev[2] or 0) + 1
-            try:
+                yday = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+                streak = 1
+                total = 1
+                if prev is not None:
+                    last_day = str(prev[0] or '')
+                    streak = int(prev[1] or 0) + 1 if last_day == yday else 1
+                    total = int(prev[2] or 0) + 1
                 self.conn.execute(
-                    'INSERT OR REPLACE INTO checkin(day, player, streak, total, updated) '
+                    'INSERT INTO checkin(day, player, streak, total, updated) '
                     'VALUES(?, ?, ?, ?, ?)', (day, key, streak, total, time.time()))
                 self.conn.execute(
                     'INSERT INTO player_stats(player, last_day, streak, total) '
@@ -274,8 +269,15 @@ class DailyDB:
                     (key, day, streak, total))
                 self.conn.commit()
             except Exception:  # noqa: BLE001
-                pass
-            return {'ok': True, 'streak': streak, 'total': total, 'day': day}
+                try:
+                    self.conn.rollback()
+                except Exception:  # noqa: BLE001
+                    # 不讓下一次操作繼續使用狀態不明的連線。
+                    conn, self._conn = self._conn, None
+                    if conn is not None:
+                        conn.close()
+                return {'ok': False, 'reason': 'storage_error', 'streak': 0, 'total': 0, 'day': day}
+            return {'ok': True, 'reason': 'signed', 'streak': streak, 'total': total, 'day': day}
 
     def stats(self, player: str) -> Dict[str, Any]:
         """累计信息（连签天数显示用；昨天没签要显示成断了）。"""

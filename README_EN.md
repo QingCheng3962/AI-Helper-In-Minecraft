@@ -37,6 +37,8 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.1
 
+- **Fix #5**: check-in deduplication, records and totals now share one transaction. Storage failures roll back and prevent rewards; retry after storage recovers.
+
 - **SemVer switch**: the project is now versioned **`v0.3.1`**, and the client mod **`0.1.0`** (jars are now named `Song_0.1.0_<gameVersion>.jar`); older entries use the mapping table above.
 
 - **`[提示词]帮助` (help)**: send `[DiaoHelper]帮助` → the bot **whispers** you a usage guide (chat, song requests, stop, affinity, video recommendations, lucky value, other commands). The **提示词 is whatever is configured under 玩家配置 → 触发正则** (`[DiaoHelper]`, `@DiaoHelper`…), *not* the song trigger `[点歌]`. The help text deliberately avoids the half-width `[点歌]` (uses `【点歌】`) so modded clients don't mistake it for a song request.

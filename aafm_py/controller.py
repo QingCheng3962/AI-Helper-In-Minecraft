@@ -1901,6 +1901,11 @@ class Controller:
             self.send_chat(cfg.checkinOffText.replace('{player}', player))
             return
         info = self.daily.sign(player)
+        if info.get('reason') in ('storage_error', 'invalid_player'):
+            self.send_chat(f'【簽到】{player} 本次簽到未能儲存，未發送獎勵，請稍後重試。')
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': f'[簽到] {player} 簽到儲存失敗，已阻止發獎。'})
+            return
         if not info.get('ok'):
             text = (cfg.checkinRepeatText
                     .replace('{player}', player)
