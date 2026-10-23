@@ -7,22 +7,25 @@
 - ``lucky(day, player, value)``   —— 当天**第一次查询时就随机定下来并存好**，重启不变；
 - ``checkin(day, player, streak, total)`` —— 当天签到记录；
 - ``player_stats(player, last_day, streak, total)`` —— 跨天累计（连签天数/总次数）；
+- ``checkin_rewards`` —— 固定獎勵快照及逐項發送狀態，未完成項目跨日承接；
 - ``meta(key, value)``           —— 记当前是哪一天。
 
 **跨天**：发现库里的 ``current_day`` 不是今天就
-「备份 → 删除 → 重建」：先把 ``daily.db`` 复制到 ``db_backup/db_backup_<时间>.db``，
-再删掉重建（当天数据清空，``player_stats`` 从备份里带过来，连签才不会断）。
+先完整建立承接統計與未完成獎勵的新庫，再備份舊庫至
+``db_backup/db_backup_<时间>.db`` 並替換 ``daily.db``；失敗保留原庫供重試。
 """
 
 from __future__ import annotations
 
+import json
 import os
-from datetime import date, timedelta
 import shutil
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional
+import uuid
+from datetime import date, timedelta
+from typing import Any, Callable, Dict, List, Optional
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -50,6 +53,17 @@ CREATE TABLE IF NOT EXISTS player_stats (
     streak   INTEGER NOT NULL DEFAULT 0,
     total    INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS checkin_rewards (
+    day TEXT NOT NULL,
+    player TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('money', 'item')),
+    snapshot TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending', 'sending', 'submitted', 'unknown')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    updated REAL,
+    PRIMARY KEY(day, player, kind)
+);
 """
 
 
@@ -66,6 +80,10 @@ class DailyDB:
         self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
         self._open()
+        # 上次進程可能在提交發送意圖後中斷；不能推論命令尚未送出。
+        with self.conn:
+            self.conn.execute("UPDATE checkin_rewards SET state='unknown', "
+                              "last_error='interrupted', updated=? WHERE state='sending'", (time.time(),))
         self.ensure_day()
 
     # ------------------------------------------------------------------
@@ -133,36 +151,35 @@ class DailyDB:
             return {'rotated': bool(cur), 'day': day, 'backup': backup}
 
     def _rotate(self, day: str) -> str:
-        """把旧库备份到 db_backup/，删掉重建，并把 player_stats 带过来。"""
-        stats: List[tuple] = []
-        try:
-            stats = list(self.conn.execute(
-                'SELECT player, last_day, streak, total FROM player_stats'))
-        except Exception:  # noqa: BLE001
-            stats = []
-        self._close()
+        """先完整建立新庫再替換；未完成獎勵不可因跨日被清除。"""
+        stats = list(self.conn.execute('SELECT player, last_day, streak, total FROM player_stats'))
+        rewards = list(self.conn.execute(
+            "SELECT day, player, kind, snapshot, state, attempts, last_error, updated "
+            "FROM checkin_rewards WHERE state!='submitted' OR day>=?", (day,)))
         backup_path = self._backup_name()
+        staging = self.path + '.rotate-' + uuid.uuid4().hex
         try:
+            new = sqlite3.connect(staging)
+            try:
+                new.executescript(SCHEMA)
+                new.executemany('INSERT INTO player_stats VALUES(?, ?, ?, ?)', stats)
+                new.executemany('INSERT INTO checkin_rewards VALUES(?, ?, ?, ?, ?, ?, ?, ?)', rewards)
+                new.execute('INSERT INTO meta(key, value) VALUES(?, ?)', ('current_day', day))
+                new.commit()
+            finally:
+                new.close()
             os.makedirs(self.backup_dir, exist_ok=True)
-            if os.path.exists(self.path):
-                shutil.copy2(self.path, backup_path)
-            for extra in ('-wal', '-shm', '-journal'):
-                p = self.path + extra
-                if os.path.exists(p):
-                    os.remove(p)
-            if os.path.exists(self.path):
-                os.remove(self.path)
-        except Exception:  # noqa: BLE001
-            pass
-        self._open()                                  # 重建（空库）
-        try:
-            self.conn.executemany(
-                'INSERT OR REPLACE INTO player_stats(player, last_day, streak, total) '
-                'VALUES(?, ?, ?, ?)', stats)
             self.conn.commit()
-        except Exception:  # noqa: BLE001
-            pass
-        self._set_meta('current_day', day)
+            self.conn.close()
+            self._conn = None
+            try:
+                shutil.copy2(self.path, backup_path)
+                os.replace(staging, self.path)
+            finally:
+                self._open()
+        finally:
+            if os.path.exists(staging):
+                os.remove(staging)
         return backup_path
 
     def _backup_name(self) -> str:
@@ -232,7 +249,8 @@ class DailyDB:
             except Exception:  # noqa: BLE001
                 return False
 
-    def sign(self, player: str, day: Optional[str] = None) -> Dict[str, Any]:
+    def sign(self, player: str, day: Optional[str] = None, *,
+             reward_factory: Optional[Callable[[int, int], List[Dict[str, Any]]]] = None) -> Dict[str, Any]:
         """只在交易提交成功後回報成功；reason 區分重複與儲存失敗。"""
         key = str(player or '').strip()
         day = day or today_str()
@@ -267,17 +285,56 @@ class DailyDB:
                     'VALUES(?, ?, ?, ?) ON CONFLICT(player) DO UPDATE SET '
                     'last_day=excluded.last_day, streak=excluded.streak, total=excluded.total',
                     (key, day, streak, total))
+                if reward_factory is not None:
+                    for reward in reward_factory(streak, total):
+                        self.conn.execute(
+                            'INSERT INTO checkin_rewards(day, player, kind, snapshot, state, updated) '
+                            "VALUES(?, ?, ?, ?, 'pending', ?)",
+                            (day, key, reward['kind'], json.dumps(reward, ensure_ascii=False), time.time()))
                 self.conn.commit()
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 try:
                     self.conn.rollback()
                 except Exception:  # noqa: BLE001
                     # 不讓下一次操作繼續使用狀態不明的連線。
                     conn, self._conn = self._conn, None
                     if conn is not None:
-                        conn.close()
-                return {'ok': False, 'reason': 'storage_error', 'streak': 0, 'total': 0, 'day': day}
+                        try:
+                            conn.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+                return {'ok': False, 'reason': 'invalid_reward' if isinstance(exc, ValueError) else 'storage_error',
+                        'streak': 0, 'total': 0, 'day': day}
             return {'ok': True, 'reason': 'signed', 'streak': streak, 'total': total, 'day': day}
+
+    def rewards(self, player: str, day: Optional[str] = None) -> List[Dict[str, Any]]:
+        """當日全部項目及歷史未完成項目；舊版沒有快照的簽到不補建獎勵。"""
+        with self._lock:
+            rows = self.conn.execute(
+                'SELECT day, player, kind, snapshot, state, attempts, last_error FROM checkin_rewards '
+                "WHERE player=? AND (day=? OR state!='submitted') "
+                "ORDER BY day, CASE kind WHEN 'money' THEN 0 ELSE 1 END",
+                (str(player).strip(), day or today_str())).fetchall()
+            return [dict(day=r[0], player=r[1], kind=r[2], snapshot=json.loads(r[3]),
+                         state=r[4], attempts=r[5], last_error=r[6]) for r in rows]
+
+    def claim_reward(self, reward: Dict[str, Any]) -> bool:
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "UPDATE checkin_rewards SET state='sending', attempts=attempts+1, updated=? "
+                "WHERE day=? AND player=? AND kind=? AND state='pending'",
+                (time.time(), reward['day'], reward['player'], reward['kind']))
+            return cur.rowcount == 1
+
+    def finish_reward(self, reward: Dict[str, Any], status: str, error: str = '') -> None:
+        state = {'submitted': 'submitted', 'not_sent': 'pending', 'unknown': 'unknown'}[status]
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                'UPDATE checkin_rewards SET state=?, last_error=?, updated=? '
+                "WHERE day=? AND player=? AND kind=? AND state='sending'",
+                (state, error, time.time(), reward['day'], reward['player'], reward['kind']))
+            if cur.rowcount != 1:
+                raise RuntimeError('Reward dispatch state changed')
 
     def stats(self, player: str) -> Dict[str, Any]:
         """累计信息（连签天数显示用；昨天没签要显示成断了）。"""

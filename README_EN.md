@@ -38,6 +38,8 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ### v0.3.1
 
 - **Fix #5**: check-in deduplication, records and totals now share one transaction. Storage failures roll back and prevent rewards; retry after storage recovers.
+- **Fix #6 / safe reward retries**: the first check-in freezes rewards and commands, tracking each reward separately. Repeating check-in retries only definitely unsent items, including previous-day items, without rerolling or incrementing statistics. Submitted, uncertain and legacy untracked rewards are never automatically resent. “Submitted” means written to the local pipe, not confirmed by the game server; administrators must reconcile uncertain items using logs and `checkin_rewards`.
+- **Database upgrade**: stop the application and back up `daily.db` before upgrading. The reward table is added automatically and unfinished records survive rotation. Reconcile pending/uncertain records before rolling back to older code, which does not understand these states; do not delete the database or blindly resend rewards. Custom success messages support `{reward_status}` (appended if absent); failure/uncertain responses bypass the success template.
 
 - **SemVer switch**: the project is now versioned **`v0.3.1`**, and the client mod **`0.1.0`** (jars are now named `Song_0.1.0_<gameVersion>.jar`); older entries use the mapping table above.
 

@@ -1018,7 +1018,7 @@ class AiPlayerGUI:
                   foreground='#888888').grid(row=7, column=1, columnspan=4, sticky='w', padx=4)
         self._entry(ck, 8, '签到成功文案', self.var_misc_checkin_text)
         ttk.Label(ck, text='可用 {player}、{money}/{value} 金币、{item}、{count}、'
-                           '{items} 物品描述（没物品时为空）、{streak} 连签天数、{total} 累计次数',
+                           '{items} 物品描述（没物品时为空）、{streak} 连签天数、{total} 累计次数、{reward_status} 发奖状态',
                   foreground='#888888').grid(row=9, column=1, columnspan=4, sticky='w', padx=4)
         self._entry(ck, 10, '今天已签文案', self.var_misc_checkin_repeat,
                     hint='可用 {player}、{streak}、{total}')

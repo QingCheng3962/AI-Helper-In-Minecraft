@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from aafm_py.config import AppConfig
+from aafm_py.bot_engine import SendResult
 from aafm_py.controller import Controller
 from aafm_py.dailydb import DailyDB
 
@@ -26,8 +27,27 @@ class FaultConnection:
             raise sqlite3.OperationalError('injected commit failure')
         self.real.commit()
 
+    def executemany(self, sql, *args):
+        if self.fail in sql:
+            raise sqlite3.OperationalError('injected SQL failure')
+        return self.real.executemany(sql, *args)
+
     def __getattr__(self, name):
         return getattr(self.real, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        if typ is not None:
+            self.real.rollback()
+            return False
+        try:
+            self.commit()
+        except Exception:
+            self.real.rollback()
+            raise
+        return False
 
 
 def controller(daily, engine=None):
@@ -36,7 +56,8 @@ def controller(daily, engine=None):
     c.config.misc.checkinMoneyMin = c.config.misc.checkinMoneyMax = 20
     c.config.misc.checkinItem = ''
     c.daily = daily
-    c._engine = engine or SimpleNamespace(say=Mock(return_value=True))
+    c._engine = engine or SimpleNamespace(say=Mock(return_value=True),
+                                         say_result=Mock(return_value=SendResult('submitted')))
     c.send_chat = Mock()
     c._post_ui = Mock()
     c._remember_sent = Mock()
@@ -64,6 +85,7 @@ class CheckinTransactions(unittest.TestCase):
         c._do_checkin('Alice')
         c._do_checkin('Alice')
         c._engine.say.assert_not_called()
+        c._engine.say_result.assert_not_called()
         self.assertIn('未能儲存', c.send_chat.call_args.args[0])
         self.assert_empty()
         self.db.conn.execute('PRAGMA query_only=OFF')
@@ -78,6 +100,7 @@ class CheckinTransactions(unittest.TestCase):
                 c = controller(self.db)
                 c._do_checkin('Alice')
                 c._engine.say.assert_not_called()
+                c._engine.say_result.assert_not_called()
                 self.db._conn = real
                 self.assert_empty()
         self.assertTrue(self.db.sign('Alice')['ok'])
