@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.1** (SemVer; legacy numbering v1.0 → v0.1.0, v2.0 → v0.2.0, v3.x → v0.3.x — old tags are kept as-is)
+**Current version: v0.3.1** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,14 +31,13 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> **From v0.3.1 the project follows Semantic Versioning** (`MAJOR.MINOR.PATCH`: breaking → MAJOR, features → MINOR, fixes → PATCH).
-> Legacy numbering: `v1.0 → v0.1.0`, `v2.0 → v0.2.0`, `v3.x → v0.3.x`. **Old tags / published releases stay untouched**,
-> and the historical entries below keep their original labels. The client mod (`mc-song-mod/`) is versioned together with the project:
-> project `v0.3.1` ↔ mod `0.1.0`.
+> **All version labels follow Semantic Versioning** (`MAJOR.MINOR.PATCH`). Historical entries were rewritten per this table:
+> `v1.0 → v0.1.0`, `v2.0 → v0.2.1`, `v2.1 → v0.2.2`, `v3.0 → v0.3.0`, `v3.1 → v0.3.0.1`, `v3.2.0 → v0.3.0.2`.
+> Current version: **`v0.3.1`**; the client mod (`mc-song-mod/`) is versioned together with the project (currently `0.1.0`).
 
 ### v0.3.1
 
-- **SemVer switch**: the project was renumbered from `v3.2.1` to **`v0.3.1`**, and the client mod from `1.0.0` to **`0.1.0`** (jars are now named `Song_0.1.0_<gameVersion>.jar`).
+- **SemVer switch**: the project is now versioned **`v0.3.1`**, and the client mod **`0.1.0`** (jars are now named `Song_0.1.0_<gameVersion>.jar`); older entries use the mapping table above.
 
 - **`[提示词]帮助` (help)**: send `[DiaoHelper]帮助` → the bot **whispers** you a usage guide (chat, song requests, stop, affinity, video recommendations, lucky value, other commands). The **提示词 is whatever is configured under 玩家配置 → 触发正则** (`[DiaoHelper]`, `@DiaoHelper`…), *not* the song trigger `[点歌]`. The help text deliberately avoids the half-width `[点歌]` (uses `【点歌】`) so modded clients don't mistake it for a song request.
 - **Affinity (new)**: `[DiaoHelper]好感度` shows your score / level / points to the next level; `[DiaoHelper]好感度 <player>` shows someone else's. Defaults: +1 per AI reply (5 min cooldown), +2 per successful song request (1 min), +1 bonus on the first interaction of each day; levels 陌生人 → 脸熟 → 熟人 → 朋友 → 好朋友 → 挚友. Stored in `affinity.json`, configured under `affinity` in `config.json`.
@@ -50,7 +49,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **New 杂项 (Misc) tab**: toggles + texts + cooldown for video recommendations, the lucky value and the daily check-in (including its reward scheme), plus **mass private message** — type a line, hit "发送给所有玩家", and the bot `/msg`s every online player one by one (with a configurable **gap between players** so it never gets kicked for spamming; the bot skips itself).
 - Fix: `fabric.mod.json` now injects the `minecraft` dependency per version (fixes the **26.x "incompatible"** error — every jar used to hard-code `~1.21.11`).
 
-### v3.2.0
+### v0.3.0.2
 
 **In-game song requests (new; two options — client mod + bot-side playback by default, zero server changes)**
 
@@ -77,7 +76,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **QQ relay improvements**: switchable gateway frameworks (SnowLuma default / NapCat) with **independent** configs; SnowLuma auto-reads port + token from `config/onebot_*.json` and picks a working token by a real WS handshake; QQ↔MC direction toggles decoupled; friendly 5xx/timeout messages with exponential backoff; a hard **20s timeout** on all 3rd-party auth requests.
 - **Apache License 2.0**: added [`LICENSE`](LICENSE) (with an explicit patent grant, friendlier for companies and redistribution).
 
-### v3.1
+### v0.3.0.1
 
 - **Command block (bottom of the Player Config tab)**: a table of commands to block (without the slash; defaults include `pay kick ban op stop whitelist kill give tp gamemode`). Any bot-sent message (AI replies / random chat) starting with `/` whose command name is listed is dropped and logged, preventing prompt-injection from running dangerous commands. Rows with "＋ add row" and per-row "Delete".
 - **Message after blocking**: when a command is blocked, an optional configurable line can be sent; placeholders `{player}` = who requested it, `{command}` = command name (`{cmd}` alias); empty = block silently.
@@ -86,7 +85,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Enable/disable buttons**: command block and random chat each have a **red/green button** (green enabled / red disabled) that toggles and saves instantly.
 - **Random chat moved into Player Config** (no longer its own tab): **each line has its own random interval** (per-row min~max seconds) and there is a **random count per fire (min~max)** that picks lines from the list; rows can be added/removed.
 
-### v3.0
+### v0.3.0
 
 - **Reconnect improvements**
   - Reconnect interval uses a value + unit (sec/min/hour/day) picker (up to 30 days).
@@ -102,7 +101,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Quick login**: picker listing local accounts with nicknames (last one preselected), quick-login via `-q`.
 - **Misc**: fixed `client.chat is not a function` (messages queued until ready).
 
-### v2.1
+### v0.2.2
 
 - **QQ relay**: bundled NapCat with four buttons (Start / Connect / Reconnect / Disconnect); OneBot 11 forward/reverse, group filter, access token.
 - **MC → QQ**: messages starting with a trigger (default `[sentQ]`, multiple allowed) are forwarded; group targeting, cooldown, color-code stripping, `?` for illegal chars, success/failure reply.
@@ -112,12 +111,12 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Chat parsing fix**: works with or without a `[guild]`-style title prefix.
 - **Misc**: log tab with `[HH:MM:SS]` timestamps; GUI tab cleanup; high-DPI.
 
-### v2.0
+### v0.2.1
 
 - **Auto reconnect / kick handling**: reconnect after drops/kicks; auto `/lobby` after a successful kick-reconnect.
 - **Appearance**: window background image + dimming and auto/light/dark text theme.
 
-### v1.0
+### v0.1.0
 
 - Initial release: client-less AI player (mineflayer), offline / LittleSkin / Microsoft login, AI chat with triggers/context/filters, Quiz auto-answer, AutoEat; bilingual README and disclaimer.
 
