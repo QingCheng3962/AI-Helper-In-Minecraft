@@ -2941,7 +2941,8 @@ class Controller:
 
         Matches the command *path*, so multi-word entries work too:
         entry ``land`` blocks ``/land create ...``; entry ``land create``
-        blocks ``/land create ...`` but not ``/land claim``.
+        blocks ``/land create ...`` but not ``/land claim``. Unqualified
+        entries also cover namespaced roots; explicit namespaces stay specific.
         """
         cfg = self.config.commandBlock
         if not cfg.enabled:
@@ -2949,15 +2950,16 @@ class Controller:
         s = (text or '').strip()
         if not s.startswith('/'):
             return ''
-        rest = s[1:].strip().lower()
+        rest = s[1:].lower().split()
         if not rest:
             return ''
         for entry in (cfg.commands or []):
-            e = str(entry).strip().lower().lstrip('/').strip()
+            e = str(entry).strip().lower().lstrip('/').split()
             if not e:
                 continue
-            if rest == e or rest.startswith(e + ' '):
-                return e
+            root = rest[0] if ':' in e[0] else rest[0].rsplit(':', 1)[-1]
+            if root == e[0] and rest[1:len(e)] == e[1:]:
+                return ' '.join(e)
         return ''
 
     def _worker_loop(self) -> None:

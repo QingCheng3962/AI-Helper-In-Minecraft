@@ -37,6 +37,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.1
 
+- **Fix #8 / command filtering**: unqualified blocked commands also cover `minecraft:` and plugin namespaces, matching case-insensitive command paths with word boundaries. Explicitly namespaced custom rules remain namespace-specific.
 - **Fix #5**: check-in deduplication, records and totals now share one transaction. Storage failures roll back and prevent rewards; retry after storage recovers.
 - **Fix #7 / book confirmation**: progress now requires server-returned item data matching the pages and book type, plus title and author for signed books. Local slot events, unchanged empty books and late responses for other volumes cannot confirm a write. Creative fallback uses the same content checks. Unconfirmed writes preserve the book and continuation position for in-game inspection and retry.
 - **Fix #6 / safe reward retries**: the first check-in freezes rewards and commands, tracking each reward separately. Repeating check-in retries only definitely unsent items, including previous-day items, without rerolling or incrementing statistics. Submitted, uncertain and legacy untracked rewards are never automatically resent. “Submitted” means written to the local pipe, not confirmed by the game server; administrators must reconcile uncertain items using logs and `checkin_rewards`.
