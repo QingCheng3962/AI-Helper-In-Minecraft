@@ -6,6 +6,8 @@ players and optional image generation.
 """
 from __future__ import annotations
 
+import copy
+import queue
 import random
 import re
 import threading
@@ -19,6 +21,7 @@ from .config import AiPlayerConfig
 from .roster import RosterError, split_aliases
 
 MAX_LOG_LINES = 200
+MAX_PENDING_WORK = 8  # one active job plus at most eight waiting jobs
 
 _LOG_CALLBACK = Callable[[str], None]
 
@@ -194,8 +197,16 @@ class AiPlayer:
                  error: _LOG_CALLBACK = None,
                  roster: Optional[Any] = None,
                  on_reply: Optional[Callable[[Optional[str]], None]] = None):
+        self._work_local = threading.local()
+        self._work_lock = threading.RLock()
+        self._work_queue = queue.Queue(maxsize=MAX_PENDING_WORK)
+        self._work_generation = 0
+        self._work_thread = None
+        self._tick_generation = None
+        self._closed = False
+        self._accepting = True
         self.config = config
-        self.on_send_chat = on_send_chat
+        self._send_chat_callback = on_send_chat
         # 每次真的回了话就回调一次（带玩家名）—— 好感度用它加分
         self.on_reply = on_reply
         self._log_cb = log
@@ -257,6 +268,93 @@ class AiPlayer:
     # ------------------------------------------------------------------
     # Lifecycle / reload
     # ------------------------------------------------------------------
+    @property
+    def config(self):
+        # A running request keeps its settings even if the GUI reloads them.
+        return getattr(self._work_local, 'config', self._config)
+
+    @config.setter
+    def config(self, value):
+        self._config = value
+
+    def _work_current(self) -> bool:
+        return (not self._closed and not self._stopped and self._accepting
+                and self._config.enabled
+                and getattr(self._work_local, 'generation', self._work_generation)
+                == self._work_generation)
+
+    def on_send_chat(self, text: str) -> None:
+        # Cancellation and publication share a lock: once stop/reload returns,
+        # no old job can publish a new chunk, image or fixed answer.
+        with self._work_lock:
+            if self._work_current():
+                self._send_chat_callback(text)
+
+    def _invalidate_work(self) -> None:
+        """Called under _work_lock; do not wait for a provider to return."""
+        self._work_generation += 1
+        self._tick_generation = None
+        while True:
+            try:
+                self._work_queue.get_nowait()
+                self._work_queue.task_done()
+            except queue.Empty:
+                break
+
+    def _enqueue(self, kind, callback, *args) -> bool:
+        with self._work_lock:
+            if self._closed or (kind not in ('reload', 'control') and not self._work_current()):
+                return False
+            if kind == 'tick' and self._tick_generation == self._work_generation:
+                return False
+            try:
+                self._work_queue.put_nowait((self._work_generation, kind, callback,
+                                             args, copy.deepcopy(self._config)))
+            except queue.Full:
+                if kind != 'tick':
+                    self._log('AI 等待队列已满，跳过本次任务，请稍后再试。')
+                return False
+            if kind == 'tick':
+                self._tick_generation = self._work_generation
+            if self._work_thread is None:
+                self._work_thread = threading.Thread(
+                    target=self._work_loop, name='aafm-ai', daemon=True)
+                self._work_thread.start()
+            return True
+
+    def _work_loop(self) -> None:
+        while True:
+            job = self._work_queue.get()
+            try:
+                if job is None:
+                    return
+                generation, kind, callback, args, cfg = job
+                with self._work_lock:
+                    if generation != self._work_generation or self._closed:
+                        continue
+                    self._work_local.generation = generation
+                    self._work_local.config = cfg
+                    if kind not in ('reload', 'control') and not self._work_current():
+                        continue
+                callback(*args)
+            except Exception as e:  # noqa: BLE001
+                self._error('AI 后台任务失败: ' + str(e))
+            finally:
+                with self._work_lock:
+                    if job is not None and kind == 'tick' and self._tick_generation == generation:
+                        self._tick_generation = None
+                self._work_local.__dict__.clear()
+                self._work_queue.task_done()
+
+    def close(self) -> None:
+        with self._work_lock:
+            if self._closed:
+                return
+            self.stop_now()
+            self._closed = True
+            if self._work_thread is not None:
+                self._work_queue.put_nowait(None)
+
     def _build_providers(self) -> None:
         cfg = self.config
         try:
@@ -321,9 +419,16 @@ class AiPlayer:
             setattr(self, attr, None)
 
     def reload(self, new_config: AiPlayerConfig) -> None:
-        # 让重载前发出的请求在返回时失效，避免旧 Provider 的迟到的回复被发出去。
-        self._generation += 1
-        self.config = new_config
+        with self._work_lock:
+            if self._closed:
+                return
+            self._invalidate_work()
+            self.config = new_config
+            self._stopped = False
+            self._enqueue('reload', self._apply_reload)
+
+    def _apply_reload(self) -> None:
+        # 重载时释放旧 Provider，避免连接/客户端泄漏（#18）
         self._close_providers()
         self._build_providers()
         self._compile_patterns()
@@ -332,7 +437,7 @@ class AiPlayer:
         self._last_player_raw = None
         self._last_player_message_time = 0
         self._last_handled_user_message_time = 0
-        self._next_scheduled_reply_time = _now_ms() + new_config.scheduleIntervalSeconds * 1000
+        self._next_scheduled_reply_time = _now_ms() + self.config.scheduleIntervalSeconds * 1000
         self._next_trigger_reply_time = _now_ms()
         self._next_image_cooldown_time = _now_ms()
         self._idle_next = []
@@ -341,18 +446,39 @@ class AiPlayer:
         self._trigger_reply_in_progress = False
         self._schedule_reply_in_progress = False
         self._image_generating = False
-        self._stopped = False
 
     def stop_now(self) -> None:
-        self._stopped = True
-        self._generation += 1          # 作废进行中的请求（迟到回复不再发送）
+        with self._work_lock:
+            self._stopped = True
+            self._invalidate_work()
+
+    def resume(self) -> None:
+        """Accept new work without reviving the generation cancelled by stop."""
+        with self._work_lock:
+            if self._closed or not self._stopped:
+                return
+            self._invalidate_work()
+            self._stopped = False
+            self._enqueue('control', self._reset_reply_state)
+
+    def _reset_reply_state(self) -> None:
         self._trigger_reply_in_progress = False
         self._schedule_reply_in_progress = False
-        self._image_generating = False
         self._scheduled_request_queued = False
+        self._image_generating = False
+        self._last_player_message = None
+        self._last_player_raw = None
+        self._last_player_message_time = 0
+        self._last_handled_user_message_time = 0
+        self._current_player = None
+        self._recent_player_messages.clear()
+        self._next_trigger_reply_time = _now_ms()
+        self._next_scheduled_reply_time = _now_ms() + self.config.scheduleIntervalSeconds * 1000
+        self._next_image_cooldown_time = _now_ms()
+        self._idle_next = []
 
     def clear_context(self) -> None:
-        self._context.clear()
+        self._enqueue('control', self._context.clear)
 
     def get_activity_log(self) -> List[str]:
         return list(self._activity_log)
@@ -376,6 +502,10 @@ class AiPlayer:
     # ------------------------------------------------------------------
     def on_player_message(self, player_name: Optional[str], text: str,
                           raw: Optional[str] = None) -> None:
+        self._enqueue('message', self._process_player_message, player_name, text, raw)
+
+    def _process_player_message(self, player_name: Optional[str], text: str,
+                                raw: Optional[str] = None) -> None:
         cfg = self.config
         if text is None or not text.strip():
             return
@@ -474,6 +604,9 @@ class AiPlayer:
             self._last_handled_user_message_time = now
 
     def tick(self) -> None:
+        self._enqueue('tick', self._tick)
+
+    def _tick(self) -> None:
         """Called periodically (>=1s): idle chat + research + scheduled replies."""
         self._maybe_idle_chat()
         self._maybe_auto_alias()
@@ -521,7 +654,11 @@ class AiPlayer:
     # Periodic random chat
     # ------------------------------------------------------------------
     def set_online(self, online: bool) -> None:
-        self._online = bool(online)
+        with self._work_lock:
+            self._online = bool(online)
+            self._accepting = self._online
+            if not online:
+                self._invalidate_work()
 
     def _maybe_idle_chat(self) -> None:
         cfg = self.config
@@ -555,7 +692,7 @@ class AiPlayer:
                     if pool:
                         picks.append(random.choice(pool))
                 for j, msg in enumerate(picks):
-                    if self._stopped or not cfg.enabled:
+                    if not self._work_current():
                         break
                     if self._is_blocked(msg):
                         continue
@@ -571,7 +708,6 @@ class AiPlayer:
     # ------------------------------------------------------------------
     def _start_ai_reply(self, user_message: str, user_message_time: int, is_trigger: bool) -> None:
         cfg = self.config
-        gen = self._generation
         flag_key = 'trigger' if is_trigger else 'schedule'
         flag = self._trigger_reply_in_progress if is_trigger else self._schedule_reply_in_progress
         if flag:
@@ -586,7 +722,7 @@ class AiPlayer:
             if provider is None:
                 self._error(('触发' if is_trigger else '定时') + 'AI 提供方为 null，请检查 AI API 设置。')
                 return
-            if not cfg.enabled:
+            if not self._work_current():
                 return
             if user_message is None or not user_message.strip():
                 return
@@ -602,14 +738,14 @@ class AiPlayer:
                 except Exception as e:  # noqa: BLE001
                     results = []
                     self._error('联网搜索失败: ' + str(e))
+                if not self._work_current():
+                    return
                 if results:
                     system += ('\n\n[联网搜索结果，可能有时效性，仅供参考]\n'
                                + websearch.format_results(results))
                     self._log(f'联网搜索：{len(results)} 条')
             reply = provider.send(system, messages)
-            # 请求期间发生了 reload / 停用：旧 Provider 的回复一律丢弃（#18）。
-            if gen != self._generation or self._stopped or not self.config.enabled:
-                self._log('AI 配置已变更或已停用，丢弃旧回复。')
+            if not self._work_current():
                 return
             if reply is None or not reply.strip():
                 return
@@ -624,14 +760,14 @@ class AiPlayer:
 
     def _handle_ai_reply(self, reply: str) -> None:
         cfg = self.config
-        if self._stopped or not cfg.enabled:
+        if not self._work_current():
             return
         chunks = self._split_reply(reply)
         if not chunks:
             return
         sent = 0
         for i, chunk in enumerate(chunks):
-            if self._stopped or not cfg.enabled:
+            if not self._work_current():
                 break
             if self._is_blocked(chunk):
                 self._log('跳过被拦截的 AI 消息: ' + chunk)
@@ -642,14 +778,17 @@ class AiPlayer:
             sent += 1
             if i < len(chunks) - 1 and self._chunk_delay_ms > 0:
                 time.sleep(self._chunk_delay_ms / 1000.0)
-        if sent > 0 and cfg.contextEnabled and cfg.contextLength > 0:
-            self._add_to_context({'role': 'assistant', 'content': reply})
-        if sent > 0 and self.on_reply is not None:
-            try:
-                self.on_reply(self._current_player)
-            except Exception:  # noqa: BLE001
-                pass
-        self._next_scheduled_reply_time = _now_ms() + cfg.scheduleIntervalSeconds * 1000
+        with self._work_lock:
+            if not self._work_current():
+                return
+            if sent > 0 and cfg.contextEnabled and cfg.contextLength > 0:
+                self._add_to_context({'role': 'assistant', 'content': reply})
+            if sent > 0 and self.on_reply is not None:
+                try:
+                    self.on_reply(self._current_player)
+                except Exception:  # noqa: BLE001
+                    pass
+            self._next_scheduled_reply_time = _now_ms() + cfg.scheduleIntervalSeconds * 1000
         self._log(f'已发送 {sent} 条 AI 消息。')
 
     # ------------------------------------------------------------------
@@ -910,13 +1049,13 @@ class AiPlayer:
     def _send_direct_reply(self, reply: str) -> None:
         """Send a fixed answer, split into chat-sized chunks like AI replies."""
         cfg = self.config
-        if self._stopped or not cfg.enabled:
+        if not self._work_current():
             return
         chunks = self._split_reply(reply or '')
         if not chunks:
             return
         for i, chunk in enumerate(chunks):
-            if self._stopped or not cfg.enabled:
+            if not self._work_current():
                 break
             if self._is_blocked(chunk):
                 self._log('跳过被拦截的回复: ' + chunk)
@@ -925,7 +1064,7 @@ class AiPlayer:
             self._log_activity('AI > ' + chunk)
             if i < len(chunks) - 1 and self._chunk_delay_ms > 0:
                 time.sleep(self._chunk_delay_ms / 1000.0)
-        if cfg.contextEnabled and cfg.contextLength > 0:
+        if self._work_current() and cfg.contextEnabled and cfg.contextLength > 0:
             self._add_to_context({'role': 'assistant', 'content': reply})
         self._log(f'已发送 {len(chunks)} 条直接回复。')
 
@@ -1046,8 +1185,7 @@ class AiPlayer:
                 self._send_direct_reply('上一个研究还在进行，请稍后再试。')
             return
         self._research_running = True
-        threading.Thread(target=self._research_job,
-                         args=(target, manual), daemon=True).start()
+        self._research_job(target, manual)
 
     def _research_job(self, target: str, manual: bool) -> None:
         try:
@@ -1056,6 +1194,8 @@ class AiPlayer:
             res = {'ok': False, 'msg': '研究出错: ' + str(e)}
         finally:
             self._research_running = False
+        if not self._work_current():
+            return
         self._last_research_ms[_norm(target).casefold()] = _now_ms()
 
         if manual:
@@ -1075,8 +1215,7 @@ class AiPlayer:
         roster = self._roster
         if roster is None:
             return {'ok': False, 'msg': '资料库未配置。'}
-        # Use a dedicated LLM client: research runs on its own thread while the
-        # shared trigger/schedule clients are used from the worker thread.
+        # Research shares the bounded AI worker and owns this short-lived client.
         provider = None
         try:
             provider = llm.create_provider(self.config, None)
@@ -1118,7 +1257,10 @@ class AiPlayer:
         if not note:
             return {'ok': False, 'msg': 'AI 未返回有效结论。'}
         try:
-            roster.add_ai_record(source, display, note)
+            with self._work_lock:
+                if not self._work_current():
+                    return {'ok': False, 'msg': '研究已取消。'}
+                roster.add_ai_record(source, display, note)
         except RosterError as e:
             return {'ok': False, 'msg': str(e)}
         return {'ok': True, 'name': display, 'note': note}
@@ -1202,8 +1344,7 @@ class AiPlayer:
                 self._send_direct_reply('上一次别名分析还在进行，请稍后再试。')
             return
         self._alias_running = True
-        threading.Thread(target=self._alias_job,
-                         args=(target, manual), daemon=True).start()
+        self._alias_job(target, manual)
 
     def _alias_job(self, target: str, manual: bool) -> None:
         try:
@@ -1212,6 +1353,8 @@ class AiPlayer:
             res = {'ok': False, 'msg': '别名分析出错: ' + str(e)}
         finally:
             self._alias_running = False
+        if not self._work_current():
+            return
         self._last_alias_ms[_norm(target).casefold()] = _now_ms()
 
         if manual:
@@ -1283,7 +1426,10 @@ class AiPlayer:
             return {'ok': False, 'msg': f'暂未发现 {display} 的别名。'}
 
         try:
-            cells = roster.add_aliases(source, display, tokens)
+            with self._work_lock:
+                if not self._work_current():
+                    return {'ok': False, 'msg': '别名分析已取消。'}
+                cells = roster.add_aliases(source, display, tokens)
         except RosterError as e:
             return {'ok': False, 'msg': str(e)}
         return {'ok': True, 'name': display,
@@ -1309,6 +1455,9 @@ class AiPlayer:
             self._context.popleft()
 
     def on_server_message(self, raw: str) -> None:
+        self._enqueue('context', self._capture_server_message, raw)
+
+    def _capture_server_message(self, raw: str) -> None:
         """Feed a server/system message into the AI context (no reply)."""
         cfg = self.config
         if not getattr(cfg, 'serverMessagesInContext', True):
@@ -1445,12 +1594,17 @@ class AiPlayer:
     # Image generation
     # ------------------------------------------------------------------
     def generate_image(self, prompt: str) -> None:
+        if not hasattr(self._work_local, 'generation'):
+            self._enqueue('image', self.generate_image, prompt)
+            return
         if self._image_generating:
             self._log('文生图已在进行中。')
             return
         self._image_generating = True
         try:
             url = self._request_image_generation(prompt)
+            if not self._work_current():
+                return
             if url:
                 self.on_send_chat(url)
                 self._log_activity('AI > [图] ' + url)

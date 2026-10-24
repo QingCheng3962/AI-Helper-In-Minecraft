@@ -44,6 +44,7 @@ public class SongModClient implements ClientModInitializer {
     private static volatile long lastMyRequestAt = 0L;
     /** 我最近一次点歌的关键词/链接/id —— 只有和它匹配的播放数据才算我的（#15）。 */
     private static volatile String lastMyQuery = "";
+    private static volatile boolean stoppedByUser = false;
     private static volatile String currentLabel = "";
 
     @Override
@@ -68,7 +69,7 @@ public class SongModClient implements ClientModInitializer {
         }
     }
 
-    private static void handleChat(String message, boolean mine) {
+    private static synchronized void handleChat(String message, boolean mine) {
         if (message == null || config == null) {
             return;
         }
@@ -97,34 +98,48 @@ public class SongModClient implements ClientModInitializer {
             audioUrl = firstAudioUrl(payload);
         }
         if (audioUrl != null) {
+            if (stoppedByUser && !mine) {
+                return;
+            }
+            if (mine) {
+                stoppedByUser = false;
+                lastMyRequestAt = System.currentTimeMillis();
+            }
             if (config.onlyMySong && !isForMe(payload)) {
                 System.out.println("[songmod] 这条点歌不是给我的，跳过：" + shorten(payload, 100));
                 return;
             }
-            PENDING.incrementAndGet();
-            consumeMyRequest();
+            final int seq = PENDING.incrementAndGet();
+            consumeMyRequest();          // 这条请求有结果了（#15）
             String label = songLabel(payload, audioUrl);
             currentLabel = label;
             System.out.println("[songmod] 用机器人直链播放: " + shorten(label, 80)
                     + " <- " + shorten(audioUrl, 90));
-            feedback("§b[点歌] §a正在播放：§f" + label);
-            hintIfConfigured();
+            feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + label);
+            hintIfConfigured(seq);
             SongPlayer.play(audioUrl, config.volume,
-                    err -> feedback("§b[点歌] §c播放失败：" + err));
+                    err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
             return;
         }
 
         // 机器人直链被服务器改坏时的第二道保险：… | ¤直链 id:1901371647 → 用歌曲 id 自己取直链
         String songId = extractSongId(payload);
         if (songId != null) {
+            if (stoppedByUser && !mine) {
+                return;
+            }
+            if (mine) {
+                stoppedByUser = false;
+                lastMyRequestAt = System.currentTimeMillis();
+            }
             if (config.onlyMySong && !isForMe(payload)) {
                 System.out.println("[songmod] 这条 id 取链不是给我的，跳过：" + shorten(payload, 100));
                 return;
             }
-            PENDING.incrementAndGet();
-            consumeMyRequest();
+            final int seq = PENDING.incrementAndGet();
+            consumeMyRequest();          // 这条请求有结果了（#15）
             feedback("§b[点歌] §7机器人直链不可用，改用歌曲 id 取链…");
-            playById(songId);
+            playById(songId, seq);
             return;
         }
 
@@ -141,7 +156,7 @@ public class SongModClient implements ClientModInitializer {
             return;
         }
         if (eq(payload, config.stopWord)) {
-            SongPlayer.stop();      // 只停我自己的
+            stopPlayback();
             feedback("§b[点歌] §e已停止播放");
             return;
         }
@@ -157,6 +172,7 @@ public class SongModClient implements ClientModInitializer {
         }
         lastKey = key;
         lastKeyAt = now;
+        stoppedByUser = false;
         // 记下「我点过歌」的时刻和关键词：机器人私聊回来的播放数据用它判断「这是给我的」
         lastMyRequestAt = now;
         lastMyQuery = payload;
@@ -165,38 +181,48 @@ public class SongModClient implements ClientModInitializer {
         final String query = payload;
         final int seq = PENDING.incrementAndGet();
         SCHED.schedule(() -> {
-            if (PENDING.get() != seq) {
-                return;
-            }
-            if (config.localFallback) {
-                feedback("§b[点歌] §7机器人没响应，本地兜底搜索…");
-                searchAndPlay(query);
-            } else {
-                feedback("§b[点歌] §c机器人不在线（或没登录网易云），点歌失败。");
+            synchronized (SongModClient.class) {
+                if (!isCurrent(seq)) {
+                    return;
+                }
+                if (config.localFallback) {
+                    feedbackIfCurrent(seq, "§b[点歌] §7机器人没响应，本地兜底搜索…");
+                    searchAndPlay(query, seq);
+                } else {
+                    feedbackIfCurrent(seq, "§b[点歌] §c机器人不在线（或没登录网易云），点歌失败。");
+                }
             }
         }, WAIT_MS, TimeUnit.MILLISECONDS);
     }
 
     /** 用歌曲 id 自己取直链播放（机器人直链被服务器改坏时的保险）。 */
-    private static void playById(String id) {
+    private static void playById(String id, int seq) {
         POOL.submit(() -> {
+            if (!isCurrent(seq)) {
+                return;
+            }
             try {
                 MusicSearch.Song song = MusicSearch.byId(id, config.neteaseCookie);
-                if (song == null || song.audioUrl == null || song.audioUrl.isEmpty()) {
-                    feedback("§b[点歌] §c用歌曲 id " + id + " 取不到直链");
-                    return;
+                synchronized (SongModClient.class) {
+                    if (!isCurrent(seq)) {
+                        return;
+                    }
+                    if (song == null || song.audioUrl == null || song.audioUrl.isEmpty()) {
+                        feedbackIfCurrent(seq, "§b[点歌] §c用歌曲 id " + id + " 取不到直链");
+                        return;
+                    }
+                    String trialNote = song.isTrial() ? " §7（试听片段）" : "";
+                    String label = song.title + " - " + song.artistText();
+                    currentLabel = label;
+                    System.out.println("[songmod] 用歌曲 id 取链播放: #" + id + " -> "
+                            + shorten(song.audioUrl, 90));
+                    feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + label + trialNote);
+                    hintIfConfigured(seq);
+                    SongPlayer.play(song.audioUrl, config.volume,
+                            err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
                 }
-                String trialNote = song.isTrial() ? " §7（试听片段）" : "";
-                String label = song.title + " - " + song.artistText();
-                currentLabel = label;
-                System.out.println("[songmod] 用歌曲 id 取链播放: #" + id + " -> "
-                        + shorten(song.audioUrl, 90));
-                feedback("§b[点歌] §a正在播放：§f" + label + trialNote);
-                hintIfConfigured();
-                SongPlayer.play(song.audioUrl, config.volume,
-                        err -> feedback("§b[点歌] §c播放失败：" + err));
             } catch (Throwable t) {
-                feedback("§b[点歌] §c出错：" + t);
+                feedbackIfCurrent(seq, "§b[点歌] §c出错：" + t);
             }
         });
     }
@@ -233,40 +259,66 @@ public class SongModClient implements ClientModInitializer {
         return null;
     }
 
-    private static void searchAndPlay(String query) {
+    private static void searchAndPlay(String query, int seq) {
         POOL.submit(() -> {
+            if (!isCurrent(seq)) {
+                return;
+            }
             try {
                 MusicSearch.Song song = MusicSearch.search(query, config.neteaseCookie);
-                if (song == null) {
-                    feedback("§b[点歌] §c没找到「" + query + "」");
-                    return;
+                synchronized (SongModClient.class) {
+                    if (!isCurrent(seq)) {
+                        return;
+                    }
+                    if (song == null) {
+                        feedbackIfCurrent(seq, "§b[点歌] §c没找到「" + query + "」");
+                        return;
+                    }
+                    if (song.audioUrl == null || song.audioUrl.isEmpty()) {
+                        feedbackIfCurrent(seq, "§b[点歌] §e" + song.title + " §7- " + song.artistText()
+                                + "：" + (song.note == null ? "暂时无法播放" : song.note));
+                        return;
+                    }
+                    String trialNote = song.isTrial() ? " §7（试听片段）" : "";
+                    String label = song.title + " - " + song.artistText();
+                    currentLabel = label;
+                    feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + label + trialNote);
+                    hintIfConfigured(seq);
+                    SongPlayer.play(song.audioUrl, config.volume,
+                            err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
                 }
-                if (song.audioUrl == null || song.audioUrl.isEmpty()) {
-                    feedback("§b[点歌] §e" + song.title + " §7- " + song.artistText()
-                            + "：" + (song.note == null ? "暂时无法播放" : song.note));
-                    return;
-                }
-                String trialNote = song.isTrial() ? " §7（试听片段）" : "";
-                String label = song.title + " - " + song.artistText();
-                currentLabel = label;
-                feedback("§b[点歌] §a正在播放：§f" + label + trialNote);
-                hintIfConfigured();
-                SongPlayer.play(song.audioUrl, config.volume,
-                        err -> feedback("§b[点歌] §c播放失败：" + err));
             } catch (Throwable t) {
-                feedback("§b[点歌] §c出错：" + t);
+                feedbackIfCurrent(seq, "§b[点歌] §c出错：" + t);
             }
         });
     }
 
-    private static void hintIfConfigured() {
+    private static void hintIfConfigured(int seq) {
         if (config.modUrl == null || config.modUrl.trim().isEmpty()) {
             return;
         }
         String hint = (config.hintText == null ? "" : config.hintText).replace("{url}", config.modUrl.trim());
         if (!hint.trim().isEmpty()) {
-            feedback("§b[点歌] §e" + hint);
+            feedbackIfCurrent(seq, "§b[点歌] §e" + hint);
         }
+    }
+
+    private static boolean isCurrent(int seq) {
+        return !stoppedByUser && PENDING.get() == seq;
+    }
+
+    private static synchronized void stopPlayback() {
+        PENDING.incrementAndGet();
+        stoppedByUser = true;
+        lastMyRequestAt = 0L;
+        lastKey = "";
+        lastKeyAt = 0L;
+        currentLabel = "";
+        SongPlayer.stop();
+    }
+
+    private static void feedbackIfCurrent(int seq, String message) {
+        feedback(seq, message);
     }
 
     private static boolean eq(String a, String b) {
@@ -409,11 +461,21 @@ public class SongModClient implements ClientModInitializer {
     }
 
     private static void feedback(String msg) {
+        feedback(-1, msg);
+    }
+
+    private static void feedback(int seq, String msg) {
         Minecraft mc = Minecraft.getInstance();
         if (mc == null) {
             return;
         }
-        mc.execute(() -> addChatLine(msg));
+        mc.execute(() -> {
+            synchronized (SongModClient.class) {
+                if (seq < 0 || isCurrent(seq)) {
+                    addChatLine(msg);
+                }
+            }
+        });
     }
 
     /**

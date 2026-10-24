@@ -24,34 +24,50 @@ public final class SongPlayer {
             + "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
     private static volatile Player player;
+    private static long generation;
 
     private SongPlayer() {
     }
 
     public static synchronized void play(String audioUrl, float volume, Consumer<String> onError) {
         stop();
+        final long request = generation;
         Thread thread = new Thread(() -> {
-            Player mine = null;
+            Player owned = null;
             try {
                 URL finalUrl = resolveFinalUrl(audioUrl);
-                InputStream in = openStream(finalUrl);
-                mine = new Player(in, new VolumeAudioDevice(volume));
                 synchronized (SongPlayer.class) {
-                    player = mine;
+                    if (request != generation) {
+                        return;
+                    }
                 }
-                mine.play();
-                in.close();
+                try (InputStream in = openStream(finalUrl)) {
+                    owned = new Player(in, new VolumeAudioDevice(volume));
+                    synchronized (SongPlayer.class) {
+                        if (request != generation) {
+                            owned.close();
+                            return;
+                        }
+                        player = owned;
+                    }
+                    owned.play();
+                }
             } catch (Throwable e) {
-                if (onError != null) {
+                boolean report;
+                synchronized (SongPlayer.class) {
+                    report = request == generation;
+                }
+                if (report && onError != null) {
                     onError.accept(e.getMessage() == null ? e.toString() : e.getMessage());
                 }
             } finally {
                 synchronized (SongPlayer.class) {
-                    // 只有「当前播放器仍是我」时才清空：旧线程结束时不能把
-                    // 新歌的引用清掉，否则新歌没法停止（#14）。
-                    if (player == mine) {
+                    if (request == generation) {
                         player = null;
                     }
+                }
+                if (owned != null) {
+                    owned.close();
                 }
             }
         }, "songmod-player");
@@ -120,6 +136,7 @@ public final class SongPlayer {
     }
 
     public static synchronized void stop() {
+        generation++;
         Player p = player;
         if (p != null) {
             try {
