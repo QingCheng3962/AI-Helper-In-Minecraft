@@ -408,14 +408,21 @@ class Controller:
             self._connecting = False
             return
 
-        self.ai_player = AiPlayer(
-            self.ai_config,
-            on_send_chat=self._on_ai_send_chat,
-            log=lambda m: self._post_ui({'kind': 'log', 'level': 'ai', 'message': m}),
-            error=lambda m: self._post_ui({'kind': 'log', 'level': 'error', 'message': m}),
-            roster=self.roster,
-            on_reply=self._on_ai_replied,
-        )
+        if self.ai_player:
+            # Reuse the bounded worker across reconnects; a slow old request
+            # must not create an additional worker on each connection attempt.
+            self.ai_player.set_online(False)
+            self.ai_player.reload(self.ai_config)
+        else:
+            self.ai_player = AiPlayer(
+                self.ai_config,
+                on_send_chat=self._on_ai_send_chat,
+                log=lambda m: self._post_ui({'kind': 'log', 'level': 'ai', 'message': m}),
+                error=lambda m: self._post_ui({'kind': 'log', 'level': 'error', 'message': m}),
+                roster=self.roster,
+                on_reply=self._on_ai_replied,
+            )
+            self.ai_player.set_online(False)
         if self._bot_username:
             self.ai_player.set_bot_username(self._bot_username)
 
@@ -453,6 +460,8 @@ class Controller:
     def shutdown(self) -> None:
         """Full stop used on app close: MC connection plus the QQ relay."""
         self.disconnect()
+        if self.ai_player:
+            self.ai_player.close()
         self._stop_qq()
         try:
             self.log_saver.flush()
