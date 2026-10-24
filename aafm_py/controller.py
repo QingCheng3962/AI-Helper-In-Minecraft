@@ -18,7 +18,7 @@ from .ai_player import AiPlayer, _BRACKET_LITERAL, _compile_trigger, _split_top_
 from .affinity import AffinityStore
 from .dailydb import DailyDB
 from . import docbook
-from .bot_engine import BotEngine, BASE_DIR
+from .bot_engine import BotEngine, BASE_DIR, SendResult
 from .config import (AiPlayerConfig, AppConfig, BOOK_PROGRESS_FILE,
                      DEFAULT_BASE_URLS, load_auth_profile)
 from .log_saver import LogSaver
@@ -1932,32 +1932,79 @@ class Controller:
         if not cfg.checkinEnabled:
             self.send_chat(cfg.checkinOffText.replace('{player}', player))
             return
-        info = self.daily.sign(player)
+        meta = {}
+
+        def reward_plan(streak: int, total: int):
+            lo, hi = int(cfg.checkinMoneyMin or 0), int(cfg.checkinMoneyMax or 0)
+            money = random.randint(min(lo, hi), max(lo, hi))
+            money += int(cfg.checkinStreakBonus or 0) * max(0, streak - 1)
+            item, count = (cfg.checkinItem or '').strip(), int(cfg.checkinItemCount or 0)
+            if not item or count <= 0:
+                item, count = '', 0
+            meta.update(money=money, item=item, count=count, streak=streak, total=total)
+            plans = []
+            for kind, enabled, template in (
+                    ('money', money > 0, cfg.checkinMoneyCmd),
+                    ('item', bool(item), cfg.checkinItemCmd)):
+                if enabled:
+                    plans.append(dict(meta, kind=kind, command=self._reward_command(
+                        template, player, money, item, count)))
+            return plans
+
+        info = self.daily.sign(player, reward_factory=reward_plan)
+        if info.get('reason') in ('storage_error', 'invalid_player'):
+            self.send_chat(f'【簽到】{player} 本次簽到未能儲存，未發送獎勵，請稍後重試。')
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': f'[簽到] {player} 簽到儲存失敗，已阻止發獎。'})
+            return
+        if info.get('reason') == 'invalid_reward':
+            self.send_chat(f'【簽到】{player} 獎勵命令設定無效，本次未簽到、未發獎，請管理者修正後重試。')
+            return
+        attempted = False
+        try:
+            for reward in self.daily.rewards(player, info['day']):
+                if reward['state'] != 'pending' or not self.daily.claim_reward(reward):
+                    continue
+                attempted = True
+                command = reward['snapshot']['command']
+                try:
+                    self._remember_sent(command)
+                    result = self._engine.say_result(command)
+                    if result.status not in ('submitted', 'not_sent', 'unknown'):
+                        result = SendResult('unknown', 'invalid_send_result')
+                except Exception as exc:  # noqa: BLE001
+                    result = SendResult('unknown', type(exc).__name__)
+                self.daily.finish_reward(reward, result.status, result.error)
+                self._post_ui({'kind': 'log', 'level': 'info' if result.status == 'submitted' else 'warn',
+                               'message': f"[簽到獎勵] {player} {reward['day']} {reward['kind']}："
+                                          f"{result.status} {result.error}"})
+                if result.status == 'unknown':
+                    break
+            rewards = self.daily.rewards(player, info['day'])
+        except Exception:  # noqa: BLE001
+            self.send_chat(f'【簽到】{player} 獎勵紀錄讀寫失敗，已停止發送；請管理者核對，勿盲目補發。')
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': f'[簽到] {player} 獎勵紀錄讀寫失敗，已停止本輪發送。'})
+            return
+        pending = sum(r['state'] == 'pending' for r in rewards)
+        unknown = sum(r['state'] in ('sending', 'unknown') for r in rewards)
+        submitted = sum(r['state'] == 'submitted' for r in rewards)
+        status = '獎勵命令已提交，實際到帳尚未確認。' if rewards else '本次未設定獎勵。'
+        if pending or unknown:
+            self.send_chat(f'【簽到】{player} 簽到已記錄；待補送 {pending} 項、已提交 {submitted} 項、'
+                           f'結果未確認 {unknown} 項。再次簽到只補送確定未送出的項目；未知結果請管理者核對。')
+            return
         if not info.get('ok'):
+            if attempted:
+                self.send_chat(f'【簽到】{player} 補領處理完成；{status}')
+                return
             text = (cfg.checkinRepeatText
                     .replace('{player}', player)
                     .replace('{streak}', str(info.get('streak') or 0))
                     .replace('{total}', str(info.get('total') or 0)))
-            self.send_chat(text)
+            self.send_chat(text + (' ' + status if rewards else ''))
             return
-        streak = int(info.get('streak') or 1)
-        total = int(info.get('total') or 1)
-        # 金钱：在 [最少, 最多] 里随机，再按连签天数加额外奖励
-        lo = int(cfg.checkinMoneyMin or 0)
-        hi = int(cfg.checkinMoneyMax or 0)
-        money = random.randint(min(lo, hi), max(lo, hi))
-        if int(cfg.checkinStreakBonus or 0) > 0:
-            money += int(cfg.checkinStreakBonus) * max(0, streak - 1)
-        item = (cfg.checkinItem or '').strip()
-        count = int(cfg.checkinItemCount or 0)
-        if not item or count <= 0:
-            item, count = '', 0
-        # 两条发放命令：金钱一行、物品一行
-        done_money = done_item = False
-        if money > 0 and (cfg.checkinMoneyCmd or '').strip():
-            done_money = self._run_reward_cmd(cfg.checkinMoneyCmd, player, money, item, count)
-        if item:
-            done_item = self._run_reward_cmd(cfg.checkinItemCmd, player, money, item, count)
+        money, item, count = meta['money'], meta['item'], meta['count']
         items_txt = f'{item} x{count}' if item else ''
         text = (cfg.checkinText
                 .replace('{player}', player)
@@ -1966,34 +2013,30 @@ class Controller:
                 .replace('{item}', item)
                 .replace('{count}', str(count))
                 .replace('{items}', f' + {items_txt}' if items_txt else '')
-                .replace('{streak}', str(streak))
-                .replace('{total}', str(total)))
-        self.send_chat(text)
-        self._post_ui({'kind': 'log', 'level': 'info',
-                       'message': f'[签到] {player} 连签 {streak} 天（累计 {total} 次）：'
-                                  f'金钱 {money}{"、" + items_txt if items_txt else ""}'
-                                  f'{"（奖励命令已发出）" if (done_money or done_item) else ""}'})
+                .replace('{streak}', str(info['streak']))
+                .replace('{total}', str(info['total'])))
+        self.send_chat(text.replace('{reward_status}', status) if '{reward_status}' in text else text + ' ' + status)
 
-    def _run_reward_cmd(self, template: str, player: str, value: int,
-                        item: str, count: int) -> bool:
-        """按模板发一条奖励命令（缺 ``/`` 会自动补上，按整条命令算长度）。"""
+    @staticmethod
+    def _reward_command(template: str, player: str, value: int,
+                        item: str, count: int) -> str:
+        """凍結前驗證命令；不截斷命令後假裝成功。"""
         cmd = (str(template or '')
                .replace('{player}', str(player))
                .replace('{value}', str(value))
                .replace('{money}', str(value))
                .replace('{item}', item or '')
                .replace('{count}', str(count)))
+        if '\n' in cmd or '\r' in cmd or re.search(r'\{[A-Za-z_][A-Za-z_0-9]*\}', cmd):
+            raise ValueError('Invalid reward command')
         cmd = ' '.join(cmd.split())
-        if not cmd:
-            return False
+        if not cmd or cmd == '/':
+            raise ValueError('Empty reward command')
         if not cmd.startswith('/'):
             cmd = '/' + cmd
-        cmd = cmd[:250]
-        self._remember_sent(cmd)          # 自触发防线
-        try:
-            return bool(self._engine.say(cmd))
-        except Exception:  # noqa: BLE001
-            return False
+        if len(cmd.encode('utf-16-le')) // 2 > 250:
+            raise ValueError('Reward command too long')
+        return cmd
 
     # ------------------------------------------------------------------
     # 群发私聊：把一句话 /msg 给所有在线玩家（GUI「杂项」页的输入框 + 按钮）

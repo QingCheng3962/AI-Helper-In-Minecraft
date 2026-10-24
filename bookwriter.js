@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// 變更說明：寫入、重試與兜底均未獲確認時停止，僅推進已確認完成的續寫進度。
+// 變更說明：僅以伺服器回傳且內容吻合的書籍確認寫入，失敗保留續寫位置。
 'use strict';
 
 // Document -> in-game "book and quill" (书与笔) writer.
@@ -96,7 +96,7 @@ function writePagesToHeldBook(bot, pages, title) {
                 type: 'list',
                 value: {
                     type: 'string',
-                    value: pages.map((p) => JSON.stringify({ text: String(p) }))
+                    value: pages.map((p) => signing ? JSON.stringify({ text: String(p) }) : String(p))
                 }
             }
         };
@@ -117,23 +117,90 @@ function writePagesToHeldBook(bot, pages, title) {
     }
 }
 
-// Send the packet and wait for the server to echo the updated slot. A slot
-// update is the existing confirmation signal; it does not validate page content.
-async function writePagesAndConfirm(bot, pages, title) {
-    const heldSlot = HOTBAR0 + (bot.quickBarSlot || 0);
-    const event = `updateSlot:${heldSlot}`;
-    let applied = false;
-    const handler = () => { applied = true; };
-    try { bot.inventory.on(event, handler); } catch (e) { /* ignore */ }
+// Decode protocol wrappers without changing whitespace, newlines or Unicode.
+function unwrapNbt(value, depth = 0) {
+    if (depth > 64) throw new Error('Book data too deeply nested');
+    if (Array.isArray(value)) return value.map((v) => unwrapNbt(v, depth + 1));
+    if (!value || typeof value !== 'object') return value;
+    if (value.type === 'list') return unwrapNbt(value.value.value, depth + 1);
+    if (value.type && Object.hasOwn(value, 'value')) return unwrapNbt(value.value, depth + 1);
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, unwrapNbt(v, depth + 1)]));
+}
+
+function componentText(value, depth = 0) {
+    if (depth > 64) throw new Error('Book text too deeply nested');
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map((v) => componentText(v, depth + 1)).join('');
+    if (!value || typeof value !== 'object'
+        || ['translate', 'score', 'selector', 'keybind', 'nbt'].some((k) => Object.hasOwn(value, k))) {
+        throw new Error('Unsupported book text');
+    }
+    if (value.text !== undefined && typeof value.text !== 'string') throw new Error('Invalid book text');
+    if (value.extra !== undefined && !Array.isArray(value.extra)) throw new Error('Invalid book extras');
+    if (value.text === undefined && value.extra === undefined) throw new Error('Missing book text');
+    return (value.text || '') + (value.extra || []).map((v) => componentText(v, depth + 1)).join('');
+}
+
+function bookMatches(bot, item, pages, title) {
     try {
-        writePagesToHeldBook(bot, pages, title);
+        const signing = title != null;
+        const id = signing ? (bot.registry.itemsByName.written_book || {}).id : writableBookId(bot);
+        if (id == null || !item || item.type !== id || !(item.count > 0)) return false;
+        let actual, actualTitle, author;
+        if (bot.supportFeature('itemsWithComponents')) {
+            const name = signing ? 'written_book_content' : 'writable_book_content';
+            const component = (item.componentMap && (item.componentMap.get(name) || item.componentMap.get('minecraft:' + name)))
+                || (item.components || []).find((c) => c.type === name || c.type === 'minecraft:' + name);
+            const data = component && component.data;
+            actual = data.pages.map((p) => signing ? componentText(unwrapNbt(p.content)) : p.content);
+            actualTitle = data.rawTitle;
+            author = data.author;
+        } else {
+            const data = unwrapNbt(item.nbt);
+            actual = data.pages.map((p) => signing ? componentText(JSON.parse(p)) : p);
+            actualTitle = data.title;
+            author = data.author;
+        }
+        return actual.length === pages.length && actual.every((p, i) => typeof p === 'string' && p === pages[i])
+            && (!signing || (actualTitle === String(title) && author === String(bot.username || '')));
+    } catch (e) {
+        return false; // Unknown or malformed formats cannot confirm a write.
+    }
+}
+
+async function confirmBook(bot, pages, title, send) {
+    const heldSlot = HOTBAR0 + (bot.quickBarSlot || 0);
+    const inventory = bot.inventory;
+    const client = bot._client;
+    const Item = require('prismarine-item')(bot.registry);
+    let applied = false;
+    const check = (raw) => {
+        try {
+            applied = bot.inventory === inventory && HOTBAR0 + (bot.quickBarSlot || 0) === heldSlot
+                && bookMatches(bot, Item.fromNotch(raw), pages, title);
+        } catch (e) { applied = false; }
+    };
+    // Observe server packets, never locally emitted inventory events.
+    const handlers = {
+        set_slot: (p) => { if (p.windowId === 0 && p.slot === heldSlot) check(p.item); },
+        window_items: (p) => { if (p.windowId === 0) check(p.items && p.items[heldSlot]); },
+        set_player_inventory: (p) => { if (p.slotId === heldSlot) check(p.contents); }
+    };
+    try {
+        for (const [event, handler] of Object.entries(handlers)) client.on(event, handler);
+        await send();
         for (let i = 0; i < 12 && !applied; i++) {
             await sleep(100);
         }
+        return applied && bot.inventory === inventory && HOTBAR0 + (bot.quickBarSlot || 0) === heldSlot
+            && bookMatches(bot, bot.heldItem, pages, title);
     } finally {
-        try { bot.inventory.removeListener(event, handler); } catch (e) { /* ignore */ }
+        for (const [event, handler] of Object.entries(handlers)) client.removeListener(event, handler);
     }
-    return applied;
+}
+
+async function writePagesAndConfirm(bot, pages, title) {
+    return confirmBook(bot, pages, title, () => writePagesToHeldBook(bot, pages, title));
 }
 
 // Creative-only last resort (pre-1.20.5): write the page data straight into the
@@ -155,7 +222,7 @@ async function setBookNbtInCreative(bot, pages, title) {
                 type: 'list',
                 value: {
                     type: 'string',
-                    value: pages.map((p) => JSON.stringify({ text: String(p) }))
+                    value: pages.map((p) => signing ? JSON.stringify({ text: String(p) }) : String(p))
                 }
             }
         };
@@ -164,8 +231,8 @@ async function setBookNbtInCreative(bot, pages, title) {
             value.author = { type: 'string', value: String(bot.username || '') };
         }
         const nbt = { type: 'compound', name: '', value };
-        await bot.creative.setInventorySlot(heldSlot, new Item(id, 1, null, nbt));
-        return true;
+        return await confirmBook(bot, pages, title,
+            () => bot.creative.setInventorySlot(heldSlot, new Item(id, 1, null, nbt)));
     } catch (e) {
         return false;
     }
@@ -373,13 +440,13 @@ async function writeBooks(bot, opts, logger, sendChat) {
             if (!applied) {
                 applied = await setBookNbtInCreative(bot, bookPages, title);
             }
-            if (!applied) {
+            await sleep(150);
+            if (!applied || !bookMatches(bot, bot.heldItem, bookPages, title)) {
                 // Preserve the last confirmed position and keep this book for inspection.
                 const message = `已確認完成 ${done} 本；第 ${bookNumber} 本寫入未獲確認，已停止並保留續寫進度：下次從第 ${nextPage + 1} 頁繼續。請核對遊戲內書籍後重試。`;
                 logger.log('warn', message);
                 return { ok: false, stopped: true, nextPage, message };
             }
-            await sleep(150);
             done++;
             nextPage = to;
             if (onProgress) {

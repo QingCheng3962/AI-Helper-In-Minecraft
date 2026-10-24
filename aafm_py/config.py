@@ -869,8 +869,8 @@ class MiscConfig:
     checkinMoneyCmd: str = 'eco give {player} {value}'
     checkinItemCmd: str = 'give {player} {item} {count}'
     # 文案：{player} 玩家、{money}/{value} 金钱、{item} 物品、{count} 数量、
-    #       {items} 物品描述（没物品时为空）、{streak} 连签天数、{total} 累计次数
-    checkinText: str = '【签到】{player} 签到成功！获得 {money} 金币{items}（连续 {streak} 天，累计 {total} 次）'
+    #       {items} 物品描述（没物品时为空）、{streak} 连签天数、{total} 累计次数、{reward_status} 发奖状态
+    checkinText: str = '【签到】{player} 签到已记录；本次奖励 {money} 金币{items}（连续 {streak} 天，累计 {total} 次）。{reward_status}'
     checkinRepeatText: str = '【签到】{player} 今天已经签过啦，明天再来～（已连续 {streak} 天）'
     checkinOffText: str = '【签到】签到功能没开（服主可在「杂项」页打开）'
 
@@ -912,9 +912,11 @@ class MiscConfig:
                                 or 'eco give {player} {value}')
         self.checkinItemCmd = (str(self.checkinItemCmd or '').strip()
                                or 'give {player} {item} {count}')
-        self.checkinText = (str(self.checkinText or '').strip()
-                            or '【签到】{player} 签到成功！获得 {money} 金币{items}'
-                               '（连续 {streak} 天，累计 {total} 次）')
+        old_checkin_text = ('【签到】{player} 签到成功！获得 {money} 金币{items}'
+                           '（连续 {streak} 天，累计 {total} 次）')
+        self.checkinText = str(self.checkinText or '').strip()
+        if not self.checkinText or self.checkinText == old_checkin_text:
+            self.checkinText = MiscConfig.__dataclass_fields__['checkinText'].default
         self.checkinRepeatText = (str(self.checkinRepeatText or '').strip()
                                   or '【签到】{player} 今天已经签过啦，明天再来～（已连续 {streak} 天）')
         self.checkinOffText = (str(self.checkinOffText or '').strip()

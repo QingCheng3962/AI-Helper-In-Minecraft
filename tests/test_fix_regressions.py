@@ -54,8 +54,9 @@ class DailyDBTest(unittest.TestCase):
         with open(blocker, 'w', encoding='utf-8') as f:
             f.write('x')
         db.backup_dir = blocker          # os.makedirs 会失败
-        info = db.ensure_day('2026-10-25')
-        self.assertEqual(info['backup'], '')
+        with self.assertRaises(OSError):
+            db.ensure_day('2026-10-25')
+        # 失败后旧库/旧日期必须原样保留（#20）
         self.assertEqual(db._get_meta('current_day'), '2020-01-01')
         db.close()
 

@@ -10,12 +10,19 @@ import json
 import os
 import subprocess
 import threading
-from typing import Callable, Dict, Any, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, Any, Literal, Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNTIME_CONFIG_FILE = os.path.join(BASE_DIR, 'runtime_config.json')
 
 _EVENT_CALLBACK = Callable[[Dict[str, Any]], None]
+
+
+@dataclass(frozen=True)
+class SendResult:
+    status: Literal['submitted', 'not_sent', 'unknown']
+    error: str = ''
 
 
 class BotEngine:
@@ -107,18 +114,34 @@ class BotEngine:
             pass
 
     def send(self, cmd: Dict[str, Any]) -> bool:
-        if not self.running or self.proc is None or self.proc.stdin is None:
-            return False
+        return self.send_result(cmd).status == 'submitted'
+
+    def send_result(self, cmd: Dict[str, Any]) -> SendResult:
+        """區分未嘗試寫入與可能部分送出；submitted 不是伺服器回執。"""
         try:
-            with self._write_lock:
-                self.proc.stdin.write(json.dumps(cmd, ensure_ascii=False) + '\n')
-                self.proc.stdin.flush()
-            return True
-        except Exception:  # noqa: BLE001
-            return False
+            payload = json.dumps(cmd, ensure_ascii=False) + '\n'
+        except Exception as exc:  # noqa: BLE001
+            return SendResult('not_sent', type(exc).__name__)
+        with self._write_lock:
+            proc = self.proc
+            try:
+                if not self._running or proc is None or proc.poll() is not None or proc.stdin is None:
+                    return SendResult('not_sent', 'disconnected')
+            except Exception as exc:  # noqa: BLE001
+                return SendResult('not_sent', type(exc).__name__)
+            try:
+                if proc.stdin.write(payload) != len(payload):
+                    return SendResult('unknown', 'short_write')
+                proc.stdin.flush()
+                return SendResult('submitted')
+            except Exception as exc:  # noqa: BLE001
+                return SendResult('unknown', type(exc).__name__)
 
     def say(self, text: str) -> bool:
         return self.send({'type': 'chat', 'text': text})
+
+    def say_result(self, text: str) -> SendResult:
+        return self.send_result({'type': 'chat', 'text': text})
 
     def set_autoeat(self, enabled: bool) -> bool:
         return self.send({'type': 'setAutoeat', 'enabled': bool(enabled)})
