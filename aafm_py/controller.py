@@ -20,7 +20,7 @@ from .dailydb import DailyDB
 from . import docbook
 from .bot_engine import BotEngine, BASE_DIR, SendResult
 from .config import (AiPlayerConfig, AppConfig, BOOK_PROGRESS_FILE,
-                     DEFAULT_BASE_URLS, load_auth_profile)
+                     DEFAULT_BASE_URLS, load_auth_profile, save_json)
 from .log_saver import LogSaver
 from .photo_server import PhotoServer, save_image_bytes
 from .qq_engine import QqEngine
@@ -426,8 +426,8 @@ class Controller:
         self._manual_disconnect = False
         self._reconnect_at = None
         self._keep_retry_deadline = None
-        self.config.save()
-        self.ai_config.save()
+        self._persist_config(self.config)
+        self._persist_config(self.ai_config)
         self._connecting = True
         self._post_ui({'kind': 'status', 'text': '正在连接...'})
 
@@ -746,14 +746,14 @@ class Controller:
         except Exception:  # noqa: BLE001
             return {}
 
-    def save_book_progress(self, **fields) -> None:
+    def save_book_progress(self, **fields) -> bool:
         data = self.load_book_progress()
         data.update(fields)
-        try:
-            with open(BOOK_PROGRESS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:  # noqa: BLE001
-            pass
+        ok = save_json(BOOK_PROGRESS_FILE, data)
+        if not ok:
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': '[书与笔] 进度保存失败，保留原进度文件；重启续写前请核对游戏内书籍。'})
+        return ok
 
     def clear_book_progress(self) -> None:
         try:
@@ -894,7 +894,7 @@ class Controller:
 
     def set_ai_enabled(self, enabled: bool) -> None:
         self.ai_config.enabled = bool(enabled)
-        self.ai_config.save()
+        self._persist_config(self.ai_config)
         if not enabled and self.ai_player:
             self.ai_player.stop_now()
         self._post_ui({'kind': 'log', 'level': 'info',
@@ -911,7 +911,7 @@ class Controller:
                                'message': f'玩家已在黑名单: {name}'})
                 return
         players.append({'name': name, 'enabled': True})
-        self.ai_config.save()
+        self._persist_config(self.ai_config)
         if self.ai_player:
             self.ai_player.config = self.ai_config
             self.ai_player._compile_patterns()
@@ -920,11 +920,11 @@ class Controller:
     def set_extra_enabled(self, which: str, enabled: bool) -> None:
         if which == 'autoeat':
             self.config.autoeat.enabled = bool(enabled)
-            self.config.save()
+            self._persist_config(self.config)
             self._engine.set_autoeat(enabled)
         elif which == 'quiz':
             self.config.quiz.enabled = bool(enabled)
-            self.config.save()
+            self._persist_config(self.config)
             self._engine.set_quiz(enabled)
 
     # ------------------------------------------------------------------
@@ -1165,12 +1165,12 @@ class Controller:
         except Exception:  # noqa: BLE001
             self._qq_nicknames = {}
 
-    def _save_qq_accounts(self) -> None:
-        try:
-            with open(QQ_ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self._qq_nicknames, f, ensure_ascii=False, indent=2)
-        except Exception:  # noqa: BLE001
-            pass
+    def _save_qq_accounts(self) -> bool:
+        ok = save_json(QQ_ACCOUNTS_FILE, self._qq_nicknames)
+        if not ok:
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': 'QQ 账号记录保存失败，原文件已保留。'})
+        return ok
 
     def list_qq_accounts(self) -> List[str]:
         """QQ numbers known locally (NapCat config files + remembered ones)."""
@@ -1326,7 +1326,7 @@ class Controller:
         if uin:
             argv = list(argv) + ['-q', uin]
             self.config.qq.lastLoginUin = uin
-            self.config.save()
+            self._persist_config(self.config)
         try:
             kwargs = {}
             if os.name == 'nt':
@@ -1418,7 +1418,7 @@ class Controller:
 
     def set_qq_enabled(self, enabled: bool) -> None:
         self.config.qq.enabled = bool(enabled)
-        self.config.save()
+        self._persist_config(self.config)
         try:
             if enabled:
                 if not self._qq.running:
@@ -2795,7 +2795,7 @@ class Controller:
         kept = [p for p in paths if os.path.exists(p)]
         if len(kept) != len(paths):
             self.config.roster.files = kept
-            self.config.save()
+            self._persist_config(self.config)
         self.roster.enabled = self.config.roster.enabled
         self.roster.personality_enabled = self.config.roster.personalityEnabled
         self.roster.alias_enabled = self.config.roster.aliasEnabled
@@ -2809,7 +2809,7 @@ class Controller:
     def roster_set_personality(self, enabled: bool, interval_seconds: int) -> None:
         self.config.roster.personalityEnabled = bool(enabled)
         self.config.roster.researchIntervalSeconds = max(30, int(interval_seconds or 180))
-        self.config.save()
+        self._persist_config(self.config)
         self.roster.personality_enabled = self.config.roster.personalityEnabled
         self.roster.research_interval_ms = self.config.roster.researchIntervalSeconds * 1000
         self._post_ui({'kind': 'log', 'level': 'info',
@@ -2827,7 +2827,7 @@ class Controller:
 
     def roster_set_alias(self, enabled: bool) -> None:
         self.config.roster.aliasEnabled = bool(enabled)
-        self.config.save()
+        self._persist_config(self.config)
         self.roster.alias_enabled = self.config.roster.aliasEnabled
         self._post_ui({'kind': 'log', 'level': 'info',
                        'message': 'AI 别名分析已' + ('启用' if enabled else '禁用') + '。'})
@@ -2842,7 +2842,7 @@ class Controller:
 
     def roster_set_enabled(self, enabled: bool) -> None:
         self.config.roster.enabled = bool(enabled)
-        self.config.save()
+        self._persist_config(self.config)
         self.roster.enabled = self.config.roster.enabled
         self._post_ui({'kind': 'log', 'level': 'info',
                        'message': '玩家身份问答已' + ('启用' if enabled else '禁用') + '。'})
@@ -2860,7 +2860,7 @@ class Controller:
         except RosterError as e:
             return False, str(e)
         files.append(path)
-        self.config.save()
+        self._persist_config(self.config)
         return True, f'已导入 {count} 条记录。'
 
     def roster_remove_file(self, path: str) -> bool:
@@ -2872,12 +2872,20 @@ class Controller:
             return False
         files.remove(match)
         self.roster.remove_source(match)
-        self.config.save()
+        self._persist_config(self.config)
         return True
 
     # ------------------------------------------------------------------
     # Config helpers
     # ------------------------------------------------------------------
+    def _persist_config(self, config) -> bool:
+        ok = config.save()
+        if not ok:
+            name = 'AI 设置' if isinstance(config, AiPlayerConfig) else '主设置'
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': f'{name}保存失败，原文件已保留；当前修改仅在内存中，请重试保存。'})
+        return ok
+
     def _build_runtime_config(self) -> Dict[str, Any]:
         cfg = self.config
         auth = {'type': cfg.auth.type, 'username': cfg.auth.username,
@@ -2973,7 +2981,8 @@ class Controller:
 
         Matches the command *path*, so multi-word entries work too:
         entry ``land`` blocks ``/land create ...``; entry ``land create``
-        blocks ``/land create ...`` but not ``/land claim``.
+        blocks ``/land create ...`` but not ``/land claim``. Unqualified
+        entries also cover namespaced roots; explicit namespaces stay specific.
         """
         cfg = self.config.commandBlock
         if not cfg.enabled:
@@ -2981,15 +2990,16 @@ class Controller:
         s = (text or '').strip()
         if not s.startswith('/'):
             return ''
-        rest = s[1:].strip().lower()
+        rest = s[1:].lower().split()
         if not rest:
             return ''
         for entry in (cfg.commands or []):
-            e = str(entry).strip().lower().lstrip('/').strip()
+            e = str(entry).strip().lower().lstrip('/').split()
             if not e:
                 continue
-            if rest == e or rest.startswith(e + ' '):
-                return e
+            root = rest[0] if ':' in e[0] else rest[0].rsplit(':', 1)[-1]
+            if root == e[0] and rest[1:len(e)] == e[1:]:
+                return ' '.join(e)
         return ''
 
     def _worker_loop(self) -> None:

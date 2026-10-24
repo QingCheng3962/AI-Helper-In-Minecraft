@@ -21,39 +21,39 @@ PROMPT_TEMPLATES_FILE = os.path.join(BASE_DIR, 'mcai_prompt_templates.json')
 BOOK_PROGRESS_FILE = os.path.join(BASE_DIR, 'book_progress.json')
 
 
-def _atomic_write_json(path: str, data: Any) -> bool:
-    """把 JSON 原子地写到 ``path``：先写同目录的临时文件，成功后再 ``os.replace``。
+def _save_failure(path, error: Exception) -> bool:
+    # Exception messages can contain rejected setting values, including secrets.
+    print(f'[mcai] Failed to save {os.path.basename(path)} ({type(error).__name__}).')
+    return False
 
-    和 ``open(path, 'w')`` 的区别是**失败不会截断原文件**——``w`` 模式一打开就
-    把原内容清空了，之后序列化/写盘/关闭任何一步出错，整份配置就没了。这里出错
-    时原文件原样保留，临时文件被清掉。
 
-    返回 ``True``/``False``，让调用方能判断成败。配置文件里有服务器地址、认证
-    信息和 AI Key，静默失败会让界面照常提示「已保存」，用户完全不知道数据丢了。
+def save_json(path, data: Any) -> bool:
+    """Replace one JSON file only after a complete, flushed and closed write.
+
+    Each writer owns a unique sibling temporary file. A failure before replace
+    leaves the original untouched; separate files are not a shared transaction.
     """
-    folder = os.path.dirname(os.path.abspath(path))
-    tmp = ''
+    temporary = None
     try:
-        os.makedirs(folder, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + '.',
-                                   suffix='.tmp', dir=folder)
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        path = os.path.abspath(path)
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                dir=os.path.dirname(path), prefix='.' + os.path.basename(path) + '.',
+                suffix='.tmp', delete=False) as f:
+            temporary = f.name
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
-        tmp = ''                    # 换成功了，finally 里别再删
+        os.replace(temporary, path)
+        temporary = None
         return True
-    except Exception as e:  # noqa: BLE001
-        print(f'[mcai] Failed to save {path}: {e}')
-        return False
+    except Exception as e:
+        return _save_failure(path, e)
     finally:
-        # 只清理本次调用自己创建的临时文件；原配置文件绝不动
-        if tmp:
+        if temporary is not None:
             try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+                os.unlink(temporary)
+            except OSError as e:
+                print(f'[mcai] Failed to remove temporary settings file ({type(e).__name__}).')
 
 
 DEFAULT_BASE_URLS = {
@@ -252,9 +252,12 @@ class AiPlayerConfig:
         return cfg
 
     def save(self, path: Optional[str] = None) -> bool:
-        """写盘。返回 ``True`` 表示成功，``False`` 表示失败（原文件保持不变）。"""
         path = path or AI_PLAYER_CONFIG_FILE
-        return _atomic_write_json(path, self.to_dict())
+        try:
+            data = self.to_dict()
+        except Exception as e:
+            return _save_failure(path, e)
+        return save_json(path, data)
 
 
 # ---------------------------------------------------------------------------
@@ -1022,13 +1025,12 @@ class AppConfig:
         return cfg
 
     def save(self, path: Optional[str] = None) -> bool:
-        """写盘。返回 ``True`` 表示成功，``False`` 表示失败（原文件保持不变）。
-
-        这份配置里有服务器地址、认证信息和 AI Key，一次写入失败（磁盘满、文件
-        被占用）就会让整份归零，所以必须原子替换 + 把成败传给调用方。
-        """
         path = path or APP_CONFIG_FILE
-        return _atomic_write_json(path, self.to_dict())
+        try:
+            data = self.to_dict()
+        except Exception as e:
+            return _save_failure(path, e)
+        return save_json(path, data)
 
 
 # ---------------------------------------------------------------------------
@@ -1051,28 +1053,27 @@ class PromptTemplateManager:
 
     @staticmethod
     def _save_list(templates: List[Dict[str, str]]) -> bool:
-        return _atomic_write_json(PROMPT_TEMPLATES_FILE, templates)
+        return save_json(PROMPT_TEMPLATES_FILE, templates)
 
     @classmethod
     def get_all(cls) -> List[Dict[str, str]]:
         return cls._load()
 
     @classmethod
-    def save(cls, name: str, prompt: str) -> None:
+    def save(cls, name: str, prompt: str) -> bool:
         templates = cls._load()
         for t in templates:
             if t.get('name') == name:
                 t['prompt'] = prompt
-                cls._save_list(templates)
-                return
+                return cls._save_list(templates)
         templates.append({'name': name, 'prompt': prompt})
-        cls._save_list(templates)
+        return cls._save_list(templates)
 
     @classmethod
-    def delete(cls, name: str) -> None:
+    def delete(cls, name: str) -> bool:
         templates = cls._load()
         templates = [t for t in templates if t.get('name') != name]
-        cls._save_list(templates)
+        return cls._save_list(templates)
 
 
 def load_auth_profile() -> Optional[Dict[str, Any]]:
