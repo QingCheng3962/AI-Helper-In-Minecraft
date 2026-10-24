@@ -24,29 +24,50 @@ public final class SongPlayer {
             + "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
     private static volatile Player player;
+    private static long generation;
 
     private SongPlayer() {
     }
 
     public static synchronized void play(String audioUrl, float volume, Consumer<String> onError) {
         stop();
+        final long request = generation;
         Thread thread = new Thread(() -> {
+            Player owned = null;
             try {
                 URL finalUrl = resolveFinalUrl(audioUrl);
-                InputStream in = openStream(finalUrl);
-                Player p = new Player(in, new VolumeAudioDevice(volume));
                 synchronized (SongPlayer.class) {
-                    player = p;
+                    if (request != generation) {
+                        return;
+                    }
                 }
-                p.play();
-                in.close();
+                try (InputStream in = openStream(finalUrl)) {
+                    owned = new Player(in, new VolumeAudioDevice(volume));
+                    synchronized (SongPlayer.class) {
+                        if (request != generation) {
+                            owned.close();
+                            return;
+                        }
+                        player = owned;
+                    }
+                    owned.play();
+                }
             } catch (Throwable e) {
-                if (onError != null) {
+                boolean report;
+                synchronized (SongPlayer.class) {
+                    report = request == generation;
+                }
+                if (report && onError != null) {
                     onError.accept(e.getMessage() == null ? e.toString() : e.getMessage());
                 }
             } finally {
                 synchronized (SongPlayer.class) {
-                    player = null;
+                    if (request == generation) {
+                        player = null;
+                    }
+                }
+                if (owned != null) {
+                    owned.close();
                 }
             }
         }, "songmod-player");
@@ -115,6 +136,7 @@ public final class SongPlayer {
     }
 
     public static synchronized void stop() {
+        generation++;
         Player p = player;
         if (p != null) {
             try {
