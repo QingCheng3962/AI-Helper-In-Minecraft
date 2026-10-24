@@ -37,6 +37,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.1
 
+- **Fix #10 / safe settings persistence**: app/AI settings, prompt templates, book progress and QQ account records use unique sibling temporary files, flushed and closed before replacement. Failures return an explicit result, preserve the original and clean up temporary files; the GUI no longer claims success or reloads stale settings. Automatic save failures also appear in the GUI log. App and AI files save independently: retry partial failures in the current window. Pause, stop and disconnect remain available; closing after failure asks before discarding edits. Save error logs omit setting values.
 - **Fix #9 / reverse QQ authentication**: malformed percent encoding, empty values and duplicate `access_token` parameters are rejected without uncaught parsing errors. Authorization retains precedence on valid requests; malformed or duplicate query credentials are rejected even with a valid header. No-token mode is unchanged.
 - **Fix #8 / command filtering**: unqualified blocked commands also cover `minecraft:` and plugin namespaces, matching case-insensitive command paths with word boundaries. Explicitly namespaced custom rules remain namespace-specific.
 - **Fix #5**: check-in deduplication, records and totals now share one transaction. Storage failures roll back and prevent rewards; retry after storage recovers.

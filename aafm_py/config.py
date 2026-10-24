@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,42 @@ AI_PLAYER_CONFIG_FILE = os.path.join(BASE_DIR, 'mcai_chat.json')
 AUTH_PROFILE_FILE = os.path.join(BASE_DIR, 'auth_profile.json')
 PROMPT_TEMPLATES_FILE = os.path.join(BASE_DIR, 'mcai_prompt_templates.json')
 BOOK_PROGRESS_FILE = os.path.join(BASE_DIR, 'book_progress.json')
+
+
+def _save_failure(path, error: Exception) -> bool:
+    # Exception messages can contain rejected setting values, including secrets.
+    print(f'[mcai] Failed to save {os.path.basename(path)} ({type(error).__name__}).')
+    return False
+
+
+def save_json(path, data: Any) -> bool:
+    """Replace one JSON file only after a complete, flushed and closed write.
+
+    Each writer owns a unique sibling temporary file. A failure before replace
+    leaves the original untouched; separate files are not a shared transaction.
+    """
+    temporary = None
+    try:
+        path = os.path.abspath(path)
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                dir=os.path.dirname(path), prefix='.' + os.path.basename(path) + '.',
+                suffix='.tmp', delete=False) as f:
+            temporary = f.name
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        return True
+    except Exception as e:
+        return _save_failure(path, e)
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError as e:
+                print(f'[mcai] Failed to remove temporary settings file ({type(e).__name__}).')
+
 
 DEFAULT_BASE_URLS = {
     'openai': 'https://api.openai.com/v1',
@@ -214,13 +251,13 @@ class AiPlayerConfig:
         cfg.validate()
         return cfg
 
-    def save(self, path: Optional[str] = None) -> None:
+    def save(self, path: Optional[str] = None) -> bool:
         path = path or AI_PLAYER_CONFIG_FILE
         try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
+            data = self.to_dict()
         except Exception as e:
-            print(f'[mcai] Failed to save {path}: {e}')
+            return _save_failure(path, e)
+        return save_json(path, data)
 
 
 # ---------------------------------------------------------------------------
@@ -987,13 +1024,13 @@ class AppConfig:
         cfg.validate()
         return cfg
 
-    def save(self, path: Optional[str] = None) -> None:
+    def save(self, path: Optional[str] = None) -> bool:
         path = path or APP_CONFIG_FILE
         try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
+            data = self.to_dict()
         except Exception as e:
-            print(f'[mcai] Failed to save {path}: {e}')
+            return _save_failure(path, e)
+        return save_json(path, data)
 
 
 # ---------------------------------------------------------------------------
@@ -1015,33 +1052,28 @@ class PromptTemplateManager:
             return []
 
     @staticmethod
-    def _save_list(templates: List[Dict[str, str]]) -> None:
-        try:
-            with open(PROMPT_TEMPLATES_FILE, 'w', encoding='utf-8') as f:
-                json.dump(templates, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f'[mcai] Failed to save prompt templates: {e}')
+    def _save_list(templates: List[Dict[str, str]]) -> bool:
+        return save_json(PROMPT_TEMPLATES_FILE, templates)
 
     @classmethod
     def get_all(cls) -> List[Dict[str, str]]:
         return cls._load()
 
     @classmethod
-    def save(cls, name: str, prompt: str) -> None:
+    def save(cls, name: str, prompt: str) -> bool:
         templates = cls._load()
         for t in templates:
             if t.get('name') == name:
                 t['prompt'] = prompt
-                cls._save_list(templates)
-                return
+                return cls._save_list(templates)
         templates.append({'name': name, 'prompt': prompt})
-        cls._save_list(templates)
+        return cls._save_list(templates)
 
     @classmethod
-    def delete(cls, name: str) -> None:
+    def delete(cls, name: str) -> bool:
         templates = cls._load()
         templates = [t for t in templates if t.get('name') != name]
-        cls._save_list(templates)
+        return cls._save_list(templates)
 
 
 def load_auth_profile() -> Optional[Dict[str, Any]]:
