@@ -37,6 +37,8 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.1
 
+- **Fix #12 / re-enable AI**: the same session accepts new requests after disabling and enabling again. Stale scheduling, deduplication and cooldown state is reset while settings and history are retained; pre-disable or disabled-period work is not revived. Enabling offline still waits for reconnection, and redundant enable calls preserve valid in-flight replies.
+
 - **Fix #11 / bounded AI work**: chat, scheduled replies, identity answers, search, images and roster research run serially on one dedicated AI worker, with one active job and at most eight waiting. Overflow is skipped with a log and ticks are coalesced, allowing MC/QQ events and daily rotation to continue. Disabling, disconnecting or reloading invalidates old jobs, suppressing stale replies and affinity credits; reconnects reuse the worker. In-flight HTTP requests finish under their existing timeouts rather than being forcibly interrupted.
 
 - **Fix #10 / safe settings persistence**: app/AI settings, prompt templates, book progress and QQ account records use unique sibling temporary files, flushed and closed before replacement. Failures return an explicit result, preserve the original and clean up temporary files; the GUI no longer claims success or reloads stale settings. Automatic save failures also appear in the GUI log. App and AI files save independently: retry partial failures in the current window. Pause, stop and disconnect remain available; closing after failure asks before discarding edits. Save error logs omit setting values.

@@ -301,7 +301,7 @@ class AiPlayer:
 
     def _enqueue(self, kind, callback, *args) -> bool:
         with self._work_lock:
-            if self._closed or (kind != 'reload' and not self._work_current()):
+            if self._closed or (kind not in ('reload', 'control') and not self._work_current()):
                 return False
             if kind == 'tick' and self._tick_generation == self._work_generation:
                 return False
@@ -332,7 +332,7 @@ class AiPlayer:
                         continue
                     self._work_local.generation = generation
                     self._work_local.config = cfg
-                    if kind != 'reload' and not self._work_current():
+                    if kind not in ('reload', 'control') and not self._work_current():
                         continue
                 callback(*args)
             except Exception as e:  # noqa: BLE001
@@ -346,6 +346,8 @@ class AiPlayer:
 
     def close(self) -> None:
         with self._work_lock:
+            if self._closed:
+                return
             self.stop_now()
             self._closed = True
             if self._work_thread is not None:
@@ -432,8 +434,33 @@ class AiPlayer:
             self._stopped = True
             self._invalidate_work()
 
+    def resume(self) -> None:
+        """Accept new work without reviving the generation cancelled by stop."""
+        with self._work_lock:
+            if self._closed or not self._stopped:
+                return
+            self._invalidate_work()
+            self._stopped = False
+            self._enqueue('control', self._reset_reply_state)
+
+    def _reset_reply_state(self) -> None:
+        self._trigger_reply_in_progress = False
+        self._schedule_reply_in_progress = False
+        self._scheduled_request_queued = False
+        self._image_generating = False
+        self._last_player_message = None
+        self._last_player_raw = None
+        self._last_player_message_time = 0
+        self._last_handled_user_message_time = 0
+        self._current_player = None
+        self._recent_player_messages.clear()
+        self._next_trigger_reply_time = _now_ms()
+        self._next_scheduled_reply_time = _now_ms() + self.config.scheduleIntervalSeconds * 1000
+        self._next_image_cooldown_time = _now_ms()
+        self._idle_next = []
+
     def clear_context(self) -> None:
-        self._enqueue('context', self._context.clear)
+        self._enqueue('control', self._context.clear)
 
     def get_activity_log(self) -> List[str]:
         return list(self._activity_log)

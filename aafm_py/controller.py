@@ -871,9 +871,13 @@ class Controller:
 
     def set_ai_enabled(self, enabled: bool) -> None:
         self.ai_config.enabled = bool(enabled)
+        if self.ai_player:
+            self.ai_player.config.enabled = bool(enabled)
+            if enabled:
+                self.ai_player.resume()
+            else:
+                self.ai_player.stop_now()
         self._persist_config(self.ai_config)
-        if not enabled and self.ai_player:
-            self.ai_player.stop_now()
         self._post_ui({'kind': 'log', 'level': 'info',
                        'message': 'AI 玩家已' + ('启用' if enabled else '禁用') + '。'})
 
