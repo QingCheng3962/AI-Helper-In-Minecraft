@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File build_all.ps1
 - Python 改动至少过一遍 `python -m py_compile aafm_py/*.py`。
 - **只改 `aafm_py/` 的 bug 修复不需要重打 jar**；改了 `mc-song-mod/src/**` 或 `fabric.mod.json` 才需要。
 - jar 名格式：`Song_<项目版本>_<游戏版本>.jar`；`fabric.mod.json` 的 `minecraft` 依赖必须是 `~${minecraft_version}`（按版本注入，别写死）。
-- **版本号用语义化（SemVer）**：项目当前 `v0.3.1`、Mod 当前 `0.1.0`（都在 `README*.md` / `mc-song-mod/gradle.properties` / `package.json` 里改）；旧 tag（`v1.0`/`v2.0`/`v3.0`/`v3.1`/`v3.2.0`）和已发的 Release **保留不动**，别再按旧编号发版。
+- **版本号用语义化（SemVer）**：项目当前 `v0.3.2`、Mod 当前 `0.1.0`（都在 `README*.md` / `mc-song-mod/gradle.properties` / `package.json` 里改）；**README 只写最新版本，历史版本写 `更新日志.md`**。旧 tag（`v1.0`/`v2.0`/`v3.0`/`v3.1`/`v3.2.0`）和已发的 Release **保留不动**，别再按旧编号发版。
 
 ## 四、几个人肉踩过的坑（别重犯）
 

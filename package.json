@@ -1,6 +1,6 @@
 {
   "name": "cubex-bot-v2",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Minimal Minecraft bot - ported from CubeX_Bot",
   "main": "app.js",
   "scripts": {

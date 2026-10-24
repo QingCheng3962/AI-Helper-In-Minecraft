@@ -123,3 +123,11 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] #32 `PacketCodec.encode`：最终帧超过 32760 字节抛 `IllegalArgumentException`，插件侧捕获并提示，不再静默产出超限包
 - [x] 回归测试：`tests/test_fix_regressions.py`（8 项）；PR #35/#36/#37 已在独立 worktree 验证：Python 27/50/73 项、Node 40/47/47 项、Java 取消测试 12+12+8 项全部通过
 
+## 2026-10-25 v0.3.2 发布
+
+- [x] 合并 PR #35 / #36 / #37（顺序合并；冲突处理：`dailydb._rotate` 采用「staging 新库 + 备份失败抛错保留旧库」、`config.py`/`gui.py` 采用 PR #36 的原子保存、`ai_player` 采用 PR #37 工作线程并补 `_close_providers`、两套 Mod 保留 PR #37 取消逻辑并补 #15 关键词匹配）
+- [x] 合并后完整测试：Python 81 项、Node 47 项、Java 取消 12+12+8 项全部通过
+- [x] 版本号升至 **v0.3.2**（`README*.md` / `package.json` / `package-lock.json` / `AGENTS.md`）
+- [x] 更新日志拆分：README 只保留最新版 v0.3.2；v0.3.1 及更早（中英）移入 `更新日志.md`
+- [x] `package.json` 增加 `engines.node >= 22`；README 环境要求同步（#30）
+
