@@ -37,6 +37,11 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.1
 
+- **Fix #5**: check-in deduplication, records and totals now share one transaction. Storage failures roll back and prevent rewards; retry after storage recovers.
+- **Fix #7 / book confirmation**: progress now requires server-returned item data matching the pages and book type, plus title and author for signed books. Local slot events, unchanged empty books and late responses for other volumes cannot confirm a write. Creative fallback uses the same content checks. Unconfirmed writes preserve the book and continuation position for in-game inspection and retry.
+- **Fix #6 / safe reward retries**: the first check-in freezes rewards and commands, tracking each reward separately. Repeating check-in retries only definitely unsent items, including previous-day items, without rerolling or incrementing statistics. Submitted, uncertain and legacy untracked rewards are never automatically resent. “Submitted” means written to the local pipe, not confirmed by the game server; administrators must reconcile uncertain items using logs and `checkin_rewards`.
+- **Database upgrade**: stop the application and back up `daily.db` before upgrading. The reward table is added automatically and unfinished records survive rotation. Reconcile pending/uncertain records before rolling back to older code, which does not understand these states; do not delete the database or blindly resend rewards. Custom success messages support `{reward_status}` (appended if absent); failure/uncertain responses bypass the success template.
+
 - **SemVer switch**: the project is now versioned **`v0.3.1`**, and the client mod **`0.1.0`** (jars are now named `Song_0.1.0_<gameVersion>.jar`); older entries use the mapping table above.
 
 - **`[提示词]帮助` (help)**: send `[DiaoHelper]帮助` → the bot **whispers** you a usage guide (chat, song requests, stop, affinity, video recommendations, lucky value, other commands). The **提示词 is whatever is configured under 玩家配置 → 触发正则** (`[DiaoHelper]`, `@DiaoHelper`…), *not* the song trigger `[点歌]`. The help text deliberately avoids the half-width `[点歌]` (uses `【点歌】`) so modded clients don't mistake it for a song request.
