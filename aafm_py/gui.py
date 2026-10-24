@@ -747,7 +747,8 @@ class AiPlayerGUI:
                   )).pack(anchor='w', padx=4, pady=4)
 
     def _on_song_play(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         trigger = (self.var_song_trigger.get() or '[点歌]').strip() or '[点歌]'
         query = self.var_song_query.get().strip()
         if not query:
@@ -1113,7 +1114,8 @@ class AiPlayerGUI:
                     'aafm AI 玩家',
                     '内容里有半角 [点歌]，装了点歌 Mod 的玩家会把它当成点歌。确定要发吗？'):
                 return
-        self._gather_config()
+        if not self._gather_config():
+            return
         gap = self._parse_float(self.var_misc_mass_gap.get(), 0.5)
         n = self.controller.mass_message(text, gap=gap, background=True)
         if n == 0:
@@ -1127,13 +1129,12 @@ class AiPlayerGUI:
             self.var_song_netease_cookie.set(cookie)
         except Exception:  # noqa: BLE001
             pass
+        self.controller.config.song.neteaseCookie = cookie
+        if not self._save_configs(self.controller.config):
+            self._netease_status.set('登录成功，但会员 Cookie 尚未保存，请重试保存。')
+            return
         try:
-            self.controller.config.song.neteaseCookie = cookie
-            self.controller.config.save()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            self._netease_status.set('登录成功 ✅ 已保存会员 Cookie：' + (cookie[:24] + '…'))
+            self._netease_status.set('登录成功 ✅ 已保存会员 Cookie。')
         except Exception:  # noqa: BLE001
             pass
         self._append_log('网易云登录成功，已保存会员 Cookie。现在可以替玩家播放 VIP 歌了。', 'info')
@@ -1172,11 +1173,9 @@ class AiPlayerGUI:
             self._append_log(msg, 'info' if ok else 'warn')
             if ok:
                 # 验证通过就顺手存进 config.json
-                try:
-                    self.controller.config.song.neteaseCookie = cookie
-                    self.controller.config.save()
-                except Exception:  # noqa: BLE001
-                    pass
+                self.controller.config.song.neteaseCookie = cookie
+                if not self._save_configs(self.controller.config):
+                    self._netease_status.set(msg + '（配置未保存，请重试保存）')
         self._ui(done)
 
     # ------------------------------------------------------------------
@@ -1453,7 +1452,8 @@ class AiPlayerGUI:
         ttk.Label(r2, text='秒重试，直到连上').pack(side='left', padx=4)
 
     def _on_active_toggle(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         self._append_log('主动连接设置已更新。', 'info')
 
     # ------------------------------------------------------------------
@@ -1533,7 +1533,8 @@ class AiPlayerGUI:
         self._render_background()
 
     def _on_apply_appearance(self) -> None:
-        self._gather_config()
+        if not self._gather_config():
+            return
         self._refresh_background_image()
         self._append_log('界面设置已保存。', 'info')
         messagebox.showinfo('aafm AI 玩家', '界面设置已保存。')
@@ -1603,7 +1604,8 @@ class AiPlayerGUI:
         if not pages:
             messagebox.showwarning('aafm', '没有解析到可写入的文本内容。')
             return
-        self._gather_config()
+        if not self._gather_config():
+            return
         cfg = self.controller.config.docBook
         if cfg.signBook and not cfg.titleTemplate.strip():
             if not messagebox.askyesno(
@@ -1627,17 +1629,20 @@ class AiPlayerGUI:
             self._append_log('写入指令发送失败（未连接或引擎未就绪）。', 'error')
 
     def _on_book_control(self, action: str) -> None:
+        # Persistence failure must not prevent pausing/stopping an active job.
         self._gather_config()
         self.controller.pause_book(action)
 
     def _on_continue_book(self) -> None:
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.continue_book()
 
     def _on_rewrite_book(self) -> None:
         if not messagebox.askyesno('aafm', '从第一页重新写入？（已记录的进度将被覆盖）'):
             return
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.rewrite_book()
 
     def _on_start_from_book(self) -> None:
@@ -1648,7 +1653,8 @@ class AiPlayerGUI:
         if not pages:
             messagebox.showwarning('aafm', '没有解析到可写入的文本内容。')
             return
-        self._gather_config()
+        if not self._gather_config():
+            return
         cfg = self.controller.config.docBook
         per_book = max(1, int(cfg.pagesPerBook or 100))
         total_books = max(1, (len(pages) + per_book - 1) // per_book)
@@ -1922,12 +1928,14 @@ class AiPlayerGUI:
         self._build_command_block_frame(frm)
 
     def _on_idle_toggle(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         self._append_log('随机发言已' + ('启用' if self.var_idle_enabled.get() else '禁用')
                          + '。', 'info')
 
     def _on_cmdblock_toggle(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         self._append_log('屏蔽命令已' + ('启用' if self.var_cmdblock_enabled.get() else '禁用')
                          + '。', 'info')
 
@@ -2465,7 +2473,9 @@ class AiPlayerGUI:
         if not prompt:
             messagebox.showwarning('aafm', '提示词内容为空。')
             return
-        PromptTemplateManager.save(name, prompt)
+        if not PromptTemplateManager.save(name, prompt):
+            self._report_save_failure()
+            return
         self.var_new_tpl_name.set('')
         self._refresh_template_combobox()
         self._append_log(f'已保存模板: {name}', 'info')
@@ -2475,7 +2485,9 @@ class AiPlayerGUI:
         if name in TEMPLATE_BUILTINS:
             messagebox.showwarning('aafm', '内置模板不可删除。')
             return
-        PromptTemplateManager.delete(name)
+        if not PromptTemplateManager.delete(name):
+            self._report_save_failure()
+            return
         self._refresh_template_combobox()
         self._append_log(f'已删除模板: {name}', 'info')
 
@@ -2485,12 +2497,21 @@ class AiPlayerGUI:
         if self.var_template.get() not in tpls:
             self.var_template.set(tpls[0] if tpls else '')
 
-    def _gather_config(self) -> bool:
-        """把界面里的值收进配置对象并写盘。返回 ``True`` 表示两份都存成功了。
+    def _report_save_failure(self) -> None:
+        message = ('部分设置未能保存；失败文件的原内容已保留，编辑内容仍在当前窗口中。'
+                   '请检查文件占用、目录权限或磁盘空间后重试。'
+                   '其他文件可能已保存，本次不会重新载入旧设置。')
+        self._append_log(message, 'error')
+        messagebox.showerror('aafm AI 玩家', message)
 
-        调用方可以忽略返回值（行为和以前一样）；只有需要提示「已保存」的入口
-        才该检查它，否则写盘失败也会弹出成功提示。
-        """
+    def _save_configs(self, *configs) -> bool:
+        results = [cfg.save() for cfg in configs]
+        if not all(results):
+            self._report_save_failure()
+            return False
+        return True
+
+    def _gather_config(self) -> bool:
         cfg = self.controller.config
         ai = self.controller.ai_config
 
@@ -2737,31 +2758,27 @@ class AiPlayerGUI:
         misc.massSkipSelf = bool(self.var_misc_mass_skipself.get())
         misc.validate()
 
-        ok_cfg = cfg.save()
-        ok_ai = ai.save()
-        return bool(ok_cfg and ok_ai)
+        return self._save_configs(cfg, ai)
 
     def _on_save(self):
-        saved = self._gather_config()
-        if not saved:
-            # 写盘失败时原文件已被保留（原子替换），但界面必须如实报错，
-            # 不能弹「设置已保存」——用户会以为配置生效了，实际还是旧的。
-            self._append_log('设置保存失败：原配置未被覆盖，请检查磁盘空间或文件占用后重试。',
-                             'error')
-            messagebox.showerror('aafm AI 玩家',
-                                 '设置保存失败：原配置未被覆盖。\n'
-                                 '请检查磁盘空间，或确认配置文件没有被其他程序占用，然后重试。')
+        if not self._gather_config():
             return
         self.controller.sync_roster_runtime()
         # 保存后立刻把新配置套到正在运行的 AI（重建 Provider、作废旧请求），
         # 否则界面显示新模型、后台仍用旧模型（#18）。
-        self.controller.reload_ai_player()
+        reload_ai = getattr(self.controller, 'reload_ai_player', None)
+        if callable(reload_ai):
+            reload_ai()
+        else:
+            # 兼容没有该方法的测试替身 / 旧接口：至少重新读一遍配置
+            self.controller.ai_config = self.controller.ai_config.__class__.load()
         self._append_log('设置已保存。', 'info')
         messagebox.showinfo('aafm AI 玩家', '设置已保存。')
 
     def _on_connect(self):
         self._relogin_pending = False
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.sync_roster_runtime()
         self.controller.connect()
         self._set_connected_state(True)
@@ -2774,7 +2791,9 @@ class AiPlayerGUI:
         self._append_log('已断开连接。', 'info')
 
     def _on_ai_enabled(self):
-        self._gather_config()
+        saved = self._gather_config()
+        if not saved and self.ai_enabled.get():
+            return
         self.controller.set_ai_enabled(self.ai_enabled.get())
 
     def _on_clear_context(self):
@@ -2805,7 +2824,8 @@ class AiPlayerGUI:
         players = self.controller.ai_config.blockedPlayers
         if 0 <= idx < len(players):
             players.pop(idx)
-            self.controller.ai_config.save()
+            if not self._save_configs(self.controller.ai_config):
+                return
             if self.controller.ai_player:
                 self.controller.ai_player.config = self.controller.ai_config
                 self.controller.ai_player._compile_patterns()
@@ -2813,14 +2833,17 @@ class AiPlayerGUI:
             self._append_log('已删除黑名单玩家。', 'info')
 
     def _on_extra(self, which, enabled):
-        self._gather_config()
+        saved = self._gather_config()
+        if not saved and enabled:
+            return
         self.controller.set_extra_enabled(which, enabled)
         self._append_log(f'{which} {"已启用" if enabled else "已禁用"}。', 'info')
 
     def _on_qq_enabled(self):
         enabled = bool(self.var_qq_enabled.get())
         try:
-            self._gather_config()
+            if not self._gather_config() and enabled:
+                return
         except Exception as e:  # noqa: BLE001
             self._append_log('保存设置出错（已忽略，仍切换 QQ）: ' + str(e), 'warn')
         self.controller.set_qq_enabled(enabled)
@@ -2828,7 +2851,8 @@ class AiPlayerGUI:
 
     def _on_qq_to_mc(self):
         try:
-            self._gather_config()
+            if not self._gather_config():
+                return
         except Exception as e:  # noqa: BLE001
             self._append_log('保存设置出错: ' + str(e), 'warn')
         on = bool(self.var_qq_to_mc.get())
@@ -2887,19 +2911,19 @@ class AiPlayerGUI:
         self._qq_editing_framework = fw
         self.controller.config.qq.framework = fw
         self._load_qq_endpoint_widgets(fw)
-        try:
-            self.controller.config.save()
-        except Exception:  # noqa: BLE001
-            pass
+        if not self._save_configs(self.controller.config):
+            return
         self._append_log(
             f'QQ 框架已切换为 {self.var_qq_framework.get()}（该框架的路径/地址/Token 独立保存）。', 'info')
 
     def _on_qq_launch_framework(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.start_qq_framework()
 
     def _on_qq_quick_login(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         if self.controller.config.qq.framework != 'napcat':
             messagebox.showinfo(
                 'aafm',
@@ -2973,23 +2997,22 @@ class AiPlayerGUI:
 
     def _on_qq_start(self):
         self.var_qq_enabled.set(True)
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.start_qq()
         self._append_log('正在连接 QQ 网关…', 'info')
 
     def _on_qq_reconnect(self):
         self.var_qq_enabled.set(True)
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.restart_qq()
         self._append_log('正在重连 QQ 网关…', 'info')
 
     def _on_qq_stop(self):
         self.var_qq_enabled.set(False)
-        try:
-            self.controller.config.qq.enabled = False
-            self.controller.config.save()
-        except Exception:  # noqa: BLE001
-            pass
+        self.controller.config.qq.enabled = False
+        self._save_configs(self.controller.config)
         self.controller.stop_qq()
         self._append_log('已断开 QQ 转述。', 'info')
 
@@ -2999,12 +3022,14 @@ class AiPlayerGUI:
         self._append_log(f'玩家身份问答{"已启用" if enabled else "已禁用"}。', 'info')
 
     def _on_roster_research(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.sync_roster_runtime()
         self._append_log(f'AI 性格研究{"已启用" if self.var_roster_research.get() else "已禁用"}。', 'info')
 
     def _on_roster_alias(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         self.controller.sync_roster_runtime()
         self._append_log(f'AI 别名分析{"已启用" if self.var_roster_alias.get() else "已禁用"}。', 'info')
 
@@ -3071,7 +3096,8 @@ class AiPlayerGUI:
             return False
 
     def _on_littleskin_login(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         if not self._spawn_console(['node', '3rdparty_auth.js']):
             return
         self._append_log('已启动 LittleSkin 登录窗口。请在弹窗里打开授权链接并选择角色，'
@@ -3090,7 +3116,8 @@ class AiPlayerGUI:
             return
         if self.var_auth_type.get() != 'littleskin':
             return
-        self._gather_config()
+        if not self._gather_config():
+            return
         if not self._spawn_console(['node', '3rdparty_auth.js', 'relogin']):
             return
         self._relogin_pending = True
@@ -3120,13 +3147,15 @@ class AiPlayerGUI:
             self._relogin_stable_since = 0.0
 
     def _on_msa_login(self):
-        self._gather_config()
+        if not self._gather_config():
+            return
         at = self.var_auth_type.get()
         username = self.var_username.get().strip() or 'MSA_Account'
         if at != 'microsoft':
             self.var_auth_type.set('microsoft')
             self._on_auth_type_changed()
-            self._gather_config()
+            if not self._gather_config():
+                return
         args = ['node', 'msa_auth.js', username]
         folder = self.var_profiles_folder.get().strip()
         if folder:
@@ -3239,8 +3268,10 @@ class AiPlayerGUI:
     # Close
     # ------------------------------------------------------------------
     def _on_close(self):
+        if not self._gather_config() and not messagebox.askyesno(
+                'aafm AI 玩家', '设置尚未全部保存。仍然退出并放弃未保存的编辑吗？'):
+            return
         try:
-            self._gather_config()
             self.controller.shutdown()
         finally:
             self.root.destroy()
