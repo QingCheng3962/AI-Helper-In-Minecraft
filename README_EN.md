@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.1** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.2** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,109 +31,38 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> **All version labels follow Semantic Versioning** (`MAJOR.MINOR.PATCH`). Historical entries were rewritten per this table:
-> `v1.0 → v0.1.0`, `v2.0 → v0.2.1`, `v2.1 → v0.2.2`, `v3.0 → v0.3.0`, `v3.1 → v0.3.0.1`, `v3.2.0 → v0.3.0.2`.
-> Current version: **`v0.3.1`**; the client mod (`mc-song-mod/`) is versioned together with the project (currently `0.1.0`).
+> All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.1 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
+> Current version: **`v0.3.2`**; the client mod stays at `0.1.0` (jar names unchanged).
 
-### v0.3.1
+### v0.3.2
 
-- **Fix #13 / cancel song requests**: stopping invalidates the player's unresolved requests and queue publications; clearing all invalidates every player. Other players remain unaffected and fresh requests can reuse cached songs. Both mod variants cancel delayed fallback, queued/running searches and ID lookups, stale notifications and pending player connections, closing discarded streams. Late bot playback data is ignored until the next local request. The existing chat format has no request identifier, so old bot data arriving after a fresh request cannot be strictly correlated; this patch does not change that protocol.
-- **Cancellation regression**: run `python -m unittest discover -s tests -p "test_*.py"` and `python tests/run_song_java.py` (requires a JDK). The latter uses original Java methods, controllable scheduling/connections and fake decoders to exercise both mod variants and the actual `SongPlayer`; this is separate from live game/audio validation. Mod sources changed, so deployments also need a newly built mod for the matching game version.
+**Merged PRs #35–#37 (audit issues #5–#13)**
 
-- **Fix #12 / re-enable AI**: the same session accepts new requests after disabling and enabling again. Stale scheduling, deduplication and cooldown state is reset while settings and history are retained; pre-disable or disabled-period work is not revived. Enabling offline still waits for reconnection, and redundant enable calls preserve valid in-flight replies.
+- **#5 Check-in transaction**: lookup, record and totals share one `BEGIN IMMEDIATE` transaction; storage failures roll back and grant nothing, and can be retried.
+- **#6 Reward retries**: the first check-in freezes a reward snapshot and tracks pending / sending / submitted / unknown per item; later check-ins only retry items that were definitely not sent, without rerolling or double-counting.
+- **#7 Book confirmation**: progress requires server-returned data matching pages, item type, title and author; unconfirmed writes keep the book and the continuation position.
+- **#8 Command blocking**: unqualified dangerous commands also cover `minecraft:` and plugin namespaces, case-insensitively and by full command path.
+- **#9 Reverse QQ auth**: malformed percent-encoding, empty values and duplicate `access_token` are rejected without crashing the QQ engine.
+- **#10 Atomic settings**: app/AI settings, prompt templates, book progress and QQ account records use temp file + fsync + `os.replace`; failures keep the original and surface in the UI.
+- **#11 AI worker**: chat, scheduled replies, identity answers, search, image generation and roster research run serially on a dedicated worker (1 active + 8 waiting), so MC/QQ events and daily rotation are no longer blocked.
+- **#12 AI re-enable**: enabling again accepts new work, clearing stale schedules, cooldowns and deduplication; work from the disabled period is not revived.
+- **#13 Cancel song requests**: stopping invalidates that player's unresolved lookups, local fallback and pending playback (both mod variants), so a stopped song cannot start later.
 
-- **Fix #11 / bounded AI work**: chat, scheduled replies, identity answers, search, images and roster research run serially on one dedicated AI worker, with one active job and at most eight waiting. Overflow is skipped with a log and ticks are coalesced, allowing MC/QQ events and daily rotation to continue. Disabling, disconnecting or reloading invalidates old jobs, suppressing stale replies and affinity credits; reconnects reuse the worker. In-flight HTTP requests finish under their existing timeouts rather than being forcibly interrupted.
+**Other audit fixes (#14–#33)**
 
-- **Fix #10 / safe settings persistence**: app/AI settings, prompt templates, book progress and QQ account records use unique sibling temporary files, flushed and closed before replacement. Failures return an explicit result, preserve the original and clean up temporary files; the GUI no longer claims success or reloads stale settings. Automatic save failures also appear in the GUI log. App and AI files save independently: retry partial failures in the current window. Pause, stop and disconnect remain available; closing after failure asks before discarding edits. Save error logs omit setting values.
-- **Fix #9 / reverse QQ authentication**: malformed percent encoding, empty values and duplicate `access_token` parameters are rejected without uncaught parsing errors. Authorization retains precedence on valid requests; malformed or duplicate query credentials are rejected even with a valid header. No-token mode is unchanged.
-- **Fix #8 / command filtering**: unqualified blocked commands also cover `minecraft:` and plugin namespaces, matching case-insensitive command paths with word boundaries. Explicitly namespaced custom rules remain namespace-specific.
-- **Fix #5**: check-in deduplication, records and totals now share one transaction. Storage failures roll back and prevent rewards; retry after storage recovers.
-- **Fix #7 / book confirmation**: progress now requires server-returned item data matching the pages and book type, plus title and author for signed books. Local slot events, unchanged empty books and late responses for other volumes cannot confirm a write. Creative fallback uses the same content checks. Unconfirmed writes preserve the book and continuation position for in-game inspection and retry.
-- **Fix #6 / safe reward retries**: the first check-in freezes rewards and commands, tracking each reward separately. Repeating check-in retries only definitely unsent items, including previous-day items, without rerolling or incrementing statistics. Submitted, uncertain and legacy untracked rewards are never automatically resent. “Submitted” means written to the local pipe, not confirmed by the game server; administrators must reconcile uncertain items using logs and `checkin_rewards`.
-- **Database upgrade**: stop the application and back up `daily.db` before upgrading. The reward table is added automatically and unfinished records survive rotation. Reconcile pending/uncertain records before rolling back to older code, which does not understand these states; do not delete the database or blindly resend rewards. Custom success messages support `{reward_status}` (appended if absent); failure/uncertain responses bypass the success template.
+- **Song playback**: #14 a stale playback thread no longer clears the new player; #15 `onlyMySong` now matches my name or the keywords of my latest request, consumed once; #19 `/msg` and public chat measure length in **UTF-16 units** so emoji cannot exceed the 256 limit.
+- **Stability**: #16 `eng.running` is a property, not a method; #17 stale engine readers no longer overwrite a new process; #18 saving AI settings reloads providers immediately, closes the old ones and drops late replies; #20 a failed daily backup no longer advances the date; #21 changing the lucky-max no longer changes today's value; #24 expired dedup cleanup runs regardless of feature switches.
+- **Data & features**: #22 CSV headers are written back after inserting columns; #23 video recommendations prefer fresh candidates and top up with old ones; #25 AutoEat registers its listener once; #26 Quiz delayed answers stay bound to their original question; #27 the local API uses exact routes plus type/size validation; #31 pagination splits by UTF-16.
+- **Mod / plugin**: #28 ZMusicBridge requires a string `type`; #32 oversized packets fail explicitly and are reported by the plugin; #14/#15 are applied to both mod variants.
+- **Build & docs**: #29 `build_all.ps1` derives paths, validates this run's artifacts and reads the mod version; #30 lock metadata aligned and Node **22+** documented; #33 pins `certifi>=2026.10.19`.
+- Added `tests/test_fix_regressions.py` (8 tests). PR verification: Python 27 / 50 / 73, Node 40 / 47 / 47, Java cancellation 12 + 12 + 8 — all passing.
 
-- **SemVer switch**: the project is now versioned **`v0.3.1`**, and the client mod **`0.1.0`** (jars are now named `Song_0.1.0_<gameVersion>.jar`); older entries use the mapping table above.
+**Other**
 
-- **`[提示词]帮助` (help)**: send `[DiaoHelper]帮助` → the bot **whispers** you a usage guide (chat, song requests, stop, affinity, video recommendations, lucky value, other commands). The **提示词 is whatever is configured under 玩家配置 → 触发正则** (`[DiaoHelper]`, `@DiaoHelper`…), *not* the song trigger `[点歌]`. The help text deliberately avoids the half-width `[点歌]` (uses `【点歌】`) so modded clients don't mistake it for a song request.
-- **Affinity (new)**: `[DiaoHelper]好感度` shows your score / level / points to the next level; `[DiaoHelper]好感度 <player>` shows someone else's. Defaults: +1 per AI reply (5 min cooldown), +2 per successful song request (1 min), +1 bonus on the first interaction of each day; levels 陌生人 → 脸熟 → 熟人 → 朋友 → 好朋友 → 挚友. Stored in `affinity.json`, configured under `affinity` in `config.json`.
-- **New [`HELP.md`](HELP.md)**: the full player-facing guide (song requests, affinity, video recommendations, lucky value, FAQ, config map for server owners).
-- **Video recommendations**: `[DiaoHelper]视频推荐` → **public chat** posts a batch of Bilibili videos (title + note + a **clickable** link — clicking opens the browser; some servers render it as a clickable `[链接]`). Sources are **pick-one**: **番剧追番榜 / anime-ranking (default)**, **B 站首页推荐 / homepage recommendations** (the feed you see on bilibili.com — the bot visits the homepage once to grab a `buvid3` cookie first, which avoids the `-412 request was banned` block), Bilibili homepage popular, the all-site ranking, or **我的收藏夹 / my own favourites** (paste a Bilibili cookie, pick a folder from the drop-down, and the bot draws items by **randomly paging** through it). Count and all texts are editable in the new **杂项 (Misc)** tab. The cooldown is **server-wide** (30 s by default) and asking again after it **swaps in a new batch** (picked from a pool of dozens, avoiding what was just shown).
-- **Daily lucky value**: `[DiaoHelper]今日幸运值` → a value fixed for that day (max value and text are configurable in the Misc tab), refreshing the next day. It is rolled **once** on the day's first query and **stored in `daily.db`**, so asking again — or **restarting the bot** — returns the very same number.
-- **Daily check-in**: `[DiaoHelper]签到` → once per day; posts the result and **grants rewards**: money (random within a configurable min~max, plus an optional per-streak-day bonus) and items (id + count). What actually gets granted is decided by **two command lines** (e.g. `eco give {player} {value}`, `give {player} {item} {count}` with the `{player} {value} {item} {count}` placeholders), and the success / already-signed / disabled texts are editable. Streak and total counts live in `daily.db` and survive restarts.
-- **Daily data + cross-day backup**: new `daily.db` (SQLite) holds **today's lucky values** and **who checked in**; when the stored day is no longer today, the bot copies the old DB to `db_backup/db_backup_<time>.db`, then **deletes and rebuilds** it for the new day (cumulative streaks are carried over so 连签 never breaks).
-- **New 杂项 (Misc) tab**: toggles + texts + cooldown for video recommendations, the lucky value and the daily check-in (including its reward scheme), plus **mass private message** — type a line, hit "发送给所有玩家", and the bot `/msg`s every online player one by one (with a configurable **gap between players** so it never gets kicked for spamming; the bot skips itself).
-- Fix: `fabric.mod.json` now injects the `minecraft` dependency per version (fixes the **26.x "incompatible"** error — every jar used to hard-code `~1.21.11`).
+- Version bumped to **v0.3.2**; `package.json` / `package-lock.json` updated.
+- **Changelog split**: README keeps only the latest release; v0.3.1 and earlier moved to [更新日志.md](更新日志.md).
+- Node requirement is now explicitly **`node >= 22`**.
 
-### v0.3.0.2
-
-**In-game song requests (new; two options — client mod + bot-side playback by default, zero server changes)**
-
-- **Client mod** ([`mc-song-mod/`](mc-song-mod/README.md)): one source tree building **15 versions** (Fabric **1.21.1 – 26.2**) via `build_all.ps1`; artifacts `dist/Song_<projectVersion>_<gameVersion>.jar`. 1.21.x uses **mojmap + remapping Loom** (`src/legacy`, includes the in-game screen); 26.x is unobfuscated with a rewritten render API → non-remapping Loom + Java 25 (`src/modern`, no screen).
-  - Chat: `[点歌]song`, `[点歌]<netease link>`, `[点歌]<song id>`; press **K** (rebindable in Controls) or send `[点歌]台` to open the in-game **Song Screen**.
-  - Fixed "the key does nothing in production": the keybind reflection hard-coded the dev-only class name `net.minecraft.client.KeyMapping$Category` (obfuscated in production) → now fully name-free reflection (match constructors by parameter types, take a static instance); works across 1.21.1–1.21.11.
-  - Playback: prefers the bot's direct link; local fallback (own Netease cookie, VIP songs included) when the bot is offline; manual `302 https→http` redirect chasing, `SourceDataLine` created lazily after the first decoded frame.
-- **Bot-side playback** (`aafm_py/netease.py`): the bot resolves with its **member account**, so **players never log in**. Song tab: **QR login** (drawn in the GUI), **Verify login** (shows nickname + `vipType` and tests a VIP song), playback toggle, play-text template, stop word, mod-download reply + cooldown.
-  - Measured truth: the legacy endpoint `api/song/enhance/player/url` **does honor membership with a valid cookie** (320k, `trial=0`); only without a cookie you get a 30–45s trial. eapi (AES-128-ECB) is just a fallback.
-- **"Whoever requests it, listens to it" (default, no broadcasting)**: the play data is sent back to the requester via **`/msg`** (`song.privatePlay`); the mod double-checks with `onlyMySong`. Turn both off for an old-style "whole server listens" broadcast.
-- **Fast response**: `song.instantPlay` — a new request starts immediately instead of queueing behind the current song's duration; re-requesting the same song reuses the cached direct link (no new search).
-- **`[点歌]help`**: the bot **whispers** the full usage list (song / stop / screen / help / login / link or id). The help deliberately shows the full-width `【点歌】` form (the bot accepts both, the mod only the half-width one, so help lines are never mistaken for song requests).
-- **Per-player stop**: `[点歌]停止` clears only that player's queue; the mod only honors commands it sent itself.
-- **Anti link-filter**: some servers replace `http(s)://…` with `[链接]` in chat. The bot now sends an **obfuscated direct link** (`¤`/`¥` for the scheme, `. / :` → `· ¦ ∶`, no `?vuutv=…`), so `http`/`://`/`.` never appear; the mod restores it, plus an `id:<songId>` fallback. `#` must not be used (servers treat it as a hex color code) and neither must `&` (MC color code).
-- **Chat channel fix**: many servers re-broadcast player chat as **system messages** (`[title]name » text`), which only reach `ClientReceiveMessageEvents.GAME` — the mod now listens to **`CHAT` + `GAME`** and tells apart "messages I sent" from "server messages", so **another player's request no longer triggers my local fallback**.
-- **`/msg` length guard**: MC's 256 limit applies to the **whole command** (`/msg ` + name + text); too long got the bot kicked (`DecoderException: serverbound/minecraft:chat_command`). The prefix length is now reserved and over-long lines are split/degraded automatically.
-- **Optional server plugin** ([`mc-music-bridge/`](mc-music-bridge/README.md)): for servers where you *can* install plugins — `ZMusicBridge` implements the **ZMusic v5 `zmusic:packet`** protocol itself (no official plugin / cloud API / device_token).
-
-**Other additions**
-
-- **Document → book** (`aafm_py/docbook.py` + `bookwriter.js`): upload `.docx` / `.doc` / `.txt`, auto-wrap by page width and auto-paginate, the bot writes it into a **book and quill** in-game; sign as a written book (title template `{number}`), **write progress / continue / start from volume X**, pause / stop / rewrite, one-click clear.
-- **Log saving** (`aafm_py/log_saver.py`): every log line (chat / server notices / private messages / action bar / app logs) is buffered and flushed to `logs/yyyy_mm_dd_第N次.txt` on day rollover or app close.
-- **Local API launcher** (`run_with_api.py`): hooks `BotEngine` and exposes a local HTTP endpoint so a website can send messages through the running bot (optional, does not modify other files).
-- **QQ relay improvements**: switchable gateway frameworks (SnowLuma default / NapCat) with **independent** configs; SnowLuma auto-reads port + token from `config/onebot_*.json` and picks a working token by a real WS handshake; QQ↔MC direction toggles decoupled; friendly 5xx/timeout messages with exponential backoff; a hard **20s timeout** on all 3rd-party auth requests.
-- **Apache License 2.0**: added [`LICENSE`](LICENSE) (with an explicit patent grant, friendlier for companies and redistribution).
-
-### v0.3.0.1
-
-- **Command block (bottom of the Player Config tab)**: a table of commands to block (without the slash; defaults include `pay kick ban op stop whitelist kill give tp gamemode`). Any bot-sent message (AI replies / random chat) starting with `/` whose command name is listed is dropped and logged, preventing prompt-injection from running dangerous commands. Rows with "＋ add row" and per-row "Delete".
-- **Message after blocking**: when a command is blocked, an optional configurable line can be sent; placeholders `{player}` = who requested it, `{command}` = command name (`{cmd}` alias); empty = block silently.
-- **Identity-learn fix**: "我是X / 俺是X / 本人就是X" no longer records "我" as a name; the statement is stored for the **speaker**, with X as an alias/description. Ignored when the speaker is unknown.
-- **Active connect (bottom of the Reconnect tab)**: ① every s/min/hour **send `/lobby`** to enter the lobby; ② every s/min/hour **check online**, and while offline retry connecting every N seconds **until it is back**. Each has its own red/green toggle.
-- **Enable/disable buttons**: command block and random chat each have a **red/green button** (green enabled / red disabled) that toggles and saves instantly.
-- **Random chat moved into Player Config** (no longer its own tab): **each line has its own random interval** (per-row min~max seconds) and there is a **random count per fire (min~max)** that picks lines from the list; rows can be added/removed.
-
-### v0.3.0
-
-- **Reconnect improvements**
-  - Reconnect interval uses a value + unit (sec/min/hour/day) picker (up to 30 days).
-  - New "custom reconnect triggers" (one regex/substring per line): a matching server chat/announcement forces a reconnect (default includes `You were kicked from lobby`) — for being moved to a login/lobby server without dropping the connection.
-  - New "proactive reconnect": while online, drop + reconnect every configured interval.
-  - New "keep retrying until back": ignore maxAttempts while the server restarts (optional max minutes, 0 = unlimited).
-- **Random chat (new tab)**: enable; interval and per-fire count are both randomized within a min~max range; message list with "＋ add row" and per-row "Delete".
-- **Human-verification auto-pass**: reads the container after a delay (retries until items populate), clicks items by "target name" (`点击这里` / `点击这里步骤N` in step order); falls back to odd-slot detection.
-- **Quiz fixes**: also accepts chat-bar `[教育部]` questions (strips `新题目:`; settlement/scoring lines ignored); supports `无人答对`; sends only the final answer (thinking discarded); reuses the global AI config and auto-appends `…/chat/completions`.
-- **Server messages**: unparseable public chat (announcements, command output, joins/leaves) is shown in the log and can feed the AI context.
-- **Identity Q&A via AI**: answers "xxx 是谁" from the roster (descriptions/aliases/AI notes) + recent chat, including aliases; "X是Y" reply is now "X是Y，我记住了".
-- **Low-health alert**: say a configurable line when health ≤ threshold (with cooldown).
-- **Quick login**: picker listing local accounts with nicknames (last one preselected), quick-login via `-q`.
-- **Misc**: fixed `client.chat is not a function` (messages queued until ready).
-
-### v0.2.2
-
-- **QQ relay**: bundled NapCat with four buttons (Start / Connect / Reconnect / Disconnect); OneBot 11 forward/reverse, group filter, access token.
-- **MC → QQ**: messages starting with a trigger (default `[sentQ]`, multiple allowed) are forwarded; group targeting, cooldown, color-code stripping, `?` for illegal chars, success/failure reply.
-- **Image → local link**: images saved to `pic_http/` and served by the built-in Python HTTP server at `/pic_http/`.
-- **Account safety**: online health check, warning + stop-auto-reconnect on risk, auto OneBot config for new scanned accounts.
-- **Update notice**: checks latest NapCat / program version at startup.
-- **Chat parsing fix**: works with or without a `[guild]`-style title prefix.
-- **Misc**: log tab with `[HH:MM:SS]` timestamps; GUI tab cleanup; high-DPI.
-
-### v0.2.1
-
-- **Auto reconnect / kick handling**: reconnect after drops/kicks; auto `/lobby` after a successful kick-reconnect.
-- **Appearance**: window background image + dimming and auto/light/dark text theme.
-
-### v0.1.0
-
-- Initial release: client-less AI player (mineflayer), offline / LittleSkin / Microsoft login, AI chat with triggers/context/filters, Quiz auto-answer, AutoEat; bilingual README and disclaimer.
 
 ## Project Layout
 
