@@ -146,7 +146,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ## Requirements
 
 - Python 3.9+ with tkinter (bundled with the official Windows Python)
-- Node.js 14+ (18+ recommended)
+- Node.js **22+** (`mineflayer` / `minecraft-protocol` require `node >= 22`; 22 LTS or newer recommended)
 - Internet access (LLM API, skin site / Microsoft account services, and the target server)
 
 ## Install

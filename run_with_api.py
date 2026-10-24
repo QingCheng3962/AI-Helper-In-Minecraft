@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
@@ -47,6 +48,18 @@ def _engine():
 
 
 TOKEN = ""
+MAX_BODY = 64 * 1024          # 请求体上限，避免超大 JSON 占内存
+MAX_SAY_LEN = 250             # MC 单包上限（UTF-16 计，这里按保守字符数）
+
+
+def _valid_game_id(value) -> bool:
+    """游戏 ID：不能含空白/斜杠/§，长度 ≤32（防止拼进命令后改变参数结构）。"""
+    if not isinstance(value, str):
+        return False
+    n = value.strip()
+    if not n or len(n) > 32:
+        return False
+    return not any(ch.isspace() or ch in '/\\§' for ch in n)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -62,18 +75,22 @@ class Handler(BaseHTTPRequestHandler):
         return not TOKEN or self.headers.get("X-Token") == TOKEN
 
     def _read(self):
+        """读取 JSON 对象；非对象/超限返回 None。"""
         try:
             n = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            n = 0
+        except (TypeError, ValueError):
+            return None
+        if n < 0 or n > MAX_BODY:
+            return None
         raw = self.rfile.read(n) if n else b"{}"
         try:
-            return json.loads(raw.decode("utf-8") or "{}")
-        except ValueError:
-            return {}
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
 
     def do_GET(self):
-        if self.path.startswith("/status"):
+        if urlsplit(self.path).path == "/status":
             e = _engine()
             self._json(200, {"ok": True, "running": bool(e and e.running)})
         else:
@@ -83,28 +100,40 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth():
             self._json(403, {"ok": False, "msg": "token 无效"})
             return
+        path = urlsplit(self.path).path
+        if path not in ("/say", "/pay"):
+            self._json(404, {"ok": False, "msg": "not found"})
+            return
         data = self._read()
+        if data is None:
+            self._json(400, {"ok": False, "msg": "请求体必须是 JSON 对象（≤64KB）"})
+            return
         e = _engine()
         if e is None or not e.running:
             self._json(503, {"ok": False, "msg": "机器人未运行（请先在界面启动机器人）"})
             return
-        if self.path.startswith("/say"):
-            text = str(data.get("text", "")).strip()
-            ok = bool(text) and e.say(text)
-            self._json(200 if ok else 400, {"ok": ok, "msg": "" if ok else "参数无效或发送失败"})
-        elif self.path.startswith("/pay"):
-            game_id = str(data.get("game_id", "")).strip()
-            try:
-                amount = int(data.get("amount", 0))
-            except (TypeError, ValueError):
-                amount = 0
-            if not game_id or amount <= 0:
-                self._json(400, {"ok": False, "msg": "game_id / amount 无效"})
+        if path == "/say":
+            text = data.get("text")
+            if not isinstance(text, str):
+                self._json(400, {"ok": False, "msg": "text 必须是字符串"})
                 return
-            ok = e.say("/pay %s %d" % (game_id, amount))
+            text = text.strip()
+            if not text or len(text) > MAX_SAY_LEN:
+                self._json(400, {"ok": False, "msg": "text 为空或过长（≤250 字符）"})
+                return
+            ok = bool(e.say(text))
             self._json(200 if ok else 503, {"ok": ok, "msg": "" if ok else "发送失败"})
-        else:
-            self._json(404, {"ok": False, "msg": "not found"})
+        else:  # /pay
+            game_id = data.get("game_id")
+            amount = data.get("amount")
+            if not _valid_game_id(game_id):
+                self._json(400, {"ok": False, "msg": "game_id 无效"})
+                return
+            if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0 or amount > 10 ** 9:
+                self._json(400, {"ok": False, "msg": "amount 必须是正整数"})
+                return
+            ok = e.say("/pay %s %d" % (game_id.strip(), amount))
+            self._json(200 if ok else 503, {"ok": ok, "msg": "" if ok else "发送失败"})
 
     def log_message(self, *args):
         pass

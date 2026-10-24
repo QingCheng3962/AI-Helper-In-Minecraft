@@ -99,6 +99,37 @@ def _sanitize_text(value) -> str:
     return ''.join(out)
 
 
+def _mc_len(text) -> int:
+    """MC 聊天命令的 256 上限按 Java 字符串（UTF-16 码元）计。
+
+    Python 的 ``len()`` 只数码点：一个 emoji 在 Java 里占 2 个码元、在 Python 里
+    只算 1 个 → 含 emoji 的文案会被算少，最后超长被服务器踢（#19）。
+    """
+    s = '' if text is None else str(text)
+    try:
+        return len(s.encode('utf-16-le')) // 2
+    except Exception:  # noqa: BLE001
+        return len(s)
+
+
+def _mc_clip(text, limit: int) -> str:
+    """按 UTF-16 码元截断（不拆开代理对），用于 /msg 等有硬上限的发送。"""
+    s = '' if text is None else str(text)
+    if limit <= 0:
+        return ''
+    if _mc_len(s) <= limit:
+        return s
+    out = []
+    used = 0
+    for ch in s:
+        w = 2 if ord(ch) > 0xFFFF else 1
+        if used + w > limit:
+            break
+        out.append(ch)
+        used += w
+    return ''.join(out)
+
+
 def _is_auth_failure(text: str) -> bool:
     if not text:
         return False
@@ -642,7 +673,8 @@ class Controller:
     # Actions
     # ------------------------------------------------------------------
     def send_chat(self, text: str) -> None:
-        text = (text or '').strip()
+        # 公屏单包上限 256（UTF-16 码元）：留 6 个余量，emoji 也算对（#19）
+        text = _mc_clip((text or '').strip(), 250).strip()
         if not text:
             return
         self._remember_sent(text)
@@ -1674,9 +1706,9 @@ class Controller:
         target = self._msg_name(who) if self._song_private() else ''
         if target:
             cmd = f'/msg {target} '
-            budget = max(40, 250 - len(cmd))
-            if len(line) > budget:
-                line = line[:budget]      # 兜底截断（正常不会走到这：上面已按 limit 拆好）
+            budget = max(40, 250 - _mc_len(cmd))
+            if _mc_len(line) > budget:
+                line = _mc_clip(line, budget)   # 兜底截断（正常不会走到这：上面已按 limit 拆好）
             self._remember_sent(cmd + line)
             try:
                 if self._engine.say(cmd + line):
@@ -1686,7 +1718,7 @@ class Controller:
             # 私聊发不出去（机器人没连上？）→ 退回公屏，至少点歌的人能听到
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': f'[点歌] 私聊 {target} 失败，改发公屏'})
-        self.send_chat(line[:250])
+        self.send_chat(line)
         return False
 
     # ------------------------------------------------------------------
@@ -1970,7 +2002,7 @@ class Controller:
         """请引擎报一份在线名单（连不上/超时就用缓存里上次的）。"""
         try:
             eng = self._engine
-            if eng is not None and eng.running():
+            if eng is not None and eng.running:
                 self._players_req_at = time.time()
                 eng.send({'type': 'listPlayers'})
                 deadline = time.time() + max(0.0, float(wait))
@@ -2030,8 +2062,8 @@ class Controller:
             ok = 0
             for i, name in enumerate(names, 1):
                 cmd = f'/msg {name} '
-                room = max(20, 250 - len(cmd))
-                body = text if len(text) <= room else text[:room]
+                room = max(20, 250 - _mc_len(cmd))
+                body = _mc_clip(text, room)
                 self._remember_sent(cmd + body)     # 自触发防线：记下自己发过的话
                 try:
                     if self._engine.say(cmd + body):
@@ -2509,7 +2541,7 @@ class Controller:
         # 私聊时整条要发的是命令 `/msg <名字> <内容>` —— MC 单包上限 256，命令名+名字也算长度！
         # （之前没算：文案长一点就直接超限，服务器反手把机器人踢了）
         target = self._msg_name(who) if self._song_private() else ''
-        limit = 250 - (len(f'/msg {target} ') if target else 0)
+        limit = 250 - (_mc_len(f'/msg {target} ') if target else 0)
         limit = max(80, limit)
 
         def build(title_text: str, with_enc: bool, with_id: bool) -> str:
@@ -2521,19 +2553,19 @@ class Controller:
             return ''.join(parts).strip()
 
         line = build(text, True, True)
-        if len(line) > limit:
+        if _mc_len(line) > limit:
             # 太长：文案单独发一条（**不带触发词**，Mod 忽略、玩家看得见）
             try:
-                self._send_song_line(who, text[:limit])
+                self._send_song_line(who, _mc_clip(text, limit))
             except Exception:  # noqa: BLE001
                 pass
             line = build(title, True, True)
-        if len(line) > limit:
+        if _mc_len(line) > limit:
             line = build(title, True, False)          # 丢掉 id 标记
-        if len(line) > limit:
-            keep = max(0, limit - len(trigger) - len(enc) - 3)
-            line = build(title[:keep], True, False)   # 缩歌名
-        if len(line) > limit:
+        if _mc_len(line) > limit:
+            keep = max(0, limit - _mc_len(trigger) - _mc_len(enc) - 3)
+            line = build(_mc_clip(title, keep), True, False)   # 缩歌名
+        if _mc_len(line) > limit:
             # 直链实在太长（罕见）：只发 id，Mod 用自己的 Cookie 取链（没填 Cookie 就是试听）
             line = build(title, False, True)
             self._post_ui({'kind': 'log', 'level': 'warn',

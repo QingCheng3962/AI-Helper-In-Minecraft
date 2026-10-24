@@ -1,4 +1,7 @@
 httpx>=0.24
+# CA 信任库：2026.7.22 及更早版本命中 GHSA-6q48-6c7w-9gw2（emSign 根证书 +
+# 泄漏的中继 CA 密钥）。下限取 GitHub 审核后的修复边界，别降回去。
+certifi>=2026.10.19
 openpyxl>=3.0
 pillow>=9.0
 qrcode>=7.0

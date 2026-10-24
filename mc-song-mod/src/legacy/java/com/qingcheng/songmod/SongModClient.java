@@ -63,6 +63,8 @@ public class SongModClient implements ClientModInitializer {
     private static volatile long lastKeyAt = 0L;
     /** 我最近一次点歌的时间（「谁点谁听」用：机器人私聊回来的播放数据是给我的）。 */
     private static volatile long lastMyRequestAt = 0L;
+    /** 我最近一次点歌的关键词/链接/id —— 只有和它匹配的播放数据才算我的（#15）。 */
+    private static volatile String lastMyQuery = "";
 
     /** 打开「点歌台」界面的按键（可在游戏的「按键设置」里改）。 */
     private static KeyMapping openKey;
@@ -271,6 +273,7 @@ public class SongModClient implements ClientModInitializer {
                 return;
             }
             PENDING.incrementAndGet();   // 这条请求有结果了
+            consumeMyRequest();
             String label = songLabel(payload, audioUrl);
             currentLabel = label;
             System.out.println("[songmod] 用机器人直链播放: " + shorten(label, 80)
@@ -290,6 +293,7 @@ public class SongModClient implements ClientModInitializer {
                 return;
             }
             PENDING.incrementAndGet();   // 这条请求有结果了（别再触发 30s 兜底）
+            consumeMyRequest();
             feedback("§b[点歌] §7机器人直链不可用，改用歌曲 id 取链…");
             playById(songId);
             return;
@@ -329,8 +333,9 @@ public class SongModClient implements ClientModInitializer {
         }
         lastKey = key;
         lastKeyAt = now;
-        // 记下「我点过歌」的时刻：机器人把播放数据私聊回来时（文案里可能不含我的名字）用它判断这是给我的
+        // 记下「我点过歌」的时刻和关键词：机器人把播放数据私聊回来时用它判断这是给我的
         lastMyRequestAt = now;
+        lastMyQuery = payload;
 
         feedback("§b[点歌] §7正在点歌：§f" + payload);
         final String query = payload;
@@ -453,14 +458,45 @@ public class SongModClient implements ClientModInitializer {
 
     /** 这条播放数据是不是放给我的（谁点谁听）。 */
     private static boolean isForMe(String payload) {
-        if (System.currentTimeMillis() - lastMyRequestAt < 300000L) {
-            return true;   // 我 5 分钟内点过歌 → 机器人回的就是给我的
-        }
+        String p = payload == null ? "" : payload.toLowerCase();
         String me = myName();
+        if (!me.isEmpty() && p.contains(me.toLowerCase())) {
+            return true;   // 文案里有我的名字 → 肯定是给我的
+        }
+        // 只有「我最近点的歌」才对得上；不能因为 5 分钟内点过歌，
+        // 就把别人点的歌也放出来（#15）。
+        if (System.currentTimeMillis() - lastMyRequestAt < 300000L) {
+            String q = lastMyQuery;
+            String np = normalizeForMatch(p);
+            String nq = normalizeForMatch(q);
+            if (!nq.isEmpty() && (np.contains(nq) || nq.contains(np))) {
+                return true;
+            }
+        }
         if (me.isEmpty()) {
             return true;   // 认不出自己是谁就别拦（宁可多放，也别放不出来）
         }
-        return payload.toLowerCase().contains(me.toLowerCase());
+        return false;
+    }
+
+    /** 匹配用：小写、只留字母/数字/汉字（去掉空格、标点、颜色符）。 */
+    private static String normalizeForMatch(String s) {
+        if (s == null) {
+            return "";
+        }
+        StringBuilder b = new StringBuilder();
+        for (char c : s.toLowerCase().toCharArray()) {
+            if (Character.isLetterOrDigit(c)) {
+                b.append(c);
+            }
+        }
+        return b.toString();
+    }
+
+    /** 收到属于自己的播放数据后清掉「最近点歌」，避免 5 分钟内继续接受别人的歌。 */
+    private static void consumeMyRequest() {
+        lastMyRequestAt = 0L;
+        lastMyQuery = "";
     }
 
     /** 自己的游戏名（先取登录账号名，取不到再取玩家名）。 */

@@ -376,21 +376,23 @@ def recommend_ex(kind: str = 'anime', limit: int = 5,
     if not pool:
         return [], err or '没抓到数据'
     used = {str(x) for x in (exclude or ())}
-    fresh = [x for x in pool if str(x.get('id')) not in used]
-    if len(fresh) < limit:
-        fresh = pool  # 池子里的都推过一遍了，允许重复
-    random.shuffle(fresh)
-    # 池子里去重（翻页可能有重复条目）
-    picked: List[Dict[str, str]] = []
-    seen_ids = set()
-    for it in fresh:
+    # 按 id 去重（翻页可能有重复条目）
+    seen_ids: set = set()
+    deduped_pool: List[Dict[str, str]] = []
+    for it in pool:
         key = str(it.get('id'))
         if key in seen_ids:
             continue
         seen_ids.add(key)
-        picked.append(it)
-        if len(picked) >= limit:
-            break
+        deduped_pool.append(it)
+    # 新候选选优先先取没推过的，不够再从推过的补
+    fresh = [x for x in deduped_pool if str(x.get('id')) not in used]
+    stale = [x for x in deduped_pool if str(x.get('id')) in used]
+    random.shuffle(fresh)
+    random.shuffle(stale)
+    # 新候选不够时用旧的补（而不是整批退回旧池子）
+    combined = fresh + stale
+    picked: List[Dict[str, str]] = combined[:limit]
     return picked, ''
 
 

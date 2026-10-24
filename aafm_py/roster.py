@@ -505,9 +505,13 @@ def _write_csv_aliases(path: str, name: str, tokens: List[str]) -> List[str]:
         for r in range(len(grid)):
             grid[r] = grid[r][:main_i + 1] + [''] * _ALIAS_SLOTS + \
                 grid[r][main_i + 1:]
-        header_low = header_low[:main_i + 1] + \
-            [f'别名{k + 1}' for k in range(_ALIAS_SLOTS)] + \
-            header_low[main_i + 1:]
+        # 上面重建了 grid 的每一行（含表头），必须把新表头写回 grid[0]，
+        # 否则别名列会变成没有表头的空列、重载后丢失（#22）。
+        for k in range(_ALIAS_SLOTS):
+            if main_i + 1 + k < len(grid[0]):
+                grid[0][main_i + 1 + k] = f'别名{k + 1}'
+        header = grid[0]
+        header_low = [str(h).strip().casefold() for h in header]
         alias_cols = [main_i + 1 + k for k in range(_ALIAS_SLOTS)]
 
     target = _normalize_name(name)
@@ -595,8 +599,12 @@ def _write_csv(path: str, name: str, note: str = '', ai: bool = False,
             # Insert an empty authoritative column right after the name.
             for r in range(len(grid)):
                 grid[r] = grid[r][:1] + [''] + grid[r][1:]
-            header.insert(1, _MAIN_HEADER_NAME)
-            header_low.insert(1, _MAIN_HEADER_NAME)
+            # grid[0] 已被重建为新列表；必须直接改 grid[0]（不是旧的 header 引用），
+            # 否则输出的表头会是「玩家名,,描述1,…」，重载后主描述读不回来（#22）。
+            if len(grid[0]) > 1:
+                grid[0][1] = _MAIN_HEADER_NAME
+            header = grid[0]
+            header_low = [str(h).strip().casefold() for h in header]
             if ai_base is not None:
                 ai_base += 1
             main_i = 1

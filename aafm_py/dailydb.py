@@ -132,7 +132,10 @@ class DailyDB:
             return {'rotated': bool(cur), 'day': day, 'backup': backup}
 
     def _rotate(self, day: str) -> str:
-        """把旧库备份到 db_backup/，删掉重建，并把 player_stats 带过来。"""
+        """把旧库备份到 db_backup/，删掉重建，并把 player_stats 带过来。
+
+        备份失败时**不推进日期**（#20）：旧库保持原样，返回空串。
+        """
         stats: List[tuple] = []
         try:
             stats = list(self.conn.execute(
@@ -141,10 +144,18 @@ class DailyDB:
             stats = []
         self._close()
         backup_path = self._backup_name()
+        backup_ok = False
         try:
             os.makedirs(self.backup_dir, exist_ok=True)
             if os.path.exists(self.path):
                 shutil.copy2(self.path, backup_path)
+                backup_ok = os.path.exists(backup_path) and os.path.getsize(backup_path) > 0
+            else:
+                backup_ok = True          # 没旧库也算成功
+            if not backup_ok:
+                # 备份失败 → 不删除原库，重连后保持旧日期
+                self._open()
+                return ''
             for extra in ('-wal', '-shm', '-journal'):
                 p = self.path + extra
                 if os.path.exists(p):
@@ -152,7 +163,12 @@ class DailyDB:
             if os.path.exists(self.path):
                 os.remove(self.path)
         except Exception:  # noqa: BLE001
-            pass
+            # 任何异常 → 不推进日期，尝试恢复连接
+            try:
+                self._open()
+            except Exception:  # noqa: BLE001
+                pass
+            return ''
         self._open()                                  # 重建（空库）
         try:
             self.conn.executemany(
@@ -195,7 +211,9 @@ class DailyDB:
                 row = None
             if row is not None:
                 try:
-                    return max(1, min(mx, int(row[0])))
+                    # 已存好的幸运值直接返回，不再用当前上限裁剪（#21）
+                    # —— 修改上限不应该改变同一玩家当天的查询结果
+                    return max(1, int(row[0]))
                 except (TypeError, ValueError):
                     pass
             value = random.randint(1, mx)

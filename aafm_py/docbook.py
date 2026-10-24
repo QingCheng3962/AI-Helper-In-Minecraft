@@ -352,10 +352,11 @@ def paginate(text: str, max_chars: int = MAX_PAGE_CHARS,
     cur_len = 0
     for wl in layout:
         # A rendered line longer than the char budget can only happen with a
-        # huge max_width; hard-split it so it never blows the budget.
+        # huge max_width; hard-split it by UTF-16 units (not Python code
+        # points), otherwise an emoji counts as 1 here but 2 in Java and the
+        # page can exceed the budget (#31).
         if _utf16_len(wl) > max_chars:
-            pieces = [wl[i:i + max(1, max_chars)]
-                      for i in range(0, len(wl), max(1, max_chars))]
+            pieces = _wrap_line(wl, max_chars)
         else:
             pieces = [wl]
         for piece in pieces:
