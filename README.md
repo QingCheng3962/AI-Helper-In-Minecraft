@@ -47,6 +47,8 @@
 
 > **版本号统一为语义化写法**（`MAJOR.MINOR.PATCH`）。历史条目已按下表改写：
 > `v1.0 → v0.1.0`、`v2.0 → v0.2.1`、`v2.1 → v0.2.2`、`v3.0 → v0.3.0`、`v3.1 → v0.3.0.1`、`v3.2.0 → v0.3.0.2`。
+> 其中 `0.3.0.1` / `0.3.0.2` 只是**历史展示编号**（对应旧 tag `v3.1` / `v3.2.0`），**不是合法 SemVer**；
+> 旧 tag 与已发布 Release 保持原样，之后的新版本一律使用三段式 `MAJOR.MINOR.PATCH`。
 > 当前版本 **`v0.3.1`**；Mod（`mc-song-mod/`）与项目同步，当前 `0.1.0`。
 
 ### v0.3.1
@@ -155,6 +157,9 @@
 │  ├─ llm.py              #   OpenAI 兼容 / Anthropic 客户端
 │  ├─ updater.py          #   启动时联网检查 NapCat / 本程序更新
 │  ├─ photo_server.py     #   本地图片 HTTP 服务（仅 /pic_http/）
+│  ├─ affinity.py         #   好感度数据（affinity.json）
+│  ├─ bilibili.py         #   视频推荐：番剧榜 / 首页推荐 / 热门 / 排行 / 收藏夹
+│  ├─ dailydb.py          #   每日数据 SQLite（幸运值 / 签到 / 跨天备份重建）
 │  ├─ bot_engine.py       #   管理 mineflayer 子进程
 │  └─ qq_engine.py        #   管理 OneBot 11 QQ 转述子进程
 ├─ bot_engine.js          # Node 端无头引擎（三种登录 + 聊天解析 + quiz/autoeat + 写书）
@@ -168,6 +173,7 @@
 ├─ mc-music-bridge/       # 服务端点歌插件（可选，给能装插件的服务器）：ZMusicBridge
 │  ├─ src/main/java/...   #   zmusic:packet 协议编码 + 网易云搜索 + 点歌逻辑
 │  └─ dist/               #   已构建好的 ZMusicBridge-1.0.0.jar
+├─ promo/                 # 宣传片：单文件网页（1920×1080，全屏录屏即出片）
 ├─ run_with_api.py        # 带本地 HTTP 接口的启动器（供网站借用机器人发消息，可选）
 ├─ LICENSE                # Apache-2.0
 ├─ qq_engine.js           # Node 端 OneBot 11 群聊转述引擎（正向/反向 WebSocket）
@@ -188,7 +194,7 @@
 ## 环境要求
 
 - Python 3.9+（需 tkinter，Windows 官方 Python 自带）
-- Node.js 14+（推荐 18+）
+- Node.js **22+**（`mineflayer` / `minecraft-protocol` 要求 `node >= 22`，推荐 22 LTS 或更新）
 - 可联网（访问 LLM API、皮肤站 / 微软账号服务、目标服务器）
 
 ## 安装

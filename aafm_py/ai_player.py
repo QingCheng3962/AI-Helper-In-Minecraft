@@ -206,6 +206,8 @@ class AiPlayer:
         self._schedule_provider = None
         self._image_provider = None
         self._bot_username: Optional[str] = None
+        # 配置代次：reload/stop 时 +1，旧请求回来发现代次变了就不再发送（#18）
+        self._generation = 0
 
         self._trigger_reply_in_progress = False
         self._schedule_reply_in_progress = False
@@ -304,8 +306,25 @@ class AiPlayer:
             self._search_pattern = None
             self._error(f"无效的联网搜索触发正则: '{cfg.searchTriggerRegex}' -> {e}")
 
+    def _close_providers(self) -> None:
+        """关闭旧的 Provider（释放连接）；关闭失败不影响新会话。"""
+        for attr in ('_trigger_provider', '_schedule_provider', '_image_provider'):
+            provider = getattr(self, attr, None)
+            if provider is None:
+                continue
+            try:
+                close = getattr(provider, 'close', None)
+                if callable(close):
+                    close()
+            except Exception:  # noqa: BLE001
+                pass
+            setattr(self, attr, None)
+
     def reload(self, new_config: AiPlayerConfig) -> None:
+        # 让重载前发出的请求在返回时失效，避免旧 Provider 的迟到的回复被发出去。
+        self._generation += 1
         self.config = new_config
+        self._close_providers()
         self._build_providers()
         self._compile_patterns()
         self._context.clear()
@@ -326,6 +345,7 @@ class AiPlayer:
 
     def stop_now(self) -> None:
         self._stopped = True
+        self._generation += 1          # 作废进行中的请求（迟到回复不再发送）
         self._trigger_reply_in_progress = False
         self._schedule_reply_in_progress = False
         self._image_generating = False
@@ -458,14 +478,15 @@ class AiPlayer:
         self._maybe_idle_chat()
         self._maybe_auto_alias()
         self._maybe_auto_research()
+        # Always clean up expired dedup records regardless of feature switches,
+        # so the cache doesn't grow unbounded when AI / scheduled replies are off.
+        self._cleanup_recent_messages()
         cfg = self.config
         if not cfg.enabled or not cfg.scheduleEnabled:
             return
         if (self._schedule_reply_in_progress or self._scheduled_request_queued
                 or self._image_generating):
             return
-
-        self._cleanup_recent_messages()
         now = _now_ms()
         if now < self._next_scheduled_reply_time:
             return
@@ -550,6 +571,7 @@ class AiPlayer:
     # ------------------------------------------------------------------
     def _start_ai_reply(self, user_message: str, user_message_time: int, is_trigger: bool) -> None:
         cfg = self.config
+        gen = self._generation
         flag_key = 'trigger' if is_trigger else 'schedule'
         flag = self._trigger_reply_in_progress if is_trigger else self._schedule_reply_in_progress
         if flag:
@@ -585,6 +607,10 @@ class AiPlayer:
                                + websearch.format_results(results))
                     self._log(f'联网搜索：{len(results)} 条')
             reply = provider.send(system, messages)
+            # 请求期间发生了 reload / 停用：旧 Provider 的回复一律丢弃（#18）。
+            if gen != self._generation or self._stopped or not self.config.enabled:
+                self._log('AI 配置已变更或已停用，丢弃旧回复。')
+                return
             if reply is None or not reply.strip():
                 return
             self._handle_ai_reply(reply)

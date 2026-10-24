@@ -231,20 +231,22 @@ class QuizHandler {
 
     // --- Send Answer ---
     _sendAnswer(answer) {
-        if (!this.session || this.session.answered) return;
+        // Capture the session this answer belongs to: a delayed callback must
+        // never leak into a newer question (#26).
+        const session = this.session;
+        if (!session || session.answered) return;
 
-        const elapsed = Date.now() - this.session.startTime;
+        const elapsed = Date.now() - session.startTime;
         const minDelay = this.config.minDelay || 3500;
         const remaining = Math.max(0, minDelay - elapsed);
 
         this.Log.info(`Sending answer in ${remaining}ms: "${answer}"`);
 
         setTimeout(() => {
-            if (this.session && !this.session.answered) {
-                this.bot.chat(answer);
-                this.session.answered = true;
-                this.Log.info(`Answer sent: "${answer}"`);
-            }
+            if (this.session !== session || session.answered) return;
+            session.answered = true;
+            this.bot.chat(answer);
+            this.Log.info(`Answer sent: "${answer}"`);
         }, remaining);
     }
 

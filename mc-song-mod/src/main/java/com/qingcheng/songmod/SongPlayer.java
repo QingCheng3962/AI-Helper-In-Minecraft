@@ -31,14 +31,15 @@ public final class SongPlayer {
     public static synchronized void play(String audioUrl, float volume, Consumer<String> onError) {
         stop();
         Thread thread = new Thread(() -> {
+            Player mine = null;
             try {
                 URL finalUrl = resolveFinalUrl(audioUrl);
                 InputStream in = openStream(finalUrl);
-                Player p = new Player(in, new VolumeAudioDevice(volume));
+                mine = new Player(in, new VolumeAudioDevice(volume));
                 synchronized (SongPlayer.class) {
-                    player = p;
+                    player = mine;
                 }
-                p.play();
+                mine.play();
                 in.close();
             } catch (Throwable e) {
                 if (onError != null) {
@@ -46,7 +47,11 @@ public final class SongPlayer {
                 }
             } finally {
                 synchronized (SongPlayer.class) {
-                    player = null;
+                    // 只有「当前播放器仍是我」时才清空：旧线程结束时不能把
+                    // 新歌的引用清掉，否则新歌没法停止（#14）。
+                    if (player == mine) {
+                        player = null;
+                    }
                 }
             }
         }, "songmod-player");

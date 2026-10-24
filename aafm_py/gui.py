@@ -2485,7 +2485,12 @@ class AiPlayerGUI:
         if self.var_template.get() not in tpls:
             self.var_template.set(tpls[0] if tpls else '')
 
-    def _gather_config(self) -> None:
+    def _gather_config(self) -> bool:
+        """把界面里的值收进配置对象并写盘。返回 ``True`` 表示两份都存成功了。
+
+        调用方可以忽略返回值（行为和以前一样）；只有需要提示「已保存」的入口
+        才该检查它，否则写盘失败也会弹出成功提示。
+        """
         cfg = self.controller.config
         ai = self.controller.ai_config
 
@@ -2732,13 +2737,25 @@ class AiPlayerGUI:
         misc.massSkipSelf = bool(self.var_misc_mass_skipself.get())
         misc.validate()
 
-        cfg.save()
-        ai.save()
+        ok_cfg = cfg.save()
+        ok_ai = ai.save()
+        return bool(ok_cfg and ok_ai)
 
     def _on_save(self):
-        self._gather_config()
+        saved = self._gather_config()
+        if not saved:
+            # 写盘失败时原文件已被保留（原子替换），但界面必须如实报错，
+            # 不能弹「设置已保存」——用户会以为配置生效了，实际还是旧的。
+            self._append_log('设置保存失败：原配置未被覆盖，请检查磁盘空间或文件占用后重试。',
+                             'error')
+            messagebox.showerror('aafm AI 玩家',
+                                 '设置保存失败：原配置未被覆盖。\n'
+                                 '请检查磁盘空间，或确认配置文件没有被其他程序占用，然后重试。')
+            return
         self.controller.sync_roster_runtime()
-        self.controller.ai_config = self.controller.ai_config.__class__.load()
+        # 保存后立刻把新配置套到正在运行的 AI（重建 Provider、作废旧请求），
+        # 否则界面显示新模型、后台仍用旧模型（#18）。
+        self.controller.reload_ai_player()
         self._append_log('设置已保存。', 'info')
         messagebox.showinfo('aafm AI 玩家', '设置已保存。')
 

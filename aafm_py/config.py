@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,42 @@ AI_PLAYER_CONFIG_FILE = os.path.join(BASE_DIR, 'mcai_chat.json')
 AUTH_PROFILE_FILE = os.path.join(BASE_DIR, 'auth_profile.json')
 PROMPT_TEMPLATES_FILE = os.path.join(BASE_DIR, 'mcai_prompt_templates.json')
 BOOK_PROGRESS_FILE = os.path.join(BASE_DIR, 'book_progress.json')
+
+
+def _atomic_write_json(path: str, data: Any) -> bool:
+    """把 JSON 原子地写到 ``path``：先写同目录的临时文件，成功后再 ``os.replace``。
+
+    和 ``open(path, 'w')`` 的区别是**失败不会截断原文件**——``w`` 模式一打开就
+    把原内容清空了，之后序列化/写盘/关闭任何一步出错，整份配置就没了。这里出错
+    时原文件原样保留，临时文件被清掉。
+
+    返回 ``True``/``False``，让调用方能判断成败。配置文件里有服务器地址、认证
+    信息和 AI Key，静默失败会让界面照常提示「已保存」，用户完全不知道数据丢了。
+    """
+    folder = os.path.dirname(os.path.abspath(path))
+    tmp = ''
+    try:
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + '.',
+                                   suffix='.tmp', dir=folder)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        tmp = ''                    # 换成功了，finally 里别再删
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f'[mcai] Failed to save {path}: {e}')
+        return False
+    finally:
+        # 只清理本次调用自己创建的临时文件；原配置文件绝不动
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
 
 DEFAULT_BASE_URLS = {
     'openai': 'https://api.openai.com/v1',
@@ -214,13 +251,10 @@ class AiPlayerConfig:
         cfg.validate()
         return cfg
 
-    def save(self, path: Optional[str] = None) -> None:
+    def save(self, path: Optional[str] = None) -> bool:
+        """写盘。返回 ``True`` 表示成功，``False`` 表示失败（原文件保持不变）。"""
         path = path or AI_PLAYER_CONFIG_FILE
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f'[mcai] Failed to save {path}: {e}')
+        return _atomic_write_json(path, self.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -985,13 +1019,14 @@ class AppConfig:
         cfg.validate()
         return cfg
 
-    def save(self, path: Optional[str] = None) -> None:
+    def save(self, path: Optional[str] = None) -> bool:
+        """写盘。返回 ``True`` 表示成功，``False`` 表示失败（原文件保持不变）。
+
+        这份配置里有服务器地址、认证信息和 AI Key，一次写入失败（磁盘满、文件
+        被占用）就会让整份归零，所以必须原子替换 + 把成败传给调用方。
+        """
         path = path or APP_CONFIG_FILE
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f'[mcai] Failed to save {path}: {e}')
+        return _atomic_write_json(path, self.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -1013,12 +1048,8 @@ class PromptTemplateManager:
             return []
 
     @staticmethod
-    def _save_list(templates: List[Dict[str, str]]) -> None:
-        try:
-            with open(PROMPT_TEMPLATES_FILE, 'w', encoding='utf-8') as f:
-                json.dump(templates, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f'[mcai] Failed to save prompt templates: {e}')
+    def _save_list(templates: List[Dict[str, str]]) -> bool:
+        return _atomic_write_json(PROMPT_TEMPLATES_FILE, templates)
 
     @classmethod
     def get_all(cls) -> List[Dict[str, str]]:

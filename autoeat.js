@@ -16,10 +16,12 @@ class AutoEat {
         this.eating = false;
         this.originalSlot = null;
 
-        if (this.enabled) {
-            this.bot.on('health', () => this._check());
-            this.Log.info("AutoEat enabled");
-        }
+        // Register the health listener exactly once; the callback itself checks
+        // `enabled`, so runtime toggles (engine command or toggle()) never leak
+        // or duplicate listeners (#25).
+        this._onHealth = () => this._check();
+        this.bot.on('health', this._onHealth);
+        this.Log.info("AutoEat " + (this.enabled ? "enabled" : "disabled"));
     }
 
     _findFood() {
@@ -83,10 +85,7 @@ class AutoEat {
 
     toggle() {
         this.enabled = !this.enabled;
-        if (this.enabled) {
-            this.bot.on('health', () => this._check());
-            this.Log.info("AutoEat enabled");
-        }
+        this.Log.info("AutoEat " + (this.enabled ? "enabled" : "disabled"));
         return this.enabled;
     }
 }

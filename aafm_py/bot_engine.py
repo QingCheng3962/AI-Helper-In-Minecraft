@@ -59,8 +59,12 @@ class BotEngine:
         threading.Thread(target=self._read_stderr, daemon=True).start()
 
     def _read_stdout(self) -> None:
+        # 固定住本线程对应的进程：之后 self.proc 可能已被新进程替换（#17）。
+        proc = self.proc
+        if proc is None or proc.stdout is None:
+            return
         try:
-            for line in self.proc.stdout:
+            for line in proc.stdout:
                 if not line:
                     continue
                 line = line.strip()
@@ -78,11 +82,16 @@ class BotEngine:
         except Exception:  # noqa: BLE001
             pass
         finally:
-            self._running = False
+            # 旧进程的读取线程结束时，不能覆盖新进程的运行状态。
+            if self.proc is proc:
+                self._running = False
 
     def _read_stderr(self) -> None:
+        proc = self.proc
+        if proc is None or proc.stderr is None:
+            return
         try:
-            for line in self.proc.stderr:
+            for line in proc.stderr:
                 if not line:
                     continue
                 line = line.strip()

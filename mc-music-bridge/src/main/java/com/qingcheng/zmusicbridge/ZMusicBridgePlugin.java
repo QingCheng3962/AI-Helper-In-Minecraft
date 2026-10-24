@@ -1,6 +1,7 @@
 package com.qingcheng.zmusicbridge;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.qingcheng.zmusicbridge.music.MusicSearch;
 import com.qingcheng.zmusicbridge.music.SongInfo;
@@ -174,20 +175,41 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
                     + "没有检测到装了 ZMusic Mod 的玩家。请安装 ZMusic 客户端 Mod 后重新进入服务器~");
             return;
         }
+        int sent = 0;
         for (Player target : targets) {
-            sendPlay(target, song);
+            if (sendPlay(target, song)) {
+                sent++;
+            }
+        }
+        if (sent == 0) {
+            requester.sendMessage(PREFIX + ChatColor.RED
+                    + "播放数据发送失败（可能超过协议大小上限），换首歌试试~");
+            return;
         }
         String who = song.title + ChatColor.GRAY + " - " + song.artistText() + ChatColor.RESET;
         if (broadcast) {
-            getServer().broadcastMessage(PREFIX + (targets.size() > 1 ? "全服点歌：" : "点歌：") + who);
+            getServer().broadcastMessage(PREFIX + (sent > 1 ? "全服点歌：" : "点歌：") + who);
         } else {
             requester.sendMessage(PREFIX + "点歌：" + who);
         }
         getLogger().info(requester.getName() + " 点歌: " + song.title + " - " + song.artistText()
-                + " (" + song.source + ":" + song.id + ") -> " + targets.size() + " 人");
+                + " (" + song.source + ":" + song.id + ") -> " + sent + " 人");
     }
 
-    private void sendPlay(Player target, SongInfo song) {
+    /**
+     * 编码并发送一个协议包；超长等编码失败只记日志，不向服务器线程抛异常（#32）。
+     */
+    private boolean sendPacket(Player player, String type, JsonObject data) {
+        try {
+            player.sendPluginMessage(this, PacketCodec.CHANNEL, PacketCodec.encode(type, data));
+            return true;
+        } catch (IllegalArgumentException e) {
+            getLogger().warning("发送 " + type + " 给 " + player.getName() + " 失败：" + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean sendPlay(Player target, SongInfo song) {
         JsonObject songObj = new JsonObject();
         songObj.addProperty("id", song.id);
         songObj.addProperty("source", song.source);
@@ -214,7 +236,7 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
         data.add("song", songObj);
         data.add("audio", audio);
 
-        target.sendPluginMessage(this, PacketCodec.CHANNEL, PacketCodec.encode("server.play", data));
+        return sendPacket(target, "server.play", data);
     }
 
     private void stopFor(CommandSender sender) {
@@ -230,9 +252,9 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
                     && !online.getUniqueId().equals(((Player) sender).getUniqueId())) {
                 continue;
             }
-            online.sendPluginMessage(this, PacketCodec.CHANNEL,
-                    PacketCodec.encode("server.stop", data));
-            sent++;
+            if (sendPacket(online, "server.stop", data)) {
+                sent++;
+            }
         }
         sender.sendMessage(PREFIX + "已停止播放（" + sent + " 人）。");
     }
@@ -242,10 +264,16 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
     // ------------------------------------------------------------------
     private void onPluginMessage(Player player, byte[] message) {
         JsonObject envelope = PacketCodec.decode(message);
-        if (envelope == null || !envelope.has("type")) {
+        if (envelope == null) {
             return;
         }
-        String type = envelope.get("type").getAsString();
+        // 结构合法不等于字段类型合法：type 必须是字符串，否则安全忽略（#28）。
+        JsonElement typeElement = envelope.get("type");
+        if (typeElement == null || !typeElement.isJsonPrimitive()
+                || !typeElement.getAsJsonPrimitive().isString()) {
+            return;
+        }
+        String type = typeElement.getAsString();
         if ("client.hello".equals(type)) {
             ready.add(player.getUniqueId());
             sendHello(player);
@@ -273,6 +301,6 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
         limits.addProperty("maxLyricsBytes", 262144);
         data.add("limits", limits);
 
-        player.sendPluginMessage(this, PacketCodec.CHANNEL, PacketCodec.encode("server.hello", data));
+        sendPacket(player, "server.hello", data);
     }
 }

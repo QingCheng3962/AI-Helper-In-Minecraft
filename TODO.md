@@ -74,7 +74,9 @@
 
 - [x] **修复「机器人回复自己说的话」死循环（实测被服务器以 Kicked for spamming 踢出）**：根因是「日志转发」功能把带触发词的日志 [点歌] 没找到「X」 发进了游戏公屏，服务器广播回来又被 _maybe_song_reply 当成新点歌 → 越滚越长（没找到「没找到「…」」）。三层防线：① **日志转发永不发送含触发词的行**（根治）；② _remember_sent/_is_own_echo——机器人发出的一切（send_chat、/msg、chatSent 事件、以及自己写的含触发词日志）都记 15 分钟，收到同样内容直接忽略；③ **熔断**——同一句话 8 秒内被点 ≥3 次即暂停点歌 60 秒并告警。实测：把机器人自己的消息（3 种前缀 × 3 个发送者）喂回去 → **0 次新搜索**；连点 5 次 → 熔断生效；带触发词的日志不再转到游戏 ✅
 
-- [x] **「没找到」的真凶：搜索接口带会员 Cookie 时被网易云返回空结果**。实测同一个搜索：带 MUSIC_U → esult.songs 为空（显示「没找到」）；**完全不带 Cookie → 正常返回**（起风了/孤勇者/甲乙丙丁 全部 OK，试听标记 trial=0）。根因应该是短时间内搜索请求过多，带会话的请求被风控喂空。修复：① search() **匿名优先**（第 3 次重试才带 Cookie 兜底）；② 每次搜索间隔 ≥0.8 秒 + **5 分钟结果缓存**（同一首歌反复点不再打接口）；③ _get_json 记录 LAST_ERROR（HTTP 状态/异常），esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X」失败：HTTP 403」而不是误报「没找到「X」」；④ 取播放地址失败时提示「可能被限流，稍等一下再试」。
+- [x] **「没找到」的真凶：搜索接口带会员 Cookie 时被网易云返回空结果**。实测同一个搜索：带 MUSIC_U →
+esult.songs 为空（显示「没找到」）；**完全不带 Cookie → 正常返回**（起风了/孤勇者/甲乙丙丁 全部 OK，试听标记 trial=0）。根因应该是短时间内搜索请求过多，带会话的请求被风控喂空。修复：① search() **匿名优先**（第 3 次重试才带 Cookie 兜底）；② 每次搜索间隔 ≥0.8 秒 + **5 分钟结果缓存**（同一首歌反复点不再打接口）；③ _get_json 记录 LAST_ERROR（HTTP 状态/异常），
+esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X」失败：HTTP 403」而不是误报「没找到「X」」；④ 取播放地址失败时提示「可能被限流，稍等一下再试」。
 
 - [x] 机器人新增聊天命令（都认「提示词」而不是 `[点歌]`）：`[提示词]帮助`（私聊 8 行用法，文案里故意只用全角 `【点歌】`）、`[提示词]好感度 [玩家]`（分数/等级/下一档；数据 `affinity.json`）、`[提示词]今日幸运值`、`[提示词]视频推荐`、`[提示词]签到`。触发判断复用 `ai_player._compile_trigger` + `_split_top_level_commas`，读 `ai_config.triggerRegex`（`ai_player` 关着也能用），没有提示词才退回点歌触发词
 - [x] 视频推荐走 `bilibili.recommend()`：大池子（30 条）里挑，**先避开刚推过的 id** → 每次冷却过后再点就是**换一批**；来源可选 番剧追番榜（默认，`season_type=1&day=3`）/ 首页热门 / 全站排行；**发公屏**、**全服共用**冷却（默认 30s，谁点都算）
@@ -84,4 +86,27 @@
 
 - [x] 视频推荐新增两个来源（**五选一**，GUI 下拉框）：`home` = **B 站首页推荐**（`x/web-interface/index/top/rcmd`，先访问一次 bilibili.com 拿 `buvid3` 再调才不会被 `-412 request was banned`；`ps` 只能 12，一次 30 条，实测连推 3 批 0 重合）；`fav` = **我的收藏夹**（`x/v3/fav/resource/list?order=mtime`，**随机翻页 2 页**凑池子，跳过失效条目）。实测：home 3/3 成功、fav 抽到 5 条可用视频；其余来源 1 个没坏
 - [x] 收藏夹要登录：`misc.biliCookie`（整条 Cookie 或只填 SESSDATA 值，`cookie_header` 归一化）+ `misc.biliFavMediaId` + `biliFavName`（只用于显示，文案里 `{source}` 会显示成「收藏夹「名字」」）；GUI「杂项 → B 站账号」有 SESSDATA 输入（密码框）+ **「读取收藏夹」按钮**（后台线程调 `login_info`/`fav_folders`，把自建+收藏的夹子填进**可选下拉框**，也能直接填收藏夹 id）+ 状态提示；选 fav 但没配 Cookie 时**在冷却之前**就公屏提示，不白扣冷却。换夹子时「推过」记录按 `fav:<media_id>` 分开记
+
+## 2026-10-25 审计 Issues 修复（#14–#33）
+
+- [x] #14 `SongPlayer`：旧播放线程 finally 只在 `player == mine` 时清引用，不再把新歌的播放器清掉（否则新歌停不了）
+- [x] #15 `onlyMySong`：记录自己最近一次点歌的**关键词**；只有「文案含我名字」或「关键词匹配」才播，并在收到后清掉，5 分钟内不再接受别人的歌
+- [x] #16 群发私聊 `refresh_player_list`：`eng.running` 是属性，原来写成 `eng.running()` 会抛异常 → 改用属性
+- [x] #17 `BotEngine`：读取线程固定自己对应的进程，旧线程结束时不再覆盖新进程的 `_running`
+- [x] #18 AI 配置保存后立即 `reload_ai_player()`；`AiPlayer.reload()` 增加配置代次、关闭旧 Provider，迟到的旧回复直接丢弃
+- [x] #19 `/msg` 与公屏发送按 **UTF-16 码元** 计长度（`_mc_len` / `_mc_clip`），含 emoji 也不会超 256 被踢
+- [x] #20 `daily.db` 跨天：备份失败（或任何异常）不推进日期、不删旧库
+- [x] #21 幸运值：已落库的值直接返回，不再被当前上限二次裁剪
+- [x] #22 CSV 写入：插列后把表头写回 `grid[0]`，权威描述列 / 别名列不再变成无表头空列
+- [x] #23 视频推荐换批：新候选优先，数量不够时用旧候选补，不再整批退回旧池子
+- [x] #24 `AiPlayer.tick()`：过期去重清理移到功能开关判断之前，AI/定时回复关闭时也不会无限增长
+- [x] #25 `AutoEat`：health 监听器只在构造时注册一次，`toggle()` / `setAutoeat` 不再重复注册
+- [x] #26 `quiz.js`：延迟发送回调捕获当时的 session，旧题的答案不会发到新题
+- [x] #27 `run_with_api.py`：路由精确匹配、请求体必须是 JSON 对象（≤64KB）、玩家名/金额严格校验
+- [x] #28 `ZMusicBridge`：`type` 必须是字符串，`null`/对象/数组安全忽略
+- [x] #29 `build_all.ps1`：路径从脚本位置推导、JDK 缺失时明确报错、版本从 `gradle.properties` 读取、按退出码 + 本次产物判定
+- [x] #30 `package-lock.json` 根版本/授权与 `package.json` 对齐；README 改为 Node 22+；说明历史 `0.3.0.x` 只是展示编号、非 SemVer
+- [x] #31 `docbook.paginate`：硬切分改用 UTF-16 感知的 `_wrap_line`，小预算下 emoji 不超页
+- [x] #32 `PacketCodec.encode`：最终帧超过 32760 字节抛 `IllegalArgumentException`，插件侧捕获并提示，不再静默产出超限包
+- [x] 回归测试：`tests/test_fix_regressions.py`（8 项）；PR #35/#36/#37 已在独立 worktree 验证：Python 27/50/73 项、Node 40/47/47 项、Java 取消测试 12+12+8 项全部通过
 

@@ -26,7 +26,12 @@ public final class PacketCodec {
     private PacketCodec() {
     }
 
-    /** 编码一条完整的 ZMusic 帧。 */
+    /**
+     * 编码一条完整的 ZMusic 帧。
+     *
+     * @throws IllegalArgumentException 编码后的帧超过协议上限（32760 字节）。
+     *         由调用方决定如何向用户反馈，不做静默截断。
+     */
     public static byte[] encode(String type, JsonObject data) {
         JsonObject envelope = new JsonObject();
         envelope.addProperty("id", UUID.randomUUID().toString());
@@ -35,7 +40,13 @@ public final class PacketCodec {
         envelope.add("data", data == null ? new JsonObject() : data);
 
         byte[] json = GSON.toJson(envelope).getBytes(StandardCharsets.UTF_8);
-        byte[] out = new byte[5 + json.length];
+        int total = 5 + json.length;
+        // 最终字节数（含外框）必须和自身 decode 的上限一致（#32）。
+        if (json.length > MAX_JSON_BYTES || total > 32760) {
+            throw new IllegalArgumentException(
+                    "ZMusic packet too large: " + total + " bytes (limit 32760)");
+        }
+        byte[] out = new byte[total];
         System.arraycopy(MAGIC, 0, out, 0, 4);
         out[4] = (byte) VERSION;
         System.arraycopy(json, 0, out, 5, json.length);
