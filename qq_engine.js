@@ -526,6 +526,31 @@ function connectForward() {
 }
 
 // --- Reverse mode (the OneBot WS server connects in to us) ---
+// null means malformed/ambiguous credentials; never expose request values in logs.
+function reverseToken(req) {
+    try {
+        const header = (req.headers && (req.headers.authorization || req.headers.Authorization)) || '';
+        const headerToken = String(header).replace(/^Bearer\s+/i, '').trim();
+        const url = String(req.url || '');
+        const queryStart = url.indexOf('?');
+        let queryToken;
+        if (queryStart >= 0) {
+            for (const pair of url.slice(queryStart + 1).split('&')) {
+                if (!pair) continue;
+                const separator = pair.indexOf('=');
+                const key = decodeURIComponent((separator < 0 ? pair : pair.slice(0, separator)).replace(/\+/g, ' '));
+                const value = decodeURIComponent((separator < 0 ? '' : pair.slice(separator + 1)).replace(/\+/g, ' '));
+                if (key !== 'access_token') continue;
+                if (queryToken !== undefined || separator < 0 || !value) return null;
+                queryToken = value;
+            }
+        }
+        return headerToken || queryToken || '';
+    } catch (e) {
+        return null;
+    }
+}
+
 function startReverse() {
     if (typeof WebSocket.Server !== 'function') {
         logError('当前 ws 版本不支持反向 WebSocket，请使用正向模式。');
@@ -547,15 +572,7 @@ function startReverse() {
 
     wss.on('connection', (ws, req) => {
         if (accessToken) {
-            const header = (req.headers && (req.headers['authorization'] || req.headers['Authorization'])) || '';
-            let token = String(header).replace(/^Bearer\s+/i, '').trim();
-            if (!token && req.url && req.url.indexOf('access_token=') >= 0) {
-                const q = req.url.split('?')[1] || '';
-                for (const pair of q.split('&')) {
-                    const kv = pair.split('=');
-                    if (kv[0] === 'access_token') token = decodeURIComponent(kv[1] || '');
-                }
-            }
+            const token = reverseToken(req);
             if (token !== accessToken) {
                 log('warn', '拒绝未授权连接（access token 不匹配）。');
                 try { ws.close(1008, 'invalid token'); } catch (e) { /* ignore */ }
