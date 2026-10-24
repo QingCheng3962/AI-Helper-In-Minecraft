@@ -188,6 +188,9 @@ class Controller:
         self._song_current: Optional[Dict[str, Any]] = None
         self._song_next_at = 0.0
         self._song_seq = 0
+        self._song_lock = threading.RLock()
+        self._song_epoch = 0
+        self._song_player_epochs: Dict[str, int] = {}
         self._qq_nicknames: Dict[str, str] = {}
         self._load_qq_accounts()
         self._photo = PhotoServer()
@@ -439,14 +442,21 @@ class Controller:
             self._connecting = False
             return
 
-        self.ai_player = AiPlayer(
-            self.ai_config,
-            on_send_chat=self._on_ai_send_chat,
-            log=lambda m: self._post_ui({'kind': 'log', 'level': 'ai', 'message': m}),
-            error=lambda m: self._post_ui({'kind': 'log', 'level': 'error', 'message': m}),
-            roster=self.roster,
-            on_reply=self._on_ai_replied,
-        )
+        if self.ai_player:
+            # Reuse the bounded worker across reconnects; a slow old request
+            # must not create an additional worker on each connection attempt.
+            self.ai_player.set_online(False)
+            self.ai_player.reload(self.ai_config)
+        else:
+            self.ai_player = AiPlayer(
+                self.ai_config,
+                on_send_chat=self._on_ai_send_chat,
+                log=lambda m: self._post_ui({'kind': 'log', 'level': 'ai', 'message': m}),
+                error=lambda m: self._post_ui({'kind': 'log', 'level': 'error', 'message': m}),
+                roster=self.roster,
+                on_reply=self._on_ai_replied,
+            )
+            self.ai_player.set_online(False)
         if self._bot_username:
             self.ai_player.set_bot_username(self._bot_username)
 
@@ -484,6 +494,8 @@ class Controller:
     def shutdown(self) -> None:
         """Full stop used on app close: MC connection plus the QQ relay."""
         self.disconnect()
+        if self.ai_player:
+            self.ai_player.close()
         self._stop_qq()
         try:
             self.log_saver.flush()
@@ -894,9 +906,13 @@ class Controller:
 
     def set_ai_enabled(self, enabled: bool) -> None:
         self.ai_config.enabled = bool(enabled)
+        if self.ai_player:
+            self.ai_player.config.enabled = bool(enabled)
+            if enabled:
+                self.ai_player.resume()
+            else:
+                self.ai_player.stop_now()
         self._persist_config(self.ai_config)
-        if not enabled and self.ai_player:
-            self.ai_player.stop_now()
         self._post_ui({'kind': 'log', 'level': 'info',
                        'message': 'AI 玩家已' + ('启用' if enabled else '禁用') + '。'})
 
@@ -2352,7 +2368,9 @@ class Controller:
                            'message': f'[点歌] {who} 又点了《{replay.get("title")}》→ '
                                       f'直接复用刚才的直链重播（不再搜索）'})
             if song.postPlayLink:
-                self._song_queue.insert(0, replay)   # 插到队首：下一秒就发（配合「立刻插播」）
+                with self._song_lock:
+                    replay['_generation'] = self._song_ticket(who)
+                    self._song_queue.insert(0, replay)   # 停止後的新點歌使用新代次
             # 回下载链接的逻辑照走（让没装 Mod 的人也能看到）
             if not song.replyEnabled:
                 return True
@@ -2403,10 +2421,14 @@ class Controller:
     # ------------------------------------------------------------------
     def song_state(self) -> Dict[str, Any]:
         """给 GUI 用：当前播放 + 队列快照。"""
-        return {
-            'current': dict(self._song_current) if self._song_current else None,
-            'queue': [dict(e) for e in self._song_queue],
-        }
+        with self._song_lock:
+            return {
+                'current': dict(self._song_current) if self._song_current else None,
+                'queue': [dict(e) for e in self._song_queue],
+            }
+
+    def _song_ticket(self, who: str):
+        return (self._song_epoch, self._song_player_epochs.get(str(who).strip().casefold(), 0))
 
     def enqueue_song(self, query: str, who: str = '我', source: str = 'gui') -> None:
         """把一次点歌解析后加入播放队列（解析在后台线程做）。"""
@@ -2415,10 +2437,16 @@ class Controller:
             return
         self._post_ui({'kind': 'log', 'level': 'song',
                        'message': f'[点歌] {who} 点了歌：{query}（加入队列）'})
-        threading.Thread(target=self._resolve_into_queue,
-                         args=(query, who, source), daemon=True).start()
+        with self._song_lock:
+            ticket = self._song_ticket(who)
+            threading.Thread(target=self._resolve_into_queue,
+                             args=(query, who, source, ticket), daemon=True).start()
 
-    def _resolve_into_queue(self, query: str, who: str, source: str) -> None:
+    def _resolve_into_queue(self, query: str, who: str, source: str, ticket=None) -> None:
+        with self._song_lock:
+            ticket = self._song_ticket(who) if ticket is None else ticket
+            if ticket != self._song_ticket(who):
+                return
         cookie = self.config.song.neteaseCookie
         try:
             from . import netease
@@ -2427,6 +2455,13 @@ class Controller:
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': f'[点歌] 解析「{query}」失败：{e}'})
             return
+        with self._song_lock:
+            if ticket != self._song_ticket(who):
+                return
+            self._add_resolved_song(info, query, who, source, ticket)
+
+    def _add_resolved_song(self, info, query, who, source, ticket) -> None:
+        """Publish while holding _song_lock, atomically with stop/queue ticks."""
         if not info:
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': f'[点歌] 没找到「{query}」'})
@@ -2442,6 +2477,7 @@ class Controller:
         self._song_seq += 1
         entry = {
             'seq': self._song_seq,
+            '_generation': ticket,
             'who': who,
             'source': source,
             'query': query,
@@ -2471,12 +2507,17 @@ class Controller:
 
     def enqueue_existing(self, entry: Dict[str, Any], who: str = '我', source: str = 'gui') -> None:
         """把队列里已有的某首（别人的）歌，按原样再加进队列（不再解析）。"""
+        with self._song_lock:
+            self._enqueue_existing_locked(entry, who, source)
+
+    def _enqueue_existing_locked(self, entry, who, source) -> None:
         url = entry.get('url')
         if not url:
             return
         self._song_seq += 1
         item = {
             'seq': self._song_seq,
+            '_generation': self._song_ticket(who),
             'who': who,
             'source': source,
             'query': entry.get('query') or entry.get('title') or '',
@@ -2499,16 +2540,21 @@ class Controller:
         带 ``who`` 时**只清这个玩家自己的** —— 「谁点谁听」下这是必须的：
         A 发 ``[点歌]停止`` 不该把 B 正在听的歌也关了。不带 ``who`` 就是全清（GUI 的「清空队列」用）。
         """
-        target = str(who or '').strip().lower()
+        with self._song_lock:
+            self._clear_song_queue_locked(who)
+
+    def _clear_song_queue_locked(self, who: str) -> None:
+        target = str(who or '').strip().casefold()
         if target:
+            self._song_player_epochs[target] = self._song_player_epochs.get(target, 0) + 1
             before = len(self._song_queue)
             self._song_queue[:] = [
                 e for e in self._song_queue
-                if str(e.get('who') or '').strip().lower() != target
+                if str(e.get('who') or '').strip().casefold() != target
             ]
             removed = before - len(self._song_queue)
             mine_current = (self._song_current is not None
-                            and str(self._song_current.get('who') or '').strip().lower() == target)
+                            and str(self._song_current.get('who') or '').strip().casefold() == target)
             if mine_current:
                 self._song_current = None
                 self._song_next_at = 0.0
@@ -2517,6 +2563,8 @@ class Controller:
                                       f'{"（含正在放的那首）" if mine_current else ""}，'
                                       f'别人的 {len(self._song_queue)} 首不动'})
             return
+        self._song_epoch += 1
+        self._song_player_epochs.clear()
         n = len(self._song_queue)
         self._song_queue.clear()
         self._song_current = None
@@ -2537,6 +2585,10 @@ class Controller:
 
     def _song_tick(self) -> None:
         """每秒调用：当前放完就播下一首；开了「立刻插播」就新歌一到马上放（打断当前这首）。"""
+        with self._song_lock:
+            self._song_tick_locked()
+
+    def _song_tick_locked(self) -> None:
         now = time.time()
         if self._song_current is not None:
             if now < self._song_next_at:
@@ -2562,6 +2614,13 @@ class Controller:
         「谁点谁听」（``song.privatePlay`` 默认开）时播放数据用 ``/msg`` **私聊**发给点歌的人，
         公屏上不出现 —— 其他玩家的 Mod 不会跟着响。
         """
+        with self._song_lock:
+            ticket = self._song_ticket(entry.get('who') or '')
+            if entry.get('_generation', ticket) != ticket:
+                return
+            self._post_song_entry_locked(entry, now)
+
+    def _post_song_entry_locked(self, entry, now=None) -> None:
         now = time.time() if now is None else now
         trigger = (self.config.song.trigger or '[点歌]').strip() or '[点歌]'
         music = f"{entry['title']} - {entry['artist']}"
