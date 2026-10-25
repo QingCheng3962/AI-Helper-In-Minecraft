@@ -25,13 +25,16 @@ tunnel: REPLACE_WITH_TUNNEL_ID
 credentials-file: C:\Users\REPLACE_USER\.cloudflared\REPLACE_WITH_TUNNEL_ID.json
 
 ingress:
-  # 网站域名 -> B 机器本机 Nginx（Nginx 再反代到 A 的机器人）
+  # 方案二（推荐）：直接指向 B 上的 Python 中继
   - hostname: pic.qingchengsep.top
-    service: http://127.0.0.1:80
+    service: http://127.0.0.1:18765
     originRequest:
       connectTimeout: 10s
-      # 如果 Nginx 是自签 HTTPS，才需要 true；一般保持 false
       noTLSVerify: false
+
+  # 如果 B 用 Nginx 反代中继，改成：
+  # - hostname: pic.qingchengsep.top
+  #   service: http://127.0.0.1:80
 
   # 兜底
   - service: http_status:404

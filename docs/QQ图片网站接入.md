@@ -1,151 +1,288 @@
-# QQ 图片 / 消息接入网站（PHP）
+# QQ 图片 / 消息接入网站（两个方案）
 
-> 适用：把 QQ 群里的**消息和图片**实时展示到自己的网站。
-> 机器人端已经内置 HTTP API，网站只需要读取 JSON / SSE，不需要直接连 OneBot。
->
-> 示例域名：`pic.qingchengsep.top`（可换成你自己的）。
-
----
-
-## 一、它是怎么工作的
-
-```
-QQ 群
-  → OneBot（NapCat / SnowLuma）
-  → qq_engine.js：解析文本 + 图片候选（file_id / file / url / path）
-  → Python Controller：
-       · 图片下载后保存到 pic_http/
-       · 消息写入内存环形缓冲（最近 500 条）
-       · 若开启「图片转链接」，同时把链接发到 MC 公屏
-  → 内置 HTTP 服务（默认端口 8765）：
-       GET /pic_http/<文件名>       图片文件
-       GET /api/qq/messages         消息列表（JSON）
-       GET /api/qq/images           图片列表（JSON）
-       GET /api/qq/stream           实时消息（SSE）
-       GET /health                  健康检查
-```
-
-> 纯图片消息以前会被跳过（没有文本），现在会以 `[图片]` 正常进入 API 和 MC 转述。
+> 方案一：机器人、网站都在同一台机器，**直接用机器人内置 API**。
+> 方案二：机器人（A）在内网，网站（B）在另一台机器，**B 上跑一个 Python 中继**，
+> 由中继去 A 收消息和图片，再对外提供给网站 / Cloudflare。
 
 ---
 
-## 二、机器人端配置
+## 一、先选方案
 
-打开机器人 GUI → **QQ 转述 → 图片转本地链接**：
-
-| 配置 | 建议值 | 说明 |
+| | 方案一：本地直接用 | 方案二：A/B + Python 中继 |
 |---|---|---|
-| 图片转链接 | 需要发 MC 就勾选 | 不勾也能只给网站用 |
-| **启用网站 API** | ✅ 勾选 | 开启 `/api/qq/*` |
-| 监听地址 | A/B 同机用 `127.0.0.1`；B 远程访问 A 用 `0.0.0.0` | 只让内网/反代访问 |
-| 监听端口 | `8765` | 与反代一致 |
-| 公网地址 | `https://pic.qingchengsep.top` | API 返回的 `abs_url` 用这个前缀 |
-| **Token** | 一串足够长的随机字符串 | 网站请求时带上；不要公开 |
-| 保留 QQ 图片原名 | 可选 | 勾选后用 `原始名.jpg`（重复自动加 `_2`） |
+| 适用 | 网站和机器人同一台机器 | 机器人内网、网站在另一台服务器 |
+| 额外程序 | 不需要 | B 上跑 `tools/qq_relay.py` |
+| 公网入口 | 机器人 8765 或本机 Nginx | 中继端口（默认 18765） |
+| 图片存储 | A 的 `pic_http/` | A 的 `pic_http/` + B 的 `relay_data/pic_http/` |
+| 消息历史 | A 内存最近 500 条 | B 的 SQLite，重启不丢 |
+| 适合 Cloudflare | 可以 | 推荐（B 直接接隧道） |
 
-对应 `config.json`：
+---
+
+## 二、方案一：本地 Python 直接用
+
+```
+网站 PHP ──HTTP──▶ 127.0.0.1:8765（机器人内置服务）
+```
+
+### 1. 机器人配置
+
+GUI → **QQ 转述 → 图片转本地链接**：
+
+| 配置 | 填什么 |
+|---|---|
+| 图片转链接 | 需要发 MC 就勾 |
+| **启用网站 API** | ✅ |
+| 监听地址 | `127.0.0.1` |
+| 端口 | `8765` |
+| 公网地址 | `https://pic.qingchengsep.top`（没有公网就留空） |
+| **Token** | 长随机串 |
+| 保留 QQ 图片原始文件名 | 可选 |
+
+保存 → **断开 QQ → 重新连接**。
+
+### 2. 网站调用
+
+PHP 直接请求本机：
+
+```php
+$base  = 'http://127.0.0.1:8765';
+$token = '机器人里填的 Token';
+$since = (int)($_GET['since'] ?? 0);
+
+$ch = curl_init("{$base}/api/qq/messages?since={$since}&limit=50");
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER     => ["X-Token: {$token}"],
+    CURLOPT_TIMEOUT        => 10,
+]);
+echo curl_exec($ch);
+curl_close($ch);
+```
+
+图片直接引用：
+
+```html
+<img src="http://127.0.0.1:8765/pic_http/xxx.jpg">
+```
+
+### 3. 要公网域名时
+
+- 机器人监听改 `0.0.0.0`（或只让反代访问 `127.0.0.1`）
+- 本机 Nginx 反代 8765
+- cloudflared 指向本机 Nginx 或 `http://127.0.0.1:8765`
+
+没有第二台机器时，方案一到这一步就结束了。
+
+---
+
+## 三、方案二：A/B 分离 + Python 中继
+
+```
+A（内网机器人） 192.168.1.23:8765
+        │ HTTP（Token）
+        ▼
+B（服务器） tools/qq_relay.py  127.0.0.1:18765
+        │
+        ▼
+Cloudflare Tunnel → https://pic.qingchengsep.top
+        │
+        ▼
+网站 PHP
+```
+
+中继负责：
+
+- 每 2 秒从 A 拉 `/api/qq/messages`
+- 把图片下载到 B 的 `relay_data/pic_http/`（文件名不变）
+- 消息写入 B 的 `relay_data/relay.db`
+- 对外提供与 A 相同格式的 API 和图片
+- A 重启导致消息 id 归零时自动去重，网站看到的本地 id 始终递增
+
+### 1. A 机器（bot）
+
+GUI → **QQ 转述 → 图片转本地链接**：
+
+| 配置 | 填什么 |
+|---|---|
+| 图片转链接 | 按需 |
+| **启用网站 API** | ✅ |
+| 监听地址 | `0.0.0.0`（让 B 能访问） |
+| 端口 | `8765` |
+| 公网地址 | `https://pic.qingchengsep.top` |
+| **Token** | 长随机串（中继要用） |
+
+保存 → 重连 QQ。
+
+A 的防火墙只放行 B 的 IP：
+
+```powershell
+New-NetFirewallRule -DisplayName "QQPic from B" `
+  -Direction Inbound -Protocol TCP -LocalPort 8765 `
+  -RemoteAddress 192.168.1.50 -Action Allow
+```
+
+B 上先确认能到 A：
+
+```bash
+curl http://192.168.1.23:8765/health
+```
+
+### 2. B 机器：部署中继
+
+只需要两个文件：
+
+```
+tools/qq_relay.py
+tools/qq_relay.example.json   → 复制成 qq_relay.json 再改
+```
+
+B 需要 **Python 3.9+**，无第三方依赖。
+
+`qq_relay.json`：
 
 ```json
 {
-  "qq": {
-    "imageAsLink": true,
-    "imageHttpHost": "0.0.0.0",
-    "imageHttpPort": 8765,
-    "imagePublicBase": "https://pic.qingchengsep.top",
-    "webApiEnabled": true,
-    "webApiToken": "换成你自己的长随机串",
-    "imagePreserveName": false
-  }
+  "upstream_base": "http://192.168.1.23:8765",
+  "upstream_token": "A 的 webApiToken",
+  "listen_host": "127.0.0.1",
+  "listen_port": 18765,
+  "token": "给网站用的 Token",
+  "public_base": "https://pic.qingchengsep.top",
+  "data_dir": "relay_data",
+  "poll_seconds": 2
 }
 ```
 
-> `imageHttpHost`：A/B 同机或只用本机反代 → `127.0.0.1`；B 机器要经内网访问 A → `0.0.0.0`（或 A 的内网 IP），并配置防火墙只允许 B。
+启动：
 
-> **安全建议**：机器人只监听 `127.0.0.1`，由 Nginx/Caddy 反代到公网；不要把 8765 直接暴露。
-> 如果必须局域网访问，再用 `0.0.0.0`，并确保 Token 已设置。
-
-### 图片命名
-
-- 默认：`20261025_143012_123_ab12.jpg`（时间戳 + 随机串，不会重名）。
-- 勾选「保留 QQ 图片原始文件名」：用 `原始名.jpg`；非安全字符替换成 `_`，重名自动加 `_2`、`_3`。
-- 扩展名按图片真实格式修正（避免 `.png` 实际是 JPEG 导致浏览器 MIME 错误）。
-- **反代和 Cloudflare 不会改名**：A 上叫什么，公网 URL 就是什么。
-
----
-
-## 三、A/B 分离部署（机器人 A、网站 B）
-
-```
-A（bot，内网） 192.168.1.23:8765
-        │ 内网直连 / frp / Tailscale
-        ▼
-B（网站） Nginx :80  →  cloudflared  →  pic.qingchengsep.top
+```bash
+python3 tools/qq_relay.py --config tools/qq_relay.json
 ```
 
-- A 的配置：`imageHttpHost=0.0.0.0`（或 A 的内网 IP），并只放行 B 的 IP 访问 8765。
-- B 的 Nginx 把 `/pic_http/`、`/api/qq/`、`/health` 反代到 A。
-- cloudflared 在 B 上指向 `http://127.0.0.1:80`，由 Cloudflare 负责 HTTPS。
-- 图片文件名在 A 生成，B 和 CF 只转发、不改名。
+Windows：
 
-现成模板：
+```powershell
+python tools\qq_relay.py --config tools\qq_relay.json
+```
 
-- Nginx： [`deploy/nginx-pic.conf`](deploy/nginx-pic.conf)
-- Cloudflare Tunnel： [`deploy/cloudflared-pic.yml`](deploy/cloudflared-pic.yml)
+看到：
 
-如果不想让 B 承担图片流量，也可以把 cloudflared 放到 A 直接指向 `http://127.0.0.1:8765`；但这样 A 就是公网源站，B 也做不了缓存/统一鉴权。
+```
+中继已启动：http://127.0.0.1:18765 -> 上游 http://192.168.1.23:8765
+```
 
----
+### 3. B 本机验证
 
-## 四、Nginx 反向代理
+```bash
+curl http://127.0.0.1:18765/health
+```
+
+应返回 `"upstream_ok": true`，否则先查 A 的地址/防火墙/Token。
+
+再验 API：
+
+```bash
+curl -H "X-Token: 给网站的Token" \
+  http://127.0.0.1:18765/api/qq/messages
+```
+
+### 4. Cloudflare Tunnel
+
+中继本身就是完整 HTTP 服务，**不需要 Nginx**，隧道直接指它：
+
+```yaml
+tunnel: 你的隧道ID
+credentials-file: C:\Users\你\.cloudflared\你的隧道ID.json
+
+ingress:
+  - hostname: pic.qingchengsep.top
+    service: http://127.0.0.1:18765
+  - service: http_status:404
+```
+
+然后：
+
+```bash
+cloudflared tunnel route dns <隧道名> pic.qingchengsep.top
+cloudflared tunnel run <隧道名>
+```
+
+公网验证：
+
+```
+https://pic.qingchengsep.top/health
+```
+
+### 5. 常驻运行
+
+Linux：
+
+```bash
+cp tools/qq-relay.service /etc/systemd/system/qq-relay.service
+# 改里面的 WorkingDirectory / User / 配置路径
+systemctl daemon-reload
+systemctl enable --now qq-relay
+journalctl -u qq-relay -f
+```
+
+Windows：任务计划程序，程序填 `python.exe`，参数：
+
+```
+tools\qq_relay.py --config tools\qq_relay.json
+```
+
+起始目录填项目根目录，勾选“不管用户是否登录都运行”。
+
+### 6. A/B 不在同一内网
+
+用 frp / Tailscale / WireGuard 把 A 的 8765 映射到 B 的本地端口，例如：
+
+```
+A:8765  --frp-->  B:127.0.0.1:18764
+```
+
+中继配置改成：
+
+```json
+"upstream_base": "http://127.0.0.1:18764",
+"listen_port": 18765
+```
+
+注意两个端口不要重复：
+
+- `18764`：给中继去访问 A（frp 映射）
+- `18765`：中继对外监听
+
+### 7. 如果 B 已经有 Nginx
+
+可以让 Nginx 反代中继，隧道指向 B 的 80：
 
 ```nginx
+upstream qq_relay {
+    server 127.0.0.1:18765;
+}
 server {
-    listen 443 ssl http2;
+    listen 80;
     server_name pic.qingchengsep.top;
 
-    ssl_certificate     /etc/nginx/ssl/pic.qingchengsep.top.pem;
-    ssl_certificate_key /etc/nginx/ssl/pic.qingchengsep.top.key;
-
-    # 图片
-    location /pic_http/ {
-        proxy_pass http://127.0.0.1:8765;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    # API（SSE 必须关闭缓冲）
+    location /pic_http/ { proxy_pass http://qq_relay; }
     location /api/qq/ {
-        proxy_pass http://127.0.0.1:8765;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://qq_relay;
         proxy_buffering off;
-        proxy_cache off;
         proxy_read_timeout 35m;
-        chunked_transfer_encoding off;
     }
-
-    location = /health {
-        proxy_pass http://127.0.0.1:8765;
-    }
+    location = /health { proxy_pass http://qq_relay; }
 }
 ```
 
-Caddy 版本：
-
-```caddy
-pic.qingchengsep.top {
-    reverse_proxy 127.0.0.1:8765
-    # SSE 自动不缓冲
-}
-```
+此时隧道 `service` 填 `http://127.0.0.1:80`。模板见 `docs/deploy/nginx-pic.conf`。
 
 ---
 
-## 五、API 说明
+## 四、API（两个方案完全一样）
 
-### 鉴权
-
-三种任选其一（Token 未设置时不需要）：
+鉴权任选：
 
 ```
 X-Token: <token>
@@ -154,15 +291,11 @@ Authorization: Bearer <token>
 ?token=<token>
 ```
 
-推荐服务端请求用 `X-Token`，不要放进前端 URL。
-
-### 1. 增量拉取消息（推荐 PHP 轮询）
+### 1. 消息
 
 ```
 GET /api/qq/messages?since=0&limit=50
 ```
-
-响应：
 
 ```json
 {
@@ -188,66 +321,68 @@ GET /api/qq/messages?since=0&limit=50
 }
 ```
 
-- `since`：上次拿到的 `last_id`，首次传 0
-- 返回按 `id` 升序；把 `last_id` 存起来，下次继续
-- 消息只保存在内存（最近 500 条），机器人重启后从 1 开始；图片文件仍在磁盘
+- `since`：上次的 `last_id`，首次 0
+- 方案二里这是 **B 的本地 id**，A 重启不会影响网站游标
+- `since` 比当前 `last_id` 大（换库/重置）时，把 `since` 归零
 
-### 2. 最近图片
+### 2. 图片列表
 
 ```
 GET /api/qq/images?limit=50
 ```
 
-返回 `{ok, images:[{name,url,abs_url,event_id,time,group_id,group_name,sender}]}`，最新在前。
-
-### 3. 实时消息（SSE）
+### 3. SSE 实时
 
 ```
 GET /api/qq/stream?since=0
 ```
 
-事件格式：
-
 ```
 id: 13
 event: message
-data: {"id":13,...}
+data: {...}
 
 : ping
 ```
-
-适合浏览器 `EventSource`；PHP 一般用轮询即可。
 
 ### 4. 健康检查
 
 ```
 GET /health
-→ {"ok":true,"events":12,"images":3,"last_id":12,"base_url":"https://...","token_required":true}
+```
+
+方案二额外返回：
+
+```json
+{
+  "ok": true,
+  "upstream_ok": true,
+  "upstream_base": "http://192.168.1.23:8765",
+  "last_sync": 1792912345.0,
+  "last_error": "",
+  ...
+}
 ```
 
 ---
 
-## 六、PHP 接入示例
+## 五、PHP 接入
 
-### 5.1 原生 PHP：给前端返回 JSON
+### 原生 PHP
 
 ```php
 <?php
-// qq_messages.php
 header('Content-Type: application/json; charset=utf-8');
 
-$token  = '换成你的 webApiToken';
-$since  = isset($_GET['since']) ? max(0, (int)$_GET['since']) : 0;
-$limit  = isset($_GET['limit']) ? min(200, max(1, (int)$_GET['limit'])) : 50;
-$base   = 'https://pic.qingchengsep.top';
+$base  = 'https://pic.qingchengsep.top';   // 方案一可改 http://127.0.0.1:8765
+$token = '你的 Token';
+$since = max(0, (int)($_GET['since'] ?? 0));
 
-$url = $base . '/api/qq/messages?since=' . $since . '&limit=' . $limit;
-$ch = curl_init($url);
+$ch = curl_init($base . '/api/qq/messages?since=' . $since . '&limit=50');
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_HTTPHEADER     => ['X-Token: ' . $token],
     CURLOPT_TIMEOUT        => 10,
-    CURLOPT_SSL_VERIFYPEER => true,
 ]);
 $body = curl_exec($ch);
 $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -255,172 +390,108 @@ curl_close($ch);
 
 if ($body === false || $code !== 200) {
     http_response_code(502);
-    echo json_encode(['ok' => false, 'msg' => 'QQ API 请求失败'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => false], JSON_UNESCAPED_UNICODE);
     exit;
 }
-
 echo $body;
 ```
 
 前端轮询：
 
-```js
+```html
+<div id="list"></div>
+<script>
 let lastId = 0;
-
-async function poll() {
-  const res = await fetch(`/qq_messages.php?since=${lastId}&limit=50`);
-  const data = await res.json();
+async function load() {
+  const r = await fetch('/qq.php?since=' + lastId);
+  const data = await r.json();
   if (!data.ok) return;
   for (const msg of data.messages) {
-    lastId = Math.max(lastId, msg.id);
-    renderMessage(msg);
-  }
-}
-
-function renderMessage(msg) {
-  const box = document.createElement('div');
-  box.className = 'qq-message';
-
-  const head = document.createElement('div');
-  head.textContent = `[${msg.group_name}] ${msg.sender}：${msg.text}`;
-  box.appendChild(head);
-
-  for (const img of msg.images || []) {
-    const el = document.createElement('img');
-    el.src = img.abs_url;      // 或 img.url（同域时）
-    el.loading = 'lazy';
-    el.style.maxWidth = '240px';
-    box.appendChild(el);
-  }
-  document.querySelector('#qq-list').appendChild(box);
-}
-
-setInterval(poll, 3000);
-poll();
-```
-
-### 5.2 ThinkPHP 6/8 控制器
-
-```php
-<?php
-namespace app\controller;
-
-use think\facade\Http;
-use think\Response;
-
-class Qq
-{
-    private string $apiBase = 'https://pic.qingchengsep.top';
-    private string $token   = '换成你的 webApiToken';
-
-    public function messages(): Response
-    {
-        $since = max(0, (int)request()->get('since', 0));
-        $limit = min(200, max(1, (int)request()->get('limit', 50)));
-
-        $resp = Http::withHeaders(['X-Token' => $this->token])
-            ->timeout(10)
-            ->get($this->apiBase . '/api/qq/messages', [
-                'since' => $since,
-                'limit' => $limit,
-            ]);
-
-        if (!$resp->isSuccess()) {
-            return json(['ok' => false, 'msg' => 'QQ API 请求失败'], 502);
-        }
-        return json($resp->json());
+    lastId = msg.id;
+    const div = document.createElement('div');
+    div.textContent = `[${msg.group_name}] ${msg.sender}：${msg.text}`;
+    document.querySelector('#list').appendChild(div);
+    for (const img of msg.images) {
+      const el = document.createElement('img');
+      el.src = img.abs_url;
+      el.style.maxWidth = '240px';
+      document.querySelector('#list').appendChild(el);
     }
+  }
+}
+setInterval(load, 3000);
+load();
+</script>
+```
+
+### ThinkPHP 6/8
+
+```php
+use think\facade\Http;
+
+public function messages()
+{
+    $resp = Http::withHeaders(['X-Token' => config('qq.token')])
+        ->timeout(10)
+        ->get(config('qq.base') . '/api/qq/messages', [
+            'since' => (int)request()->get('since', 0),
+            'limit' => 50,
+        ]);
+    return json($resp->json());
 }
 ```
 
-路由：
+### Laravel 10/11
 
 ```php
-Route::get('qq/messages', 'Qq/messages');
-```
-
-### 5.3 Laravel 10/11
-
-```php
-<?php
-namespace App\Http\Controllers;
-
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
-class QqController extends Controller
-{
-    public function messages(): Response|array
-    {
-        $since = max(0, (int)request('since', 0));
-        $limit = min(200, max(1, (int)request('limit', 50)));
-
-        $resp = Http::withToken(config('services.qq.token'))
-            ->timeout(10)
-            ->get(config('services.qq.base') . '/api/qq/messages', [
-                'since' => $since,
-                'limit' => $limit,
-            ]);
-
-        if ($resp->failed()) {
-            return response()->json(['ok' => false, 'msg' => 'QQ API 请求失败'], 502);
-        }
-        return response()->json($resp->json());
-    }
-}
-```
-
-`config/services.php`：
-
-```php
-'qq' => [
-    'base'  => env('QQ_API_BASE', 'https://pic.qingchengsep.top'),
-    'token' => env('QQ_API_TOKEN'),
-],
-```
-
-`.env`：
-
-```
-QQ_API_BASE=https://pic.qingchengsep.top
-QQ_API_TOKEN=换成你的 webApiToken
+$resp = Http::withToken(config('services.qq.token'))
+    ->get(config('services.qq.base') . '/api/qq/messages', [
+        'since' => request('since', 0),
+        'limit' => 50,
+    ]);
+return response()->json($resp->json());
 ```
 
 ---
 
-## 七、把图片放进网页的两种方式
+## 六、图片命名
 
-1. **直接引用绝对地址**：`<img src="<?= $img['abs_url'] ?>">`
-   要求 `imagePublicBase` 配成 `https://pic.qingchengsep.top`，且反代 `/pic_http/` 可访问。
-2. **由 PHP 代理**（图片接口不公开时）：PHP 读取 `/pic_http/<name>` 再输出，需自行加登录校验和缓存。
-
----
-
-## 八、运维与安全
-
-- **Token**：至少 32 位随机串；泄露后立即改 `config.json` 并重启 QQ 转述。
-- **监听地址**：反代方案用 `127.0.0.1`；`0.0.0.0` 会暴露到局域网/公网。
-- **图片清理**：`pic_http/` 会持续增长，建议定时删除 7 天前的文件：
-  ```bash
-  find /path/to/AI-Helper-In-Minecraft/pic_http -type f -mtime +7 -delete
-  ```
-  （Windows 可用计划任务 + PowerShell）
-- **消息不落库**：只存内存最近 500 条；需要长期保存请在 PHP 侧写入自己的数据库。
-- **群过滤**：机器人「群号」填了谁就只转述/记录谁；留空 = 全部群。
-- **隐私**：图片文件名不可猜但并非鉴权；群图片可能包含个人信息，公网展示前请确认群成员知情。
+- 默认：`20261025_143012_123_ab12.jpg`
+- 勾选「保留 QQ 图片原始文件名」：`原始名.jpg`，重名自动 `_2`、`_3`
+- 扩展名按真实图片格式修正
+- A 生成什么名字，中继、Cloudflare、网站 URL 都保持什么名字
 
 ---
 
-## 九、常见问题
+## 七、运维与安全
 
-**Q：API 返回空？**
-A：确认已勾选「启用网站 API」、QQ 已连接、群号过滤正确；纯图片消息现在也会以 `[图片]` 出现。
+- **Token**：A 一个、B 中继一个，都可以不同；至少 32 位随机
+- **监听地址**：中继默认 `127.0.0.1`，只让 CF/Nginx 访问；不要直接暴露 18765
+- **A 的 8765**：只放行 B 的 IP
+- **图片清理**：
+  - A：`pic_http/`
+  - B：`relay_data/pic_http/`
+  - 建议都保留 7 天
+- **消息历史**：方案二在 `relay_data/relay.db`，备份这个文件即可
+- **隐私**：知道图片 URL 就能访问；需要私密就加 Cloudflare Access 或 Nginx 鉴权
+
+---
+
+## 八、常见问题
+
+**Q：B 的 `/health` 显示 `upstream_ok: false`？**
+A：B 访问不到 A。先在 B 上 `curl http://A:8765/health`，查 IP/端口/防火墙/Token。
+
+**Q：A 重启后网站 `since` 很大，没有新消息？**
+A：方案二不会：中继用自己的本地 id。方案一需要 PHP 检测 `last_id < since` 时把 `since` 归零。
 
 **Q：图片 404？**
-A：确认 `imagePublicBase` 与反代域名一致，且 `/pic_http/` 已反代到 8765；文件名区分大小写。
+A：方案一查 A 的 `/pic_http/` 反代；方案二查 `relay_data/pic_http/` 是否已同步，以及 `public_base` 是否填写。
 
-**Q：SSE 一直不推？**
-A：Nginx 必须 `proxy_buffering off`，`proxy_read_timeout` 要大于心跳周期；PHP 轮询更简单。
+**Q：中继重启会不会重复消息？**
+A：不会，SQLite 里有指纹去重；已同步的图片也不会重新下载。
 
-**Q：重启机器人后 `since` 很大但没有新消息？**
-A：内存 `id` 会从 1 重新开始。PHP 侧检测到 `last_id < since` 时把 `since` 归零，或改用自己的数据库游标。
+**Q：中继要不要装整个项目？**
+A：只要 `tools/qq_relay.py` 和一份 JSON 配置即可，Python 标准库，无第三方依赖。
