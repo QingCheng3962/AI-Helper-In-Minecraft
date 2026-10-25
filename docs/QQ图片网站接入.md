@@ -11,7 +11,7 @@
 | | 方案一：本地直接用 | 方案二：A/B + Python 中继 |
 |---|---|---|
 | 适用 | 网站和机器人同一台机器 | 机器人内网、网站在另一台服务器 |
-| 额外程序 | 不需要 | B 上跑 `tools/qq_relay.py` |
+| 额外程序 | 不需要 | B 上跑 `other_qq_pic_sent/relay.py` |
 | 公网入口 | 机器人 8765 或本机 Nginx | 中继端口（默认 18765） |
 | 图片存储 | A 的 `pic_http/` | A 的 `pic_http/` + B 的 `relay_data/pic_http/` |
 | 消息历史 | A 内存最近 500 条 | B 的 SQLite，重启不丢 |
@@ -33,6 +33,7 @@ GUI → **QQ 转述 → 图片转本地链接**：
 |---|---|
 | 图片转链接 | 需要发 MC 就勾 |
 | **启用网站 API** | ✅ |
+| **网站出站方式** | **此设备出站** |
 | 监听地址 | `127.0.0.1` |
 | 端口 | `8765` |
 | 公网地址 | `https://pic.qingchengsep.top`（没有公网就留空） |
@@ -82,7 +83,7 @@ curl_close($ch);
 A（内网机器人） 192.168.1.23:8765
         │ HTTP（Token）
         ▼
-B（服务器） tools/qq_relay.py  127.0.0.1:18765
+B（服务器） other_qq_pic_sent/relay.py  127.0.0.1:18765
         │
         ▼
 Cloudflare Tunnel → https://pic.qingchengsep.top
@@ -107,6 +108,7 @@ GUI → **QQ 转述 → 图片转本地链接**：
 |---|---|
 | 图片转链接 | 按需 |
 | **启用网站 API** | ✅ |
+| **网站出站方式** | **内网其他设备出站**（会自动把监听地址设为 `0.0.0.0`） |
 | 监听地址 | `0.0.0.0`（让 B 能访问） |
 | 端口 | `8765` |
 | 公网地址 | `https://pic.qingchengsep.top` |
@@ -133,8 +135,8 @@ curl http://192.168.1.23:8765/health
 只需要两个文件：
 
 ```
-tools/qq_relay.py
-tools/qq_relay.example.json   → 复制成 qq_relay.json 再改
+other_qq_pic_sent/relay.py
+other_qq_pic_sent/relay.example.json   → 复制成 qq_relay.json 再改
 ```
 
 B 需要 **Python 3.9+**，无第三方依赖。
@@ -157,19 +159,35 @@ B 需要 **Python 3.9+**，无第三方依赖。
 启动：
 
 ```bash
-python3 tools/qq_relay.py --config tools/qq_relay.json
+python3 other_qq_pic_sent/relay.py --config other_qq_pic_sent/relay.json
 ```
 
 Windows：
 
 ```powershell
-python tools\qq_relay.py --config tools\qq_relay.json
+python other_qq_pic_sent\relay.py --config other_qq_pic_sent\relay.json
 ```
 
 看到：
 
 ```
 中继已启动：http://127.0.0.1:18765 -> 上游 http://192.168.1.23:8765
+```
+
+### 3. 可选：B 上的安全示例网站
+
+`other_qq_pic_sent/web/` 已经带了一套只读示例（PHP 8+）：
+
+- 登录页（会话 + CSRF + 登录限速）
+- 图片墙（`textContent` 防 XSS，图片 URL 白名单）
+- 服务端代理中继（Token 不出现在浏览器）
+
+部署步骤见 `other_qq_pic_sent/README.md`；最简：
+
+```bash
+php other_qq_pic_sent/web/hash.php '你的密码'
+# 把输出填到 PHP-FPM 的 QQ_PIC_PASSWORD_HASH
+# 再配置 QQ_RELAY_BASE / QQ_RELAY_TOKEN / QQ_PIC_BASE
 ```
 
 ### 3. B 本机验证
@@ -219,7 +237,7 @@ https://pic.qingchengsep.top/health
 Linux：
 
 ```bash
-cp tools/qq-relay.service /etc/systemd/system/qq-relay.service
+cp other_qq_pic_sent/qq-relay.service /etc/systemd/system/qq-relay.service
 # 改里面的 WorkingDirectory / User / 配置路径
 systemctl daemon-reload
 systemctl enable --now qq-relay
@@ -229,7 +247,7 @@ journalctl -u qq-relay -f
 Windows：任务计划程序，程序填 `python.exe`，参数：
 
 ```
-tools\qq_relay.py --config tools\qq_relay.json
+other_qq_pic_sent\relay.py --config other_qq_pic_sent\relay.json
 ```
 
 起始目录填项目根目录，勾选“不管用户是否登录都运行”。
@@ -494,4 +512,4 @@ A：方案一查 A 的 `/pic_http/` 反代；方案二查 `relay_data/pic_http/`
 A：不会，SQLite 里有指纹去重；已同步的图片也不会重新下载。
 
 **Q：中继要不要装整个项目？**
-A：只要 `tools/qq_relay.py` 和一份 JSON 配置即可，Python 标准库，无第三方依赖。
+A：只要 `other_qq_pic_sent/relay.py` 和一份 JSON 配置即可，Python 标准库，无第三方依赖。

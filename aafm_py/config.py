@@ -505,6 +505,10 @@ class QqConfig:
     # behind a reverse proxy that adds its own auth).
     webApiEnabled: bool = False
     webApiToken: str = ''
+    # Website egress mode:
+    #   'local' -> this machine serves the website/CF directly (127.0.0.1)
+    #   'relay' -> another LAN machine runs other_qq_pic_sent/relay.py
+    webMode: str = 'local'
     # Keep the original QQ image file name (sanitised, with a collision suffix)
     # instead of the default timestamp_random name.
     imagePreserveName: bool = False
@@ -586,6 +590,8 @@ class QqConfig:
         self.imagePublicBase = str(self.imagePublicBase or '').strip().rstrip('/')
         self.webApiEnabled = bool(self.webApiEnabled)
         self.webApiToken = str(self.webApiToken or '').strip()
+        if self.webMode not in ('local', 'relay'):
+            self.webMode = 'local'
         self.imagePreserveName = bool(self.imagePreserveName)
         self.lastLoginUin = str(self.lastLoginUin or '').strip()
 

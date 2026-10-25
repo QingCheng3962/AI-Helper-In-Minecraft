@@ -146,8 +146,10 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 文档：新增 `docs/QQ图片网站接入.md`（数据流、配置、Nginx/Caddy、API、原生 PHP / ThinkPHP / Laravel、前端轮询/SSE、安全与清理）
 - [x] GUI：新增「监听地址」下拉（127.0.0.1 / 0.0.0.0，可手填）与「保留 QQ 图片原始文件名」开关
 - [x] 图片命名：`save_image_bytes(..., preserve_name=True)` 保留 QQ 原名（安全字符过滤、扩展名按真实格式修正、重名自动 `_2/_3`、防路径穿越）
-- [x] 部署模板：`docs/deploy/nginx-pic.conf`（B 机器反代中继）、`docs/deploy/cloudflared-pic.yml`（CF 隧道指向 B 中继）、`tools/qq-relay.service`（systemd）
-- [x] **方案二：B 端 Python 中继** `tools/qq_relay.py`（标准库）：轮询 A 的 `/api/qq/messages`、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地自增 id、指纹去重、A 重启 id 归零自动重拉；对外提供 `/api/qq/*`、`/pic_http/*`、`/health` 与 SSE
+- [x] 部署模板：`docs/deploy/nginx-pic.conf`（B 机器反代中继）、`docs/deploy/cloudflared-pic.yml`（CF 隧道指向 B 中继）、`other_qq_pic_sent/qq-relay.service`（systemd）
+- [x] **方案二：B 端 Python 中继** `other_qq_pic_sent/relay.py`（标准库）：轮询 A 的 `/api/qq/messages`、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地自增 id、指纹去重、A 重启 id 归零自动重拉；对外提供 `/api/qq/*`、`/pic_http/*`、`/health` 与 SSE
+- [x] **GUI 出站方式**：`qq.webMode`（`local` 此设备出站 / `relay` 内网其他设备出站），选 relay 时自动把监听地址从 127.0.0.1 调到 0.0.0.0
+- [x] **安全示例前后端**：`other_qq_pic_sent/web/`（PHP 8+，登录会话、CSRF、登录限速、CSP、textContent 防 XSS、图片 URL 白名单、cURL 只允许 HTTP/HTTPS、Token 服务端保存）
 - [x] 文档重写为两个方案：`docs/QQ图片网站接入.md`（本地直接用 / A+B 中继 + Cloudflare + PHP/ThinkPHP/Laravel）
 - [x] 回归测试：`tests/test_qq_relay.py`（同步、图片下载、鉴权、去重、上游 id 回绕）
 

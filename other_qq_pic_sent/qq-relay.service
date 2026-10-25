@@ -1,6 +1,6 @@
 # Linux systemd 模板：B 机器上的 QQ 中继
 # 1) 改 WorkingDirectory / ExecStart / User
-# 2) cp tools/qq-relay.service /etc/systemd/system/qq-relay.service
+# 2) cp other_qq_pic_sent/qq-relay.service /etc/systemd/system/qq-relay.service
 # 3) systemctl daemon-reload && systemctl enable --now qq-relay
 # 4) journalctl -u qq-relay -f
 
@@ -13,7 +13,7 @@ Wants=network-online.target
 Type=simple
 User=www-data
 WorkingDirectory=/opt/AI-Helper-In-Minecraft
-ExecStart=/usr/bin/python3 /opt/AI-Helper-In-Minecraft/tools/qq_relay.py --config /opt/AI-Helper-In-Minecraft/tools/qq_relay.json
+ExecStart=/usr/bin/python3 /opt/AI-Helper-In-Minecraft/other_qq_pic_sent/relay.py --config /opt/AI-Helper-In-Minecraft/other_qq_pic_sent/relay.json
 Restart=always
 RestartSec=3
 # 日志直接进 journald

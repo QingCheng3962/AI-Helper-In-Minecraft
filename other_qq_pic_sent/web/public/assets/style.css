@@ -1,0 +1,110 @@
+:root {
+  color-scheme: dark;
+  --bg: #111418;
+  --panel: #1a1f26;
+  --line: #2a3038;
+  --text: #e6e9ee;
+  --muted: #8b93a1;
+  --accent: #4c8dff;
+  --error: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  background: rgba(17, 20, 24, .92);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+
+.topbar h1 { margin: 0; font-size: 17px; }
+.topbar a { color: var(--accent); text-decoration: none; margin-left: 12px; }
+.muted { color: var(--muted); font-size: 13px; }
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.messages { display: flex; flex-direction: column; gap: 12px; }
+
+.message {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.message-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.who { font-weight: 600; }
+.time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.text { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; }
+
+.message img {
+  display: block;
+  max-width: min(100%, 360px);
+  max-height: 360px;
+  border-radius: 8px;
+  margin: 6px 0;
+  background: #0b0d10;
+}
+
+.empty { text-align: center; padding: 40px 0; }
+
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.login-box {
+  width: min(100%, 360px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px;
+}
+.login-box h1 { margin: 0 0 4px; font-size: 20px; }
+.login-box label { display: block; margin: 16px 0 6px; font-size: 13px; color: var(--muted); }
+.login-box input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f1318;
+  color: var(--text);
+}
+.login-box button {
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.error { color: var(--error); }
