@@ -54,6 +54,7 @@ class WebAppTest(unittest.TestCase):
         self.app = WebApp(self.relay, {
             'listen_host': '127.0.0.1',
             'listen_port': _free_port(),
+            'require_login': True,
             'password_hash': make_password_hash('pw', 1000),
             'secure_cookie': False,
             'title': '测试图片墙',
@@ -128,6 +129,47 @@ class WebAppTest(unittest.TestCase):
              'Cookie': f'qqpic_sid={token}'},
             payload)
         self.assertEqual(status, 403)
+
+    def test_no_login_public_mode_and_root_image(self):
+        app = WebApp(self.relay, {
+            'listen_host': '127.0.0.1',
+            'listen_port': _free_port(),
+            'require_login': False,
+            'password_hash': '',
+            'secure_cookie': False,
+            'title': '公开图片墙',
+        })
+        app.start()
+        conn = http.client.HTTPConnection('127.0.0.1', app.listen_port, timeout=5)
+        try:
+            def req(path):
+                conn.request('GET', path)
+                resp = conn.getresponse()
+                return resp.status, resp.read()
+
+            status, body = req('/')
+            self.assertEqual(status, 200)
+            self.assertIn('公开图片墙'.encode('utf-8'), body)
+
+            status, body = req('/api/messages?since=0&limit=10')
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)['messages'][0]['text'], 'hello')
+
+            # 根路径图片：/p.png（用户要求的 pic.qingchengsep.top/图片名）
+            status, body = req('/p.png')
+            self.assertEqual(status, 200)
+            self.assertEqual(body, PNG)
+
+            # 老路径也兼容
+            status, body = req('/pic_http/p.png')
+            self.assertEqual(status, 200)
+            self.assertEqual(body, PNG)
+
+            status, _body = req('/login')
+            self.assertEqual(status, 303)
+        finally:
+            conn.close()
+            app.stop()
 
     def test_password_hash(self):
         hashed = make_password_hash('secret', 1000)

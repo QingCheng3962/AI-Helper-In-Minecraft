@@ -56,8 +56,8 @@
 - **图片只落盘一次**：网站 API 与 MC 公屏链接共用 `_prepare_qq_images()` 的结果，MC 离线时图片仍会保存供网站读取。
 - GUI「QQ 转述 → 图片转本地链接」新增「监听地址」「启用网站 API」开关、「Token」输入框与「保留 QQ 图片原始文件名」开关；配置项见 `qq.imageHttpHost` / `qq.webApiEnabled` / `qq.webApiToken` / `qq.imagePreserveName`。
 - **两种接入方案**：① **此设备出站**（A 自己开、网站/CF 直连 8765）；② **内网其他设备出站**（B 上跑 `other_qq_pic_sent/relay.py` 中继，去 A 收消息/图片，再对外提供 API 和图片）。GUI 的「网站出站方式」可直接切换。
-- **Python 中继**（`other_qq_pic_sent/relay.py`，标准库无依赖）：轮询 A、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地递增 id、指纹去重、A 重启 id 归零自动处理；对外提供同一套 `/api/qq/*` 与 `/pic_http/*`。
-- **Python Web 后台**（`other_qq_pic_sent/webapp.py`）：登录页 + 图片墙 + 只读 API，全部标准库；PBKDF2 密码、会话 Cookie、CSRF、登录限速、CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。
+- **Python 中继**（`other_qq_pic_sent/relay.py`，标准库无依赖）：轮询 A、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地递增 id、指纹去重、A 重启 id 归零自动处理；对外提供同一套 `/api/qq/*` 与图片 `/<文件名>`（兼容旧 `/pic_http/<文件名>`）。
+- **Python Web 后台**（`other_qq_pic_sent/webapp.py`）：默认**免登录**图片墙 + 只读 API，全部标准库；可选 `require_login` + PBKDF2/会话/CSRF/限速；CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。图片地址为 `https://域名/文件名`（不带 `/pic_http/`）。
 - A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`other_qq_pic_sent/qq-relay.service`。
 - 完整接入文档（两个方案、Cloudflare、Python Web 后台、自己的网站用 Flask/FastAPI 接入、轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
 - **QSP 完整使用说明**（QQ 图片发到 MC / 网站，逐步操作 + 排错）：[how to use QSP(QQ sent picture to minecraft).md](<how to use QSP(QQ sent picture to minecraft).md>)。
@@ -126,7 +126,7 @@
 │  ├─ src/main/java/...   #   zmusic:packet 协议编码 + 网易云搜索 + 点歌逻辑
 │  └─ dist/               #   已构建好的 ZMusicBridge-1.0.0.jar
 ├─ docs/                  # 接入文档（QQ 图片/消息接入网站等）
-├─ other_qq_pic_sent/     # 方案二 B 端：relay.py + Python Web 后台（登录/图片墙）+ 部署模板
+├─ other_qq_pic_sent/     # 方案二 B 端：relay.py + Python 网页（默认免登录）+ 部署模板
 ├─ promo/                 # 宣传片：单文件网页（1920×1080，全屏录屏即出片）
 ├─ run_with_api.py        # 带本地 HTTP 接口的启动器（供网站借用机器人发消息，可选）
 ├─ 更新日志.md            # 历史版本更新记录（v0.3.1 及更早；最新版见 README）

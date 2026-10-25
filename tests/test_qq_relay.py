@@ -136,10 +136,16 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(status, 200)
         msg = json.loads(body)['messages'][0]
         self.assertEqual(msg['text'], '[图片] 你好')
+        self.assertEqual(msg['images'][0]['url'], '/20261025_1.png')
         self.assertEqual(msg['images'][0]['abs_url'],
-                         'https://pic.example.top/pic_http/20261025_1.png')
+                         'https://pic.example.top/20261025_1.png')
 
         status, body = self._get('/pic_http/20261025_1.png', token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, PNG)
+
+        # B 端对外根路径：/文件名
+        status, body = self._get('/20261025_1.png', token=None)
         self.assertEqual(status, 200)
         self.assertEqual(body, PNG)
 

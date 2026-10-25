@@ -47,8 +47,10 @@
 
     for (const img of msg.images || []) {
       const raw = img.url || '';
-      // 只允许同源 /pic_http/，防止消息里塞入外部或 javascript: URL
-      if (raw.indexOf('/pic_http/') !== 0) continue;
+      // 只允许同源图片路径：/文件名 或 /pic_http/文件名
+      const safe = raw.indexOf('/pic_http/') === 0
+        || /^\/[^/?#]+\.(png|jpe?g|gif|webp|bmp)$/i.test(raw);
+      if (!safe) continue;
 
       const link = document.createElement('a');
       link.href = raw;

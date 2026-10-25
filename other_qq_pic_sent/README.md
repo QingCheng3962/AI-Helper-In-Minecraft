@@ -1,38 +1,39 @@
-# other_qq_pic_sent（Python 版）
+# other_qq_pic_sent（B 端，Python）
 
-方案二（A/B 分离）的独立目录：**B 机器上用 Python 收 A 的消息/图片，并直接带一个登录图片墙**。
+方案二（A/B 分离）的独立目录：B 机器上用 Python 收 A 的消息/图片，并直接提供网页。
 
 ```
 A（bot，内网） ──HTTP──▶ B：other_qq_pic_sent
-                         ├─ relay.py        去 A 拉消息/图片
-                         ├─ webapp.py       登录页 + 图片墙 + 只读 API（Python 后端）
-                         ├─ relay_data/     消息 SQLite + 图片（运行时生成）
-                         └─ web/            HTML 模板 + CSS/JS
+                         ├─ relay.py     去 A 拉消息/图片
+                         ├─ webapp.py    网页 + 图片 + 只读 API（Python 后端）
+                         ├─ relay_data/  SQLite + 图片（运行时生成）
+                         └─ web/         HTML 模板 + CSS/JS
 ```
 
-> 不需要 PHP、不需要 Nginx（可选）、不需要数据库服务；只依赖 Python 3.9+ 标准库。
+> **默认免登录**：打开网页就能看，不需要密码。
+> 图片地址是 `https://pic.qingchengsep.top/图片名`（不带 `/pic_http/`）。
+> 需要登录时把 `web.require_login` 改成 `true`，配置密码哈希即可。
 
 ---
 
-## 一、目录说明
+## 一、目录
 
 | 路径 | 作用 |
 |---|---|
-| `relay.py` | 内网同步：轮询 A、下载图片、SQLite 存消息 |
-| `webapp.py` | Python Web 后端：登录、会话、CSRF、限速、图片墙、`/api/messages` |
-| `hash_password.py` | 生成 PBKDF2 密码哈希 |
-| `relay.example.json` | 配置模板（中继 + Web） |
-| `web/templates/` | `login.html`、`index.html` |
+| `relay.py` | 轮询 A、下载图片、SQLite 存消息 |
+| `webapp.py` | Python Web：公开图片墙 + `/api/messages`（可选登录） |
+| `hash_password.py` | 需要登录时生成密码哈希（PBKDF2） |
+| `relay.example.json` | 配置模板 |
+| `web/templates/` | `index.html`、`login.html` |
 | `web/static/` | `app.js`、`style.css` |
-| `qq-relay.service` | systemd 模板（运行 webapp.py） |
+| `qq-relay.service` | systemd 模板 |
 
 ---
 
-## 二、快速开始
-
-### 1. 配置
+## 二、启动（免登录，最简单）
 
 ```bash
+cd other_qq_pic_sent
 cp relay.example.json relay.json
 ```
 
@@ -40,8 +41,8 @@ cp relay.example.json relay.json
 
 ```json
 {
-  "upstream_base": "http://192.168.1.23:8765",
-  "upstream_token": "A 的 webApiToken",
+  "upstream_base": "http://192.168.1.103:8765",
+  "upstream_token": "A 的 Token",
   "listen_host": "127.0.0.1",
   "listen_port": 18765,
   "public_base": "https://pic.qingchengsep.top",
@@ -50,88 +51,118 @@ cp relay.example.json relay.json
   "web": {
     "listen_host": "127.0.0.1",
     "listen_port": 8080,
+    "require_login": false,
     "password_hash": "",
-    "session_ttl": 86400,
-    "secure_cookie": true,
     "title": "QQ 群图片"
   }
 }
 ```
 
-### 2. 生成登录密码
-
-```bash
-python3 hash_password.py '你的密码'
-```
-
-把输出（`pbkdf2_sha256$...`）填到 `web.password_hash`。
-
-> `web.secure_cookie`：正式 HTTPS 用 `true`；本地 `http://127.0.0.1` 调试时临时改 `false`。
-
-### 3. 启动
+启动：
 
 ```bash
 python3 webapp.py --config relay.json
 ```
 
-看到：
+Windows：
+
+```powershell
+python webapp.py --config relay.json
+```
+
+打开：
 
 ```
-Web 后台：http://127.0.0.1:8080  （中继 API：http://127.0.0.1:18765）
+http://127.0.0.1:8080
 ```
 
-### 4. 访问
-
-- 本机：`http://127.0.0.1:8080`
-- 公网：Cloudflare Tunnel `service: http://127.0.0.1:8080`
-- 也可以在前面放 Nginx：`proxy_pass http://127.0.0.1:8080;`
-
-登录后每 3 秒自动拉新消息，图片点开看大图。
+直接就是图片墙，不需要登录。
 
 ---
 
-## 三、端口与数据流
+## 三、需要登录时（可选）
+
+`relay.json`：
+
+```json
+"web": {
+  "require_login": true,
+  "password_hash": "先运行 hash_password.py 生成的哈希"
+}
+```
+
+生成哈希：
+
+```bash
+python3 hash_password.py '你的密码'
+```
+
+Windows：
+
+```powershell
+python hash_password.py "你的密码"
+```
+
+重启 `webapp.py` 后，打开网页会先跳登录页。
+
+---
+
+## 四、图片地址
+
+B 对外：
+
+```
+https://pic.qingchengsep.top/20261025_143012_123_ab12.jpg
+```
+
+- 不带 `/pic_http/`（也可以用，兼容旧地址）
+- 图片文件名保持 A 的原名（勾选「保留 QQ 图片原始文件名」时）
+- 中继 API 的 `images[].url` 是 `/文件名`，`abs_url` 是完整公网地址
+
+中继内部 API 仍兼容：
+
+```
+http://127.0.0.1:18765/pic_http/文件名
+http://127.0.0.1:18765/文件名
+```
+
+---
+
+## 五、端口与数据
 
 | 端口 | 谁 | 说明 |
 |---|---|---|
-| A:8765 | 机器人 | B 的中继去访问它 |
-| B:18765 | relay.py | 给外部程序用的 Token API（只监听 127.0.0.1） |
-| B:8080 | webapp.py | 登录页 + 图片墙；Cloudflare 指向它 |
+| `8765` | A | 机器人内置 API |
+| `18765` | B | 中继内部 API（只监听 127.0.0.1） |
+| `8080` | B | 网页；Cloudflare 指向它 |
+
+数据：
 
 ```
-Cloudflare → B:8080（webapp.py）→ relay_data/（本地 SQLite + 图片）
-                ▲
-                └── relay.py 后台线程每 2 秒从 A:8765 同步
+relay_data/relay.db        # 消息（本地 id 递增）
+relay_data/pic_http/       # 图片
 ```
 
-- `relay_data/relay.db`：消息（本地 id 递增）
-- `relay_data/pic_http/`：图片（文件名保持 A 的原名）
-- 两个目录都不在 `web/` 下，浏览器无法直接列目录
+- 备份这两个即可
+- `relay_data/` 不在 `web/` 下
+- `relay.json` 和 `relay_data/` 已加入 `.gitignore`
 
 ---
 
-## 四、安全设计（对应木马 / 暴库 / 越权）
+## 六、Cloudflare
 
-| 风险 | 做法 |
-|---|---|
-| **木马/上传** | 没有任何上传接口；只读 GET；不能通过网站写文件 |
-| **SQL 注入** | Web 端不执行用户 SQL；中继 SQLite 全部参数化查询 |
-| **暴库** | 数据在 `relay_data/`（webroot 之外）；无数据库服务；无堆栈回显 |
-| **越权** | 登录会话（随机 32 字节 token，内存存储）；`HttpOnly` + `SameSite=Strict`；登录后换 session |
-| **CSRF** | 登录/退出都有 CSRF token；API 只读 |
-| **暴力破解** | 每个 IP 5 次失败 / 10 分钟 |
-| **XSS** | 前端只用 `textContent`；CSP 禁止内联脚本；图片只允许同源 `/pic_http/` |
-| **SSRF** | 中继地址来自配置；Web 端不接受用户 URL |
-| **路径穿越** | 图片文件名 `basename` + 目录校验 |
-| **点击劫持** | `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` |
-| **密码** | PBKDF2-SHA256（310,000 次），只存哈希 |
-| **Token 泄露** | A 的 Token 只在中继进程内使用，浏览器拿不到 |
+```yaml
+ingress:
+  - hostname: pic.qingchengsep.top
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+```
 
-> 示例是**只读**的。以后如果加上传/发消息/管理后台，必须另做文件类型与大小校验、随机文件名、逐用户权限和审计日志。
+HTTPS 由 Cloudflare 负责；webapp 监听 `127.0.0.1` 即可。
 
 ---
 
-## 五、常驻运行
+## 七、常驻运行
 
 Linux：
 
@@ -152,32 +183,42 @@ Windows 任务计划：
 
 ---
 
-## 六、Cloudflare
+## 八、安全说明（默认公开访问）
 
-```yaml
-ingress:
-  - hostname: pic.qingchengsep.top
-    service: http://127.0.0.1:8080
-  - service: http_status:404
-```
+默认 `require_login: false`，意味着：
 
-HTTPS 由 Cloudflare 负责；`webapp.py` 继续监听 `127.0.0.1` 即可。
+- 任何知道 `https://pic.qingchengsep.top` 的人都能看图片和消息
+- 适合公开群/展示用途
+- 不想公开就设 `require_login: true` + 密码哈希
+
+其他防护仍然有效：
+
+| 风险 | 做法 |
+|---|---|
+| 木马/上传 | 没有上传接口，只读 |
+| SQL 注入 | Web 端无 SQL；中继 SQLite 参数化 |
+| 暴库 | 数据在 `relay_data/`（webroot 外），无数据库服务 |
+| XSS | 前端只用 `textContent`；CSP 禁止内联脚本 |
+| SSRF | 中继地址来自配置，不接受用户 URL |
+| 路径穿越 | 图片名 basename + 目录校验 |
+| 点击劫持 | `X-Frame-Options: DENY` |
+| Token | 只在中继进程内，浏览器拿不到 |
 
 ---
 
-## 七、常见问题
+## 九、常见问题
 
-**Q：登录页 500 / 显示未配置密码？**
-A：`web.password_hash` 为空。运行 `hash_password.py` 并填入，重启。
+**Q：网页打不开？**
+A：确认 `webapp.py` 在运行，监听 `127.0.0.1:8080`；Cloudflare 的 service 是 `http://127.0.0.1:8080`。
 
-**Q：登录后一直“连接失败”？**
-A：看 webapp 日志里的「同步失败」。先在 B 上 `curl http://A:8765/health`。
+**Q：`/health` 里 `upstream_ok: false`？**
+A：B 访问不到 A。先在 B 上 `curl http://A:8765/health`。
 
 **Q：图片 404？**
-A：确认 `relay_data/pic_http/` 有文件；等中继同步完成。
+A：等中继同步；检查 `relay_data/pic_http/` 是否有文件。
 
-**Q：忘记密码？**
-A：重新运行 `hash_password.py`，替换 `web.password_hash`，重启。
+**Q：想改成登录访问？**
+A：`web.require_login: true`，运行 `hash_password.py` 填 `password_hash`，重启。
 
-**Q：能不用内置网页，只拿 API？**
-A：可以，用 `relay.py` 的 `/api/qq/messages`（Token），见 `../docs/QQ图片网站接入.md`。
+**Q：只想给外部程序 API，不要网页？**
+A：用 `relay.py` 的 `/api/qq/messages`（Token）；webapp 仍可同时提供网页。
