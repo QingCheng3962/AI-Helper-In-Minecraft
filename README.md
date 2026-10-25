@@ -60,6 +60,7 @@
 - **Python Web 后台**（`other_qq_pic_sent/webapp.py`）：登录页 + 图片墙 + 只读 API，全部标准库；PBKDF2 密码、会话 Cookie、CSRF、登录限速、CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。
 - A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`other_qq_pic_sent/qq-relay.service`。
 - 完整接入文档（两个方案、Cloudflare、Python Web 后台、自己的网站用 Flask/FastAPI 接入、轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
+- **QSP 完整使用说明**（QQ 图片发到 MC / 网站，逐步操作 + 排错）：[how to use QSP(QQ sent picture to minecraft).md](<how to use QSP(QQ sent picture to minecraft).md>)。
 
 ### v0.3.2
 
