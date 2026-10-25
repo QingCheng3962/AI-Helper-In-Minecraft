@@ -152,4 +152,5 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] **Python Web 后台**：`other_qq_pic_sent/webapp.py`（标准库，登录会话、CSRF、登录限速、CSP、textContent 防 XSS、图片同源白名单、PBKDF2 密码、Token 服务端保存）
 - [x] 文档重写为两个方案：`docs/QQ图片网站接入.md`（本地直接用 / A+B 中继 + Cloudflare + Python Web 后台）
 - [x] 回归测试：`tests/test_qq_relay.py`（同步、图片下载、鉴权、去重、上游 id 回绕）
+- [x] 文档：新增 `how to use QSP(QQ sent picture to minecraft).md`（QSP 到 MC/网站的两个方案、GUI 配置、B 部署、Cloudflare、API、安全、排错、命令速查）
 
