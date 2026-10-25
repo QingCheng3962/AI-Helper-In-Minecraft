@@ -1,40 +1,19 @@
 # ============================================================
-# Cloudflare Tunnel 配置模板（放在 B 机器）
+# Cloudflare Tunnel 配置模板（B 机器）
 #
-# 1) 安装 cloudflared
-#    Windows: winget install --id Cloudflare.cloudflared
-#    Linux:   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
-#
-# 2) 登录并创建隧道（会生成凭据 JSON）
-#    cloudflared tunnel login
-#    cloudflared tunnel create pic-qingcheng
-#
-# 3) 把本文件复制到：
-#    Windows: C:\Users\<你>\.cloudflared\config.yml
-#    Linux:   /etc/cloudflared/config.yml
-#
-# 4) 在 Cloudflare DNS 里给 pic.qingchengsep.top 添加 CNAME：
-#    pic.qingchengsep.top -> <隧道ID>.cfargotunnel.com
-#    （或在创建隧道时用 cloudflared tunnel route dns pic-qingcheng pic.qingchengsep.top）
-#
-# 5) 启动：
-#    cloudflared tunnel run pic-qingcheng
+# 默认指向 other_qq_pic_sent/webapp.py 的 8080。
+# 如果 B 前面加了 Nginx，把 service 改成 http://127.0.0.1:80
+# 如果只想暴露中继 API（没有网页），改成 http://127.0.0.1:18765
 # ============================================================
 
 tunnel: REPLACE_WITH_TUNNEL_ID
 credentials-file: C:\Users\REPLACE_USER\.cloudflared\REPLACE_WITH_TUNNEL_ID.json
 
 ingress:
-  # 方案二（推荐）：直接指向 B 上的 Python 中继
   - hostname: pic.qingchengsep.top
-    service: http://127.0.0.1:18765
+    service: http://127.0.0.1:8080
     originRequest:
       connectTimeout: 10s
       noTLSVerify: false
 
-  # 如果 B 用 Nginx 反代中继，改成：
-  # - hostname: pic.qingchengsep.top
-  #   service: http://127.0.0.1:80
-
-  # 兜底
   - service: http_status:404

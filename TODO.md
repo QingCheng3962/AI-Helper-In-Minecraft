@@ -149,7 +149,8 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 部署模板：`docs/deploy/nginx-pic.conf`（B 机器反代中继）、`docs/deploy/cloudflared-pic.yml`（CF 隧道指向 B 中继）、`other_qq_pic_sent/qq-relay.service`（systemd）
 - [x] **方案二：B 端 Python 中继** `other_qq_pic_sent/relay.py`（标准库）：轮询 A 的 `/api/qq/messages`、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地自增 id、指纹去重、A 重启 id 归零自动重拉；对外提供 `/api/qq/*`、`/pic_http/*`、`/health` 与 SSE
 - [x] **GUI 出站方式**：`qq.webMode`（`local` 此设备出站 / `relay` 内网其他设备出站），选 relay 时自动把监听地址从 127.0.0.1 调到 0.0.0.0
-- [x] **Python Web 后台**：`other_qq_pic_sent/webapp.py`（标准库，登录会话、CSRF、登录限速、CSP、textContent 防 XSS、图片同源白名单、PBKDF2 密码、Token 服务端保存）
+- [x] **Python Web 后台**：`other_qq_pic_sent/webapp.py`（标准库；默认 `require_login=false` 免登录，公开图片墙；可选登录：PBKDF2、会话 Cookie、CSRF、登录限速；CSP、textContent 防 XSS、图片同源白名单、Token 服务端保存）
+- [x] B 端图片地址改为 `https://域名/文件名`（不带 `/pic_http/`），同时保留 `/pic_http/` 兼容 A 发到 MC 的旧链接
 - [x] 文档重写为两个方案：`docs/QQ图片网站接入.md`（本地直接用 / A+B 中继 + Cloudflare + Python Web 后台）
 - [x] 回归测试：`tests/test_qq_relay.py`（同步、图片下载、鉴权、去重、上游 id 回绕）
 - [x] 文档：新增 `how to use QSP(QQ sent picture to minecraft).md`（QSP 到 MC/网站的两个方案、GUI 配置、B 部署、Cloudflare、API、安全、排错、命令速查）

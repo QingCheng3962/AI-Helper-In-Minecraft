@@ -42,7 +42,7 @@ A：Minecraft 机器人（Python GUI + Node 引擎）
                 ▼
         B：other_qq_pic_sent（可选）
           relay.py   去 A 收消息/图片
-          webapp.py  Python 登录页 + 图片墙
+          webapp.py  Python 网页 + 图片墙（默认免登录）
                 │
                 ▼
         Cloudflare Tunnel → https://pic.qingchengsep.top
@@ -76,7 +76,7 @@ A：Minecraft 机器人（Python GUI + Node 引擎）
 | 适用 | 机器人、网站同一台机器 | 机器人内网、网站在另一台服务器 |
 | 额外程序 | 无 | `other_qq_pic_sent/webapp.py` |
 |  Website 入口 | A:8765 | B:8080（Cloudflare 指向它） |
-| 登录页 | 无（只有 API） | 有（Python 登录 + 图片墙） |
+| 网页 | 无（只有 API） | 有（Python 图片墙，默认免登录） |
 | 图片存储 | A 的 `pic_http/` | A + B 的 `relay_data/pic_http/` |
 | 消息历史 | A 内存最近 500 条 | B 的 SQLite，重启不丢 |
 
@@ -157,7 +157,7 @@ A（内网 bot）192.168.1.23:8765
         ▼
 B（服务器）other_qq_pic_sent/
         ├─ relay.py      去 A 收消息/图片
-        ├─ webapp.py     Python 登录页 + 图片墙 + API
+        ├─ webapp.py     Python 网页 + 图片墙 + API（默认免登录）
         └─ relay_data/   SQLite + 图片
         │
         ▼
@@ -225,34 +225,24 @@ cp relay.example.json relay.json
   "web": {
     "listen_host": "127.0.0.1",
     "listen_port": 8080,
+    "require_login": false,
     "password_hash": "",
-    "session_ttl": 86400,
-    "secure_cookie": true,
     "title": "QQ 群图片"
   }
 }
 ```
 
-### 5.4 生成登录密码
+### 5.4 登录（可选，默认不需要）
 
-Linux：
+默认 `require_login: false`，打开网页直接看，**不用生成密码**。
+
+如果以后想加登录：
 
 ```bash
 python3 hash_password.py '你的密码'
 ```
 
-Windows：
-
-```powershell
-python hash_password.py "你的密码"
-```
-
-把输出（`pbkdf2_sha256$...`）填到 `web.password_hash`。
-
-`web.secure_cookie`：
-
-- 正式 HTTPS（Cloudflare）：`true`
-- 本地 `http://127.0.0.1` 调试：临时改 `false`
+把输出填到 `web.password_hash`，并把 `require_login` 改成 `true`，重启。
 
 ### 5.5 启动
 
@@ -269,7 +259,7 @@ python webapp.py --config relay.json
 看到：
 
 ```
-Web 后台：http://127.0.0.1:8080  （中继 API：http://127.0.0.1:18765）
+Web 后台：http://127.0.0.1:8080  （登录：关闭（公开访问）；中继 API：http://127.0.0.1:18765）
 ```
 
 ### 5.6 验证
@@ -280,7 +270,7 @@ curl http://127.0.0.1:18765/health
 
 返回里要有 `"upstream_ok": true`。
 
-浏览器打开 `http://127.0.0.1:8080` → 登录 → 看图片墙。
+浏览器打开 `http://127.0.0.1:8080` → **直接就是图片墙**，不需要登录。
 
 ### 5.7 Cloudflare Tunnel
 
@@ -393,18 +383,18 @@ MC 单条聊天有长度限制（默认 `maxLength=220`，最高 256）。图片
 ### 7.2 方案 B：用内置 Python 网页
 
 1. 浏览器打开 `https://pic.qingchengsep.top`
-2. 输入密码登录
+2. **默认不需要登录**，直接看图片墙
 3. 每 3 秒自动刷新
-4. 图片点开看大图
-5. 右上角退出
+4. 图片地址是 `https://pic.qingchengsep.top/图片名`（不带 `/pic_http/`）
+5. 图片点开看大图
 
-改密码：
+如果以后要加登录：
 
 ```bash
-python3 hash_password.py '新密码'
+python3 hash_password.py '你的密码'
 ```
 
-替换 `web.password_hash`，重启 `webapp.py`。
+把输出填到 `web.password_hash`，`web.require_login` 改成 `true`，重启 `webapp.py`。
 
 ### 7.3 方案 B：自己的网站读中继 API
 
@@ -467,7 +457,8 @@ GET /api/qq/messages?since=0&limit=50
 GET /api/qq/images?limit=50
 GET /api/qq/stream?since=0        （SSE）
 GET /health
-GET /pic_http/<文件名>
+GET /<文件名>              （B 端对外图片，推荐）
+GET /pic_http/<文件名>     （兼容旧地址）
 ```
 
 鉴权：
@@ -496,8 +487,8 @@ Authorization: Bearer <token>
       "images": [
         {
           "name": "20261025_143012_123_ab12.jpg",
-          "url": "/pic_http/20261025_143012_123_ab12.jpg",
-          "abs_url": "https://pic.qingchengsep.top/pic_http/20261025_143012_123_ab12.jpg"
+          "url": "/20261025_143012_123_ab12.jpg",
+          "abs_url": "https://pic.qingchengsep.top/20261025_143012_123_ab12.jpg"
         }
       ]
     }
@@ -511,13 +502,14 @@ Authorization: Bearer <token>
 - B 的 `id` 是本地自增，A 重启不影响
 - `since` 比当前 `last_id` 大时归零
 
-### 8.2 内置网页 API（B:8080，登录会话）
+### 8.2 内置网页 API（B:8080）
 
 ```
 GET /api/messages?since=0&limit=50
 ```
 
-需要登录 Cookie（浏览器自动带），只给内置页面使用。
+- 默认 `require_login=false`：**不需要 Cookie**，公开可读
+- 如果开启登录：需要登录 Cookie，浏览器自动带
 
 ---
 
@@ -539,9 +531,10 @@ GET /api/messages?since=0&limit=50
 | A 的 8765 | 只放行 B 的 IP |
 | B 的 8080/18765 | 只监听 127.0.0.1，公网只走 Cloudflare |
 | Token | 至少 32 位随机 |
-| 密码 | PBKDF2 哈希，不存明文 |
-| 会话 | HttpOnly + SameSite=Strict |
-| CSRF | 登录/退出校验 |
+| 默认访问 | `require_login=false`：知道域名就能看；不想公开就开登录 |
+| 密码（可选） | PBKDF2 哈希，不存明文 |
+| 会话（可选） | HttpOnly + SameSite=Strict |
+| CSRF（可选） | 登录/退出校验 |
 | 限速 | 每 IP 5 次失败 / 10 分钟 |
 | XSS | 前端只用 `textContent` |
 | 上传 | 没有上传接口，只读 |
@@ -591,10 +584,11 @@ relay_data/pic_http/
 | 玩家点链接打不开 | 域名/CF 隧道/防火墙不通 |
 | 链接被截断 | `qq.maxLength` 调到 256；或让玩家看网站 |
 | B `/health` 的 `upstream_ok=false` | B 访问不到 A：IP/端口/防火墙/Token |
-| 登录页提示未配置密码 | `web.password_hash` 为空，运行 `hash_password.py` |
-| 登录后一直“连接失败” | 看 webapp 日志同步错误；检查 `upstream_base` |
+| 网页一直“连接失败” | 看 webapp 日志同步错误；检查 `upstream_base` |
 | 图片 404 | 中继还没同步完；检查 `relay_data/pic_http/` |
-| 登录后又跳回登录 | `secure_cookie=true` 但用 HTTP 访问；本地调试改 false |
+| 开启了登录但提示未配置密码 | `web.password_hash` 为空，运行 `hash_password.py` |
+| 开启登录后又跳回登录 | `secure_cookie=true` 但用 HTTP 访问；本地调试改 false |
+| 任何人都能看图片 | 默认 `require_login=false`；不想公开就设 `true` |
 | CF 502 | 隧道 service 端口不对 / webapp 没启动 |
 
 ---
@@ -620,9 +614,13 @@ GUI → QQ 转述 → 图片转本地链接
 ```bash
 cd other_qq_pic_sent
 cp relay.example.json relay.json
-python3 hash_password.py '你的密码'
-# 编辑 relay.json 填 upstream_base / upstream_token / web.password_hash
+# 编辑 relay.json 填 upstream_base / upstream_token
+# 默认 require_login=false，不需要密码
 python3 webapp.py --config relay.json
+
+# 可选：要登录时
+# python3 hash_password.py '你的密码'
+# 把输出填到 web.password_hash，并把 require_login 改成 true
 ```
 
 ### 验证

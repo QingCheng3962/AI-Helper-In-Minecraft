@@ -11,10 +11,7 @@
     <h1>{{title}}</h1>
     <div class="top-actions">
       <span id="qq-status" class="muted">加载中…</span>
-      <form method="post" action="/logout" class="logout-form">
-        <input type="hidden" name="csrf" value="{{csrf}}">
-        <button type="submit" class="logout">退出</button>
-      </form>
+      {{logout_html}}
     </div>
   </header>
 

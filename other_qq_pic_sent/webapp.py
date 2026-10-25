@@ -39,6 +39,9 @@ except ImportError:  # 直接 python webapp.py 运行时
 DEFAULT_WEB = {
     'listen_host': '127.0.0.1',
     'listen_port': 8080,
+    # 默认免登录（用户要求：打开网页就能看）。需要登录时改为 true，
+    # 并配置 password_hash（hash_password.py 生成）。
+    'require_login': False,
     'password_hash': '',
     'session_ttl': 86400,
     'secure_cookie': False,
@@ -166,6 +169,7 @@ class WebApp:
         self.relay = relay
         self.listen_host = str(cfg['listen_host'] or '127.0.0.1')
         self.listen_port = int(cfg['listen_port'] or 8080)
+        self.require_login = bool(cfg['require_login'])
         self.password_hash = str(cfg['password_hash'] or '')
         self.session_ttl = int(cfg['session_ttl'] or 86400)
         self.secure_cookie = bool(cfg['secure_cookie'])
@@ -180,7 +184,10 @@ class WebApp:
         with open(path, 'r', encoding='utf-8') as f:
             text = f.read()
         for key, value in values.items():
-            text = text.replace('{{' + key + '}}', html.escape(str(value), quote=True))
+            # 以 _html 结尾的变量允许传可信 HTML（服务端自己拼的）
+            rendered = str(value) if key.endswith('_html') \
+                else html.escape(str(value), quote=True)
+            text = text.replace('{{' + key + '}}', rendered)
         return text
 
     def start(self) -> None:
@@ -305,6 +312,9 @@ class WebApp:
                     self._static(path)
                     return
                 if path == '/login':
+                    if not app.require_login:
+                        self._redirect('/')
+                        return
                     _token, session = self._session()
                     if session and session.get('auth'):
                         self._redirect('/')
@@ -318,15 +328,24 @@ class WebApp:
                     self._redirect('/')
                     return
                 if path == '/':
-                    if not self._require_auth():
-                        return
-                    token, session = self._session()
+                    session = None
+                    if app.require_login:
+                        session = self._require_auth()
+                        if not session:
+                            return
+                    logout_html = ''
+                    if app.require_login:
+                        csrf = (session or {}).get('csrf', '')
+                        logout_html = (
+                            '<form method="post" action="/logout" class="logout-form">'
+                            f'<input type="hidden" name="csrf" value="{csrf}">'
+                            '<button type="submit" class="logout">退出</button></form>')
                     body = app.render('index.html', title=app.title,
-                                      csrf=(session or {}).get('csrf', ''))
+                                      logout_html=logout_html)
                     self._html(body)
                     return
                 if path == '/api/messages':
-                    if not self._require_auth(api=True):
+                    if app.require_login and not self._require_auth(api=True):
                         return
                     since = self._int('since', 0, 0, 2 ** 62)
                     limit = self._int('limit', 50, 1, 100)
@@ -338,18 +357,28 @@ class WebApp:
                     })
                     return
                 if path.startswith('/pic_http/'):
-                    if not self._require_auth():
+                    if app.require_login and not self._require_auth():
                         return
-                    self._image(path)
+                    if not self._image(path):
+                        self._plain(404, 'Not Found')
+                    return
+                # B 端对外图片：/文件名（不带 /pic_http/）
+                if self._is_image_path(path) and self._image(path):
                     return
                 self._plain(404, 'Not Found')
 
             def do_POST(self):  # noqa: N802
                 path = urllib.parse.urlsplit(self.path).path
                 if path == '/login':
+                    if not app.require_login:
+                        self._redirect('/')
+                        return
                     self._login()
                     return
                 if path == '/logout':
+                    if not app.require_login:
+                        self._redirect('/')
+                        return
                     _token, session = self._session()
                     if session and session.get('auth'):
                         form = self._form()
@@ -416,22 +445,25 @@ class WebApp:
                 ctype = mimetypes.guess_type(full)[0] or 'application/octet-stream'
                 self._send(body, ctype, extra={'Cache-Control': 'public, max-age=3600'})
 
-            def _image(self, path: str) -> None:
-                name = os.path.basename(urllib.parse.unquote(path[len('/pic_http/'):]))
+            def _is_image_path(self, path: str) -> bool:
+                return path.count('/') == 1 and path.lower().endswith(
+                    ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'))
+
+            def _image(self, path: str) -> bool:
+                raw = path[len('/pic_http/'):] if path.startswith('/pic_http/') \
+                    else path.lstrip('/')
+                name = os.path.basename(urllib.parse.unquote(raw))
                 if not name or name in ('.', '..'):
-                    self._plain(404, 'Not Found')
-                    return
+                    return False
                 full = os.path.join(app.relay.pic_dir, name)
                 if os.path.dirname(os.path.abspath(full)) != os.path.abspath(app.relay.pic_dir) \
                         or not os.path.isfile(full):
-                    self._plain(404, 'Not Found')
-                    return
+                    return False
                 try:
                     size = os.path.getsize(full)
                     f = open(full, 'rb')
                 except OSError:
-                    self._plain(404, 'Not Found')
-                    return
+                    return False
                 ctype = mimetypes.guess_type(full)[0] or 'application/octet-stream'
                 self._headers(ctype, extra={
                     'Content-Length': str(size),
@@ -447,6 +479,7 @@ class WebApp:
                     pass
                 finally:
                     f.close()
+                return True
 
             def log_message(self, *args):  # silence
                 pass
@@ -514,8 +547,9 @@ def main() -> None:
     if args.secure_cookie is not None:
         web['secure_cookie'] = args.secure_cookie
 
-    if not web.get('password_hash'):
-        raise SystemExit('未配置 web.password_hash，请先运行 hash_password.py 生成')
+    if bool(web.get('require_login')) and not web.get('password_hash'):
+        raise SystemExit('web.require_login=true 时必须配置 web.password_hash '
+                         '（运行 hash_password.py 生成）')
 
     relay = Relay(cfg)
     relay.start_http()
@@ -525,7 +559,8 @@ def main() -> None:
     sync_thread = threading.Thread(target=sync_loop, args=(relay, stop), daemon=True)
     sync_thread.start()
     log(f'Web 后台：http://{app.listen_host}:{app.listen_port}  '
-        f'（中继 API：http://{relay.listen_host}:{relay.listen_port}）')
+        f'（登录：{"开启" if app.require_login else "关闭（公开访问）"}；'
+        f'中继 API：http://{relay.listen_host}:{relay.listen_port}）')
     try:
         while True:
             time.sleep(3600)

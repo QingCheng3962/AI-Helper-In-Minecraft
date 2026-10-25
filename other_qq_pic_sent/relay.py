@@ -97,6 +97,11 @@ def _safe_name(name: str) -> str:
     return name
 
 
+def re_image_name(name: str) -> bool:
+    return str(name or '').lower().endswith(
+        ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'))
+
+
 class Relay:
     """消息/图片同步 + 对外 HTTP 服务。"""
 
@@ -282,7 +287,8 @@ class Relay:
     # local queries
     # ------------------------------------------------------------------
     def _public_url(self, name: str) -> str:
-        rel = '/pic_http/' + name
+        # B 端对外图片地址：https://域名/文件名（不带 /pic_http/）
+        rel = '/' + name
         return (self.public_base + rel) if self.public_base else rel
 
     def _serialize(self, row: Tuple) -> Dict[str, Any]:
@@ -296,7 +302,7 @@ class Relay:
             name = str(img.get('name') or '')
             out_images.append({
                 'name': name,
-                'url': '/pic_http/' + name,
+                'url': '/' + name,
                 'abs_url': self._public_url(name),
             })
         return {
@@ -411,6 +417,11 @@ class Relay:
                     self._json(200, {'ok': True, **relay.stats()})
                     return
                 if path not in ('/api/qq/messages', '/api/qq/images', '/api/qq/stream'):
+                    # 兼容根路径图片：/文件名（B 端对外）
+                    name = _safe_name(urllib.parse.unquote(path.lstrip('/')))
+                    if name and re_image_name(name):
+                        self._serve_file()
+                        return
                     self.send_error(404, 'Not Found')
                     return
                 if not self._authorized():
@@ -464,7 +475,11 @@ class Relay:
 
             def _serve_file(self, head_only: bool = False) -> None:
                 path = urllib.parse.urlsplit(self.path).path
-                name = _safe_name(urllib.parse.unquote(path[len('/pic_http/'):]))
+                if path.startswith('/pic_http/'):
+                    raw = path[len('/pic_http/'):]
+                else:
+                    raw = path.lstrip('/')
+                name = _safe_name(urllib.parse.unquote(raw))
                 full = os.path.join(relay.pic_dir, name) if name else ''
                 if not name or not os.path.isfile(full):
                     self.send_error(404, 'Not Found')
