@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**当前版本：v0.3.2**（语义化版本；历史版本编号已统一改写，对照表见[更新日志](#更新日志)）
+**当前版本：v0.3.3-beta**（语义化版本；历史版本编号已统一改写，对照表见[更新日志](#更新日志)）
 
 一个"无客户端"的 Minecraft AI 玩家：不需要打开游戏本体，用 GUI 控制 mineflayer 引擎进入服务器，由大模型驱动它在游戏内与人聊天互动。
 
@@ -46,10 +46,10 @@
 
 ## 更新日志
 
-> 版本号统一为语义化写法（`MAJOR.MINOR.PATCH`）。**最新版本写在下面**；**v0.3.1 及更早的历史记录见 [更新日志.md](更新日志.md)**（含中文与英文历史）。
-> 当前版本 **`v0.3.2`**；Mod（`mc-song-mod/`）保持 `0.1.0`，jar 名不变。
+> 版本号统一为语义化写法（`MAJOR.MINOR.PATCH`）。**最新版本写在下面**；**v0.3.2 及更早的历史记录见 [更新日志.md](更新日志.md)**（含中文与英文历史）。
+> 当前版本 **`v0.3.3-beta`**；Mod（`mc-song-mod/`）保持 `0.1.0`，jar 名不变。
 
-### v0.3.3（开发中，未发布）
+### v0.3.3-beta
 
 - **网站接入（QQ → 网站）**：`qq.webApiEnabled` + `qq.webApiToken`；内置 HTTP 服务新增 `GET /api/qq/messages?since=&limit=`、`GET /api/qq/images?limit=`、`GET /api/qq/stream`（SSE）和 `GET /health`，支持 `X-Token` / `Authorization: Bearer` / `?token=`，CORS 可配置。
 - **纯图片消息不再丢弃**：`qq_engine.js` 先解析图片再判断文本，纯图片消息以 `[图片]` 进入网站 API 与 MC 转述。
@@ -61,37 +61,6 @@
 - A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`other_qq_pic_sent/qq-relay.service`。
 - 完整接入文档（两个方案、Cloudflare、Python Web 后台、自己的网站用 Flask/FastAPI 接入、轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
 - **QSP 完整使用说明**（QQ 图片发到 MC / 网站，逐步操作 + 排错）：[how to use QSP(QQ sent picture to minecraft).md](<how to use QSP(QQ sent picture to minecraft).md>)。
-
-### v0.3.2
-
-**合并贡献者 PR #35–#37（修复审计 Issues #5–#13）**
-
-- **#5 签到事务**：查重、签到记录与累计统计放进同一个 `BEGIN IMMEDIATE` 事务；写库失败会回滚、不发放奖励，可稍后重试。
-- **#6 奖励补领**：首次签到冻结奖励快照，逐项记录 pending / sending / submitted / unknown；再次签到只补发**确定未送出**的项目，不重抽、不重复计次。
-- **#7 写书确认**：只认服务器回传且页数、物品类型、标题、作者吻合的书籍数据；未确认就不推进进度、不丢书。
-- **#8 命令拦截**：未指定命名空间的危险命令同时覆盖 `minecraft:` 与插件命名空间，忽略大小写并按完整命令路径匹配。
-- **#9 QQ 反向验证**：畸形百分号编码、空值、重复 `access_token` 一律拒绝，不再因解析异常让 QQ 引擎退出。
-- **#10 配置原子保存**：主配置 / AI 配置 / 提示词模板 / 书进度 / QQ 账号记录改为「临时文件 + fsync + os.replace」；失败保留原文件，界面如实报错。
-- **#11 AI 工作队列**：聊天、定时回复、身份问答、搜索、文生图、资料研究进入独立 AI 工作线程串行处理（最多 1 项执行 + 8 项等待），不再阻塞 MC / QQ 事件与每日数据轮转。
-- **#12 AI 重新启用**：停用后再次启用能接受新请求，清掉旧排程、冷却与去重；停用期间的任务不会复活。
-- **#13 停止点歌**：停止会取消该玩家尚未完成的解析、本地兜底与待启动播放（legacy / modern 两套 Mod 同步），不再「停了之后又响」。
-
-**其余审计修复（#14–#33）**
-
-- **点歌与播放**：#14 旧播放线程不再清空新播放器引用；#15 `onlyMySong` 改为「文案含我名字」或「匹配本次点歌关键词」，收到后即消费；#19 `/msg` 与公屏发送按 **UTF-16 码元**计长度，emoji 不会再超 256 被服务器踢。
-- **稳定性**：#16 `eng.running` 属性被误当方法调用；#17 旧引擎读取线程不再覆盖新进程状态；#18 保存 AI 配置后立即重载、关闭旧 Provider 并作废旧请求；#20 每日数据备份失败不推进日期；#21 修改幸运值上限不再改变当天结果；#24 过期去重清理不再受功能开关影响。
-- **数据与功能**：#22 CSV 插列后写回表头（重载不丢描述/别名）；#23 视频推荐优先新候选，不足再用旧候选补；#25 AutoEat 监听器只注册一次；#26 Quiz 延迟答案绑定原题；#27 本地 API 精确路由与类型/大小校验；#31 分页按 UTF-16 切分。
-- **Mod / 插件**：#28 ZMusicBridge 的 `type` 必须为字符串；#32 协议编码超限抛错并由插件提示；#14 / #15 两套 Mod 同步修改。
-- **构建与文档**：#29 `build_all.ps1` 去硬编码路径、按本次产物判定；#30 lock 根版本/授权对齐、文档要求 Node **22+**；#33 固定 `certifi>=2026.10.19`。
-- 新增回归测试 `tests/test_fix_regressions.py`（8 项）。PR 验证结果：Python 27 / 50 / 73 项、Node 40 / 47 / 47 项、Java 取消测试 12 + 12 + 8 项全部通过。
-
-**其它**
-
-- 版本号升至 **v0.3.2**；`package.json` / `package-lock.json` 同步为 `0.3.2`。
-- **更新日志拆分**：README 只保留最新版本；v0.3.1 及更早的历史记录移入 [更新日志.md](更新日志.md)。
-- Node 引擎要求明确为 **`node >= 22`**（`package.json` 的 `engines` 与 README 一致）。
-- **客户端 Mod 全量构建通过**：15 个版本（1.21.1 ~ 1.21.11、26.1 ~ 26.2）已产出到 `mc-song-mod/dist/Song_0.1.0_<游戏版本>.jar`；同时修好 `build_all.ps1` 在 Windows PowerShell 5.1 下的脚本编码与 Gradle 输出判定问题。
-
 
 ## 目录结构
 
@@ -129,7 +98,7 @@
 ├─ other_qq_pic_sent/     # 方案二 B 端：relay.py + Python 网页（默认免登录）+ 部署模板
 ├─ promo/                 # 宣传片：单文件网页（1920×1080，全屏录屏即出片）
 ├─ run_with_api.py        # 带本地 HTTP 接口的启动器（供网站借用机器人发消息，可选）
-├─ 更新日志.md            # 历史版本更新记录（v0.3.1 及更早；最新版见 README）
+├─ 更新日志.md            # 历史版本更新记录（v0.3.2 及更早；最新版见 README）
 ├─ LICENSE                # Apache-2.0
 ├─ qq_engine.js           # Node 端 OneBot 11 群聊转述引擎（正向/反向 WebSocket）
 ├─ 3rdparty_auth.js       # LittleSkin OAuth 登录/刷新/自动重登

@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.2** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.3-beta** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,39 +31,19 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.1 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
-> Current version: **`v0.3.2`**; the client mod stays at `0.1.0` (jar names unchanged).
+> All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.2 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
+> Current version: **`v0.3.3-beta`**; the client mod stays at `0.1.0` (jar names unchanged).
 
-### v0.3.2
+### v0.3.3-beta
 
-**Merged PRs #35–#37 (audit issues #5–#13)**
-
-- **#5 Check-in transaction**: lookup, record and totals share one `BEGIN IMMEDIATE` transaction; storage failures roll back and grant nothing, and can be retried.
-- **#6 Reward retries**: the first check-in freezes a reward snapshot and tracks pending / sending / submitted / unknown per item; later check-ins only retry items that were definitely not sent, without rerolling or double-counting.
-- **#7 Book confirmation**: progress requires server-returned data matching pages, item type, title and author; unconfirmed writes keep the book and the continuation position.
-- **#8 Command blocking**: unqualified dangerous commands also cover `minecraft:` and plugin namespaces, case-insensitively and by full command path.
-- **#9 Reverse QQ auth**: malformed percent-encoding, empty values and duplicate `access_token` are rejected without crashing the QQ engine.
-- **#10 Atomic settings**: app/AI settings, prompt templates, book progress and QQ account records use temp file + fsync + `os.replace`; failures keep the original and surface in the UI.
-- **#11 AI worker**: chat, scheduled replies, identity answers, search, image generation and roster research run serially on a dedicated worker (1 active + 8 waiting), so MC/QQ events and daily rotation are no longer blocked.
-- **#12 AI re-enable**: enabling again accepts new work, clearing stale schedules, cooldowns and deduplication; work from the disabled period is not revived.
-- **#13 Cancel song requests**: stopping invalidates that player's unresolved lookups, local fallback and pending playback (both mod variants), so a stopped song cannot start later.
-
-**Other audit fixes (#14–#33)**
-
-- **Song playback**: #14 a stale playback thread no longer clears the new player; #15 `onlyMySong` now matches my name or the keywords of my latest request, consumed once; #19 `/msg` and public chat measure length in **UTF-16 units** so emoji cannot exceed the 256 limit.
-- **Stability**: #16 `eng.running` is a property, not a method; #17 stale engine readers no longer overwrite a new process; #18 saving AI settings reloads providers immediately, closes the old ones and drops late replies; #20 a failed daily backup no longer advances the date; #21 changing the lucky-max no longer changes today's value; #24 expired dedup cleanup runs regardless of feature switches.
-- **Data & features**: #22 CSV headers are written back after inserting columns; #23 video recommendations prefer fresh candidates and top up with old ones; #25 AutoEat registers its listener once; #26 Quiz delayed answers stay bound to their original question; #27 the local API uses exact routes plus type/size validation; #31 pagination splits by UTF-16.
-- **Mod / plugin**: #28 ZMusicBridge requires a string `type`; #32 oversized packets fail explicitly and are reported by the plugin; #14/#15 are applied to both mod variants.
-- **Build & docs**: #29 `build_all.ps1` derives paths, validates this run's artifacts and reads the mod version; #30 lock metadata aligned and Node **22+** documented; #33 pins `certifi>=2026.10.19`.
-- Added `tests/test_fix_regressions.py` (8 tests). PR verification: Python 27 / 50 / 73, Node 40 / 47 / 47, Java cancellation 12 + 12 + 8 — all passing.
-
-**Other**
-
-- Version bumped to **v0.3.2**; `package.json` / `package-lock.json` updated.
-- **Changelog split**: README keeps only the latest release; v0.3.1 and earlier moved to [更新日志.md](更新日志.md).
-- Node requirement is now explicitly **`node >= 22`**.
-- **Client mod built for all 15 versions** (1.21.1–1.21.11, 26.1–26.2) into `mc-song-mod/dist/Song_0.1.0_<gameVersion>.jar`; `build_all.ps1` also fixed for Windows PowerShell 5.1 (script encoding and Gradle output handling).
-
+- **Website integration (QQ → website)**: `qq.webApiEnabled` / `qq.webApiToken`; built-in endpoints `/api/qq/messages`, `/api/qq/images`, `/api/qq/stream` (SSE), `/health` with token auth and CORS.
+- **Pure-image messages are no longer dropped**: `qq_engine.js` resolves images first and forwards them as `[图片]`.
+- **Images saved once**: the website API and the MC chat link share `_prepare_qq_images()`; images are still saved when MC is offline.
+- **GUI egress mode**: **This device** (A serves the website directly) or **another LAN device** (B runs the Python relay; selecting it switches the bind address to `0.0.0.0`).
+- **Python relay** (`other_qq_pic_sent/relay.py`, stdlib only): polls A, downloads images, stores messages in SQLite with local increasing IDs, fingerprint dedup, handles A restarting and resetting IDs.
+- **Python web app** (`other_qq_pic_sent/webapp.py`, stdlib only): public no-login gallery by default (optional `require_login` with PBKDF2/session/CSRF/rate limit), read-only API; image URLs are `https://domain/filename` (old `/pic_http/filename` also works).
+- Deployment templates: `docs/deploy/nginx-pic.conf`, `docs/deploy/cloudflared-pic.yml`, `other_qq_pic_sent/qq-relay.service`.
+- Docs: [`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md) and [QSP usage guide](<how to use QSP(QQ sent picture to minecraft).md>).
 
 ## Project Layout
 
