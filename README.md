@@ -55,9 +55,10 @@
 - **纯图片消息不再丢弃**：`qq_engine.js` 先解析图片再判断文本，纯图片消息以 `[图片]` 进入网站 API 与 MC 转述。
 - **图片只落盘一次**：网站 API 与 MC 公屏链接共用 `_prepare_qq_images()` 的结果，MC 离线时图片仍会保存供网站读取。
 - GUI「QQ 转述 → 图片转本地链接」新增「监听地址」「启用网站 API」开关、「Token」输入框与「保留 QQ 图片原始文件名」开关；配置项见 `qq.imageHttpHost` / `qq.webApiEnabled` / `qq.webApiToken` / `qq.imagePreserveName`。
-- **两种接入方案**：① 本地直接用（网站和 bot 同机，直连 8765）；② A/B 分离（B 上跑 `tools/qq_relay.py` 中继，去 A 收消息/图片，再对外提供 API 和图片）。
-- **Python 中继**（`tools/qq_relay.py`，标准库无依赖）：轮询 A、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地递增 id、指纹去重、A 重启 id 归零自动处理；对外提供同一套 `/api/qq/*` 与 `/pic_http/*`。
-- A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`tools/qq-relay.service`。
+- **两种接入方案**：① **此设备出站**（A 自己开、网站/CF 直连 8765）；② **内网其他设备出站**（B 上跑 `other_qq_pic_sent/relay.py` 中继，去 A 收消息/图片，再对外提供 API 和图片）。GUI 的「网站出站方式」可直接切换。
+- **Python 中继**（`other_qq_pic_sent/relay.py`，标准库无依赖）：轮询 A、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地递增 id、指纹去重、A 重启 id 归零自动处理；对外提供同一套 `/api/qq/*` 与 `/pic_http/*`。
+- **安全示例前后端**（`other_qq_pic_sent/web/`）：PHP 登录页 + 图片墙，只读、会话鉴权、CSRF、登录限速、CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。
+- A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`other_qq_pic_sent/qq-relay.service`。
 - 完整接入文档（两个方案、Cloudflare、原生 PHP、ThinkPHP、Laravel、前端轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
 
 ### v0.3.2
@@ -124,7 +125,7 @@
 │  ├─ src/main/java/...   #   zmusic:packet 协议编码 + 网易云搜索 + 点歌逻辑
 │  └─ dist/               #   已构建好的 ZMusicBridge-1.0.0.jar
 ├─ docs/                  # 接入文档（QQ 图片/消息接入网站等）
-├─ tools/                 # qq_relay.py（方案二 B 端中继）与 systemd/配置模板
+├─ other_qq_pic_sent/     # 方案二 B 端：relay.py + 安全 PHP 前后端 + 部署模板
 ├─ promo/                 # 宣传片：单文件网页（1920×1080，全屏录屏即出片）
 ├─ run_with_api.py        # 带本地 HTTP 接口的启动器（供网站借用机器人发消息，可选）
 ├─ 更新日志.md            # 历史版本更新记录（v0.3.1 及更早；最新版见 README）

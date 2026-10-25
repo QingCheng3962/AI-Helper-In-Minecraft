@@ -1389,8 +1389,10 @@ class Controller:
                 # the 「启用」 checkbox un-clickable).
                 extra = ''
                 if cfg.webApiEnabled:
-                    extra = (f'；网站 API 已开启：/api/qq/messages、/api/qq/images、'
-                             f'/api/qq/stream（Token '
+                    mode = '内网其他设备（B 跑 other_qq_pic_sent/relay.py）' \
+                        if getattr(cfg, 'webMode', 'local') == 'relay' else '本机'
+                    extra = (f'；网站 API 已开启（出站：{mode}）：/api/qq/messages、'
+                             f'/api/qq/images、/api/qq/stream（Token '
                              f'{"已设置" if cfg.webApiToken else "未设置，建议设置"}）')
                 self._post_ui({'kind': 'log', 'level': 'info',
                                'message': f'图片服务已启动（端口 {cfg.imageHttpPort}）'

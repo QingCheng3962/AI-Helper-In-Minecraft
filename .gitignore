@@ -26,3 +26,6 @@ affinity.json
 # 每日数据（幸运值 / 签到）：跨天自动备份到 db_backup/
 daily.db
 /db_backup/
+# B 端中继运行时数据 / 本地配置（含 Token，别提交）
+/other_qq_pic_sent/relay_data/
+/other_qq_pic_sent/relay.json

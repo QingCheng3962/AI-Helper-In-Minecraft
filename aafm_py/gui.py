@@ -1844,6 +1844,7 @@ class AiPlayerGUI:
         self.var_qq_img_base = tk.StringVar()
         self.var_qq_web_api = tk.BooleanVar(value=False)
         self.var_qq_web_token = tk.StringVar()
+        self.var_qq_web_mode = tk.StringVar(value='local')
         self.var_qq_img_preserve = tk.BooleanVar(value=False)
         r = ttk.Frame(img)
         r.pack(fill='x', pady=2)
@@ -1869,6 +1870,19 @@ class AiPlayerGUI:
         r3.pack(fill='x', pady=(2, 2))
         ttk.Checkbutton(r3, text='保留 QQ 图片原始文件名（重复自动加 _2/_3）',
                         variable=self.var_qq_img_preserve).pack(side='left')
+        r4 = ttk.Frame(img)
+        r4.pack(fill='x', pady=(2, 2))
+        ttk.Label(r4, text='网站出站方式').pack(side='left')
+        ttk.Radiobutton(r4, text='此设备出站（A 直接给网站）',
+                        variable=self.var_qq_web_mode, value='local',
+                        command=self._on_qq_web_mode).pack(side='left', padx=(6, 0))
+        ttk.Radiobutton(r4, text='内网其他设备出站（B 跑 other_qq_pic_sent）',
+                        variable=self.var_qq_web_mode, value='relay',
+                        command=self._on_qq_web_mode).pack(side='left', padx=(12, 0))
+        ttk.Label(img, text='A 自己开：网站/CF 直接连本机 127.0.0.1:8765；'
+                            'B 转发：B 上运行 other_qq_pic_sent/relay.py，'
+                            'A 只需让 B 能访问 8765（监听地址 0.0.0.0）。',
+                  foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
         ttk.Label(img, text='监听地址：127.0.0.1=只给本机反代；0.0.0.0=允许 B 机器经内网访问（需防火墙限制）。'
                             '公网地址留空=自动探测公网 IP，例 https://pic.qingchengsep.top。'
                             '网站 API 建议配合 Nginx/Caddy 反代并设置 Token。',
@@ -2321,6 +2335,7 @@ class AiPlayerGUI:
         self.var_qq_img_base.set(cfg.qq.imagePublicBase or '')
         self.var_qq_web_api.set(bool(cfg.qq.webApiEnabled))
         self.var_qq_web_token.set(cfg.qq.webApiToken or '')
+        self.var_qq_web_mode.set(cfg.qq.webMode or 'local')
         self.var_qq_img_preserve.set(bool(cfg.qq.imagePreserveName))
         self.var_qq_autoreconnect.set(bool(cfg.qq.autoReconnect))
         self.var_qq_health.set(str(cfg.qq.healthCheckSeconds))
@@ -2674,6 +2689,7 @@ class AiPlayerGUI:
         qq.imagePublicBase = self.var_qq_img_base.get().strip()
         qq.webApiEnabled = bool(self.var_qq_web_api.get())
         qq.webApiToken = self.var_qq_web_token.get().strip()
+        qq.webMode = (self.var_qq_web_mode.get() or 'local').strip()
         qq.imagePreserveName = bool(self.var_qq_img_preserve.get())
         qq.autoReconnect = self.var_qq_autoreconnect.get()
         qq.healthCheckSeconds = self._parse_int(self.var_qq_health.get(), 30)
@@ -2868,6 +2884,12 @@ class AiPlayerGUI:
             return
         self.controller.set_extra_enabled(which, enabled)
         self._append_log(f'{which} {"已启用" if enabled else "已禁用"}。', 'info')
+
+    def _on_qq_web_mode(self):
+        """切到「内网其他设备出站」时，默认放开监听让 B 能访问。"""
+        if (self.var_qq_web_mode.get() or '').strip() == 'relay':
+            if (self.var_qq_img_host.get() or '').strip() in ('', '127.0.0.1'):
+                self.var_qq_img_host.set('0.0.0.0')
 
     def _on_qq_enabled(self):
         enabled = bool(self.var_qq_enabled.get())

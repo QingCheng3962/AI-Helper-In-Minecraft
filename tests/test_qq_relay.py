@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from tools.qq_relay import Relay, _fingerprint
+from other_qq_pic_sent.relay import Relay, _fingerprint
 
 
 def _free_port() -> int:

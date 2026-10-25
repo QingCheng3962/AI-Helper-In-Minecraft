@@ -15,8 +15,8 @@
 只依赖 Python 标准库（Python 3.9+）。
 
 用法：
-    python tools/qq_relay.py --config tools/qq_relay.example.json
-    python tools/qq_relay.py --upstream http://192.168.1.23:8765 \
+    python other_qq_pic_sent/relay.py --config other_qq_pic_sent/relay.example.json
+    python other_qq_pic_sent/relay.py --upstream http://192.168.1.23:8765 \
         --upstream-token A的Token --listen-port 18765 --token 给网站的Token
 
 常驻运行（Linux systemd）示例见 docs/QQ图片网站接入.md。
