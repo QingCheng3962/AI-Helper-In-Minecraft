@@ -76,6 +76,7 @@
 - 版本号升至 **v0.3.2**；`package.json` / `package-lock.json` 同步为 `0.3.2`。
 - **更新日志拆分**：README 只保留最新版本；v0.3.1 及更早的历史记录移入 [更新日志.md](更新日志.md)。
 - Node 引擎要求明确为 **`node >= 22`**（`package.json` 的 `engines` 与 README 一致）。
+- **客户端 Mod 全量构建通过**：15 个版本（1.21.1 ~ 1.21.11、26.1 ~ 26.2）已产出到 `mc-song-mod/dist/Song_0.1.0_<游戏版本>.jar`；同时修好 `build_all.ps1` 在 Windows PowerShell 5.1 下的脚本编码与 Gradle 输出判定问题。
 
 
 ## 目录结构
