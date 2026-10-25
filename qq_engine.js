@@ -403,12 +403,8 @@ async function handleObj(obj) {
     }
 
     const message = obj.message != null ? obj.message : obj.raw_message;
-    const content = extractText(message);
-    if (!content) {
-        log('info', `群 ${groupId} 的消息没有可转述的文本内容（纯图片/卡片等），已跳过。`);
-        return;
-    }
-
+    // Resolve images first: a pure-image message has no text, but it still
+    // must reach the website API / MC relay as "[图片]" (not be dropped).
     let images = [];
     if (Array.isArray(message) && (config.imageAsLink || config.collectImages)) {
         try {
@@ -416,6 +412,11 @@ async function handleObj(obj) {
         } catch (e) {
             images = [];
         }
+    }
+    const content = extractText(message) || (images.length ? '[图片]' : '');
+    if (!content) {
+        log('info', `群 ${groupId} 的消息没有可转述的文本内容（卡片/文件等），已跳过。`);
+        return;
     }
 
     emitEvent({

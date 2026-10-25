@@ -134,3 +134,14 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] **Mod 全量构建通过（15/15）**：1.21.1 ~ 1.21.11、26.1 ~ 26.2，产物 `mc-song-mod/dist/Song_0.1.0_<游戏版本>.jar`；已逐个校验 `fabric.mod.json` 的 `version=0.1.0` 与按版本注入的 `minecraft` / `java` 依赖
 - [x] 构建期网络问题处理：Mojang `client.jar` / `server.jar` 从 BMCLAPI 镜像补齐到 Loom 缓存；1.21.10 mappings 临时下载失败后重试成功
 
+## 2026-10-25 网站接入（QQ → 网站）
+
+- [x] `photo_server.py`：新增 QQ 消息/图片内存环形缓冲（最近 500 条/500 张）与 `/api/qq/messages`、`/api/qq/images`、`/api/qq/stream`（SSE）、`/health`；支持 Token（`X-Token` / `Authorization: Bearer` / `?token=`）与 CORS
+- [x] `photo_server.py`：图片响应改为按块读取；HEAD 不再发送 body；API 增加 `since` / `limit` 参数与 `abs_url`（由 `imagePublicBase` 生成）
+- [x] `qq_engine.js`：先解析图片再判断文本，纯图片消息以 `[图片]` 进入事件（此前被直接跳过）
+- [x] `controller.py`：新增 `_prepare_qq_images()`；网站 API 与 MC 转发共用同一次图片落盘；MC 离线时也保存图片并记录网站消息
+- [x] `config.py` / `gui.py`：新增 `qq.webApiEnabled`、`qq.webApiToken` 及 GUI 开关/Token 输入框
+- [x] `_build_qq_runtime_config()`：开启网站 API 时向 qq_engine 传 `collectImages: true`
+- [x] 回归测试：`tests/test_photo_api.py`（鉴权、消息/图片列表、CORS、图片文件、Controller 落盘与公屏链接），全套 86 项通过
+- [x] 文档：新增 `docs/QQ图片网站接入.md`（数据流、配置、Nginx/Caddy、API、原生 PHP / ThinkPHP / Laravel、前端轮询/SSE、安全与清理）
+
