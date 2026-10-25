@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from types import SimpleNamespace
 
-from aafm_py.photo_server import PHOTO_DIR, PhotoServer
+from aafm_py.photo_server import PHOTO_DIR, PhotoServer, save_image_bytes
 
 
 def _free_port() -> int:
@@ -106,6 +106,46 @@ class PhotoApiTest(unittest.TestCase):
             os.unlink(path)
             if name:
                 os.unlink(os.path.join(PHOTO_DIR, name))
+
+    def test_preserve_original_image_name(self):
+        payload = b'\x89PNG\r\n\x1a\n' + b'name-test'
+        created = []
+        try:
+            n1 = save_image_bytes(payload, r'C:\QQ\图片 2026.PNG',
+                                  preserve_name=True)
+            created.append(n1)
+            self.assertEqual(n1, '图片_2026.png')   # 真实格式 PNG，空格变 _
+            n2 = save_image_bytes(payload, r'C:\QQ\图片 2026.PNG',
+                                  preserve_name=True)
+            created.append(n2)
+            self.assertEqual(n2, '图片_2026_2.png')  # 重名自动加后缀
+
+            # 扩展名按真实格式修正：提示 .jpg，实际 PNG -> .png
+            n3 = save_image_bytes(payload, 'fake.jpg', preserve_name=True)
+            created.append(n3)
+            self.assertEqual(n3, 'fake.png')
+        finally:
+            for name in created:
+                try:
+                    os.unlink(os.path.join(PHOTO_DIR, name))
+                except OSError:
+                    pass
+
+    def test_preserve_name_blocks_path_traversal(self):
+        payload = b'\x89PNG\r\n\x1a\n' + b'traversal'
+        name = ''
+        try:
+            name = save_image_bytes(payload, r'..\..\evil.png',
+                                    preserve_name=True)
+            self.assertEqual(name, 'evil.png')
+            self.assertEqual(os.path.dirname(os.path.join(PHOTO_DIR, name)),
+                             os.path.abspath(PHOTO_DIR))
+        finally:
+            if name:
+                try:
+                    os.unlink(os.path.join(PHOTO_DIR, name))
+                except OSError:
+                    pass
 
     def test_image_file_is_served(self):
         os.makedirs(PHOTO_DIR, exist_ok=True)

@@ -37,9 +37,11 @@ QQ 群
 |---|---|---|
 | 图片转链接 | 需要发 MC 就勾选 | 不勾也能只给网站用 |
 | **启用网站 API** | ✅ 勾选 | 开启 `/api/qq/*` |
+| 监听地址 | A/B 同机用 `127.0.0.1`；B 远程访问 A 用 `0.0.0.0` | 只让内网/反代访问 |
 | 监听端口 | `8765` | 与反代一致 |
 | 公网地址 | `https://pic.qingchengsep.top` | API 返回的 `abs_url` 用这个前缀 |
 | **Token** | 一串足够长的随机字符串 | 网站请求时带上；不要公开 |
+| 保留 QQ 图片原名 | 可选 | 勾选后用 `原始名.jpg`（重复自动加 `_2`） |
 
 对应 `config.json`：
 
@@ -47,21 +49,54 @@ QQ 群
 {
   "qq": {
     "imageAsLink": true,
-    "imageHttpHost": "127.0.0.1",
+    "imageHttpHost": "0.0.0.0",
     "imageHttpPort": 8765,
     "imagePublicBase": "https://pic.qingchengsep.top",
     "webApiEnabled": true,
-    "webApiToken": "换成你自己的长随机串"
+    "webApiToken": "换成你自己的长随机串",
+    "imagePreserveName": false
   }
 }
 ```
 
+> `imageHttpHost`：A/B 同机或只用本机反代 → `127.0.0.1`；B 机器要经内网访问 A → `0.0.0.0`（或 A 的内网 IP），并配置防火墙只允许 B。
+
 > **安全建议**：机器人只监听 `127.0.0.1`，由 Nginx/Caddy 反代到公网；不要把 8765 直接暴露。
 > 如果必须局域网访问，再用 `0.0.0.0`，并确保 Token 已设置。
 
+### 图片命名
+
+- 默认：`20261025_143012_123_ab12.jpg`（时间戳 + 随机串，不会重名）。
+- 勾选「保留 QQ 图片原始文件名」：用 `原始名.jpg`；非安全字符替换成 `_`，重名自动加 `_2`、`_3`。
+- 扩展名按图片真实格式修正（避免 `.png` 实际是 JPEG 导致浏览器 MIME 错误）。
+- **反代和 Cloudflare 不会改名**：A 上叫什么，公网 URL 就是什么。
+
 ---
 
-## 三、Nginx 反向代理
+## 三、A/B 分离部署（机器人 A、网站 B）
+
+```
+A（bot，内网） 192.168.1.23:8765
+        │ 内网直连 / frp / Tailscale
+        ▼
+B（网站） Nginx :80  →  cloudflared  →  pic.qingchengsep.top
+```
+
+- A 的配置：`imageHttpHost=0.0.0.0`（或 A 的内网 IP），并只放行 B 的 IP 访问 8765。
+- B 的 Nginx 把 `/pic_http/`、`/api/qq/`、`/health` 反代到 A。
+- cloudflared 在 B 上指向 `http://127.0.0.1:80`，由 Cloudflare 负责 HTTPS。
+- 图片文件名在 A 生成，B 和 CF 只转发、不改名。
+
+现成模板：
+
+- Nginx： [`deploy/nginx-pic.conf`](deploy/nginx-pic.conf)
+- Cloudflare Tunnel： [`deploy/cloudflared-pic.yml`](deploy/cloudflared-pic.yml)
+
+如果不想让 B 承担图片流量，也可以把 cloudflared 放到 A 直接指向 `http://127.0.0.1:8765`；但这样 A 就是公网源站，B 也做不了缓存/统一鉴权。
+
+---
+
+## 四、Nginx 反向代理
 
 ```nginx
 server {
@@ -106,7 +141,7 @@ pic.qingchengsep.top {
 
 ---
 
-## 四、API 说明
+## 五、API 说明
 
 ### 鉴权
 
@@ -192,7 +227,7 @@ GET /health
 
 ---
 
-## 五、PHP 接入示例
+## 六、PHP 接入示例
 
 ### 5.1 原生 PHP：给前端返回 JSON
 
@@ -353,7 +388,7 @@ QQ_API_TOKEN=换成你的 webApiToken
 
 ---
 
-## 六、把图片放进网页的两种方式
+## 七、把图片放进网页的两种方式
 
 1. **直接引用绝对地址**：`<img src="<?= $img['abs_url'] ?>">`
    要求 `imagePublicBase` 配成 `https://pic.qingchengsep.top`，且反代 `/pic_http/` 可访问。
@@ -361,7 +396,7 @@ QQ_API_TOKEN=换成你的 webApiToken
 
 ---
 
-## 七、运维与安全
+## 八、运维与安全
 
 - **Token**：至少 32 位随机串；泄露后立即改 `config.json` 并重启 QQ 转述。
 - **监听地址**：反代方案用 `127.0.0.1`；`0.0.0.0` 会暴露到局域网/公网。
@@ -376,7 +411,7 @@ QQ_API_TOKEN=换成你的 webApiToken
 
 ---
 
-## 八、常见问题
+## 九、常见问题
 
 **Q：API 返回空？**
 A：确认已勾选「启用网站 API」、QQ 已连接、群号过滤正确；纯图片消息现在也会以 `[图片]` 出现。

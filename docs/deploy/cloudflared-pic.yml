@@ -1,0 +1,37 @@
+# ============================================================
+# Cloudflare Tunnel 配置模板（放在 B 机器）
+#
+# 1) 安装 cloudflared
+#    Windows: winget install --id Cloudflare.cloudflared
+#    Linux:   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+#
+# 2) 登录并创建隧道（会生成凭据 JSON）
+#    cloudflared tunnel login
+#    cloudflared tunnel create pic-qingcheng
+#
+# 3) 把本文件复制到：
+#    Windows: C:\Users\<你>\.cloudflared\config.yml
+#    Linux:   /etc/cloudflared/config.yml
+#
+# 4) 在 Cloudflare DNS 里给 pic.qingchengsep.top 添加 CNAME：
+#    pic.qingchengsep.top -> <隧道ID>.cfargotunnel.com
+#    （或在创建隧道时用 cloudflared tunnel route dns pic-qingcheng pic.qingchengsep.top）
+#
+# 5) 启动：
+#    cloudflared tunnel run pic-qingcheng
+# ============================================================
+
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: C:\Users\REPLACE_USER\.cloudflared\REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  # 网站域名 -> B 机器本机 Nginx（Nginx 再反代到 A 的机器人）
+  - hostname: pic.qingchengsep.top
+    service: http://127.0.0.1:80
+    originRequest:
+      connectTimeout: 10s
+      # 如果 Nginx 是自签 HTTPS，才需要 true；一般保持 false
+      noTLSVerify: false
+
+  # 兜底
+  - service: http_status:404

@@ -1603,6 +1603,24 @@ class Controller:
                 continue
         return fallback
 
+    @staticmethod
+    def _image_hint(candidates) -> str:
+        """优先挑「像文件名」的候选（带图片扩展名），否则退回第一个。"""
+        fallback = ''
+        for cand in (candidates or []):
+            if not isinstance(cand, dict):
+                continue
+            value = str(cand.get('value') or '')
+            if not value:
+                continue
+            base = value.replace('\\', '/').split('?', 1)[0].rsplit('/', 1)[-1]
+            if base.lower().endswith(('.png', '.jpg', '.jpeg', '.gif',
+                                      '.webp', '.bmp')):
+                return value
+            if not fallback:
+                fallback = value
+        return fallback
+
     def _prepare_qq_images(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
         """把一条 QQ 消息里的图片保存到 ``pic_http/``。
 
@@ -1610,20 +1628,19 @@ class Controller:
         图片会被跳过。网站 API 与 MC 公屏链接共用这一份结果，避免重复下载。
         """
         saved: List[Dict[str, str]] = []
+        preserve = bool(getattr(self.config.qq, 'imagePreserveName', False))
         for candidates in (ev.get('images') or []):
             data = None
-            hint = ''
+            hint = self._image_hint(candidates)
             for cand in (candidates or []):
                 if not isinstance(cand, dict):
                     continue
-                if not hint:
-                    hint = str(cand.get('value') or '')
                 data = self._fetch_image_bytes(cand)
                 if data:
                     break
             if not data:
                 continue
-            name = save_image_bytes(data, hint)
+            name = save_image_bytes(data, hint, preserve_name=preserve)
             saved.append({'name': name, 'url': '/pic_http/' + name})
         return saved
 
