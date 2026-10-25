@@ -155,3 +155,8 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 回归测试：`tests/test_qq_relay.py`（同步、图片下载、鉴权、去重、上游 id 回绕）
 - [x] 文档：新增 `how to use QSP(QQ sent picture to minecraft).md`（QSP 到 MC/网站的两个方案、GUI 配置、B 部署、Cloudflare、API、安全、排错、命令速查）
 
+## 2026-10-25 v0.3.3-beta 发布
+
+- [x] 版本号升至 **v0.3.3-beta**（README / README_EN / package.json / package-lock / AGENTS）
+- [x] 更新日志：README 只留 v0.3.3-beta；v0.3.2（中英）移入 \更新日志.md- [x] B 端默认免登录、图片地址 \/文件名\、Python relay + webapp
+- [x] 全量测试 100 项通过
