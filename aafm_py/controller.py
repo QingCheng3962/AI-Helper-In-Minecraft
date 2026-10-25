@@ -1154,6 +1154,8 @@ class Controller:
             'listenPort': ep.listenPort,
             'groups': list(qq.groups or []),
             'imageAsLink': bool(qq.imageAsLink),
+            # Website API needs the image candidates even when MC relay is off.
+            'collectImages': bool(qq.imageAsLink or qq.webApiEnabled),
             'autoReconnect': bool(qq.autoReconnect),
             'healthCheckSeconds': int(qq.healthCheckSeconds),
         }
@@ -1376,15 +1378,23 @@ class Controller:
     def _start_qq(self) -> None:
         self._qq_connected = False
         cfg = self.config.qq
-        if cfg.imageAsLink:
+        if cfg.imageAsLink or cfg.webApiEnabled:
             try:
                 self._public_base_cache = ''
-                self._photo.start(cfg.imageHttpHost, cfg.imageHttpPort)
+                self._photo.start(cfg.imageHttpHost, cfg.imageHttpPort,
+                                  token=cfg.webApiToken,
+                                  public_base=cfg.imagePublicBase)
                 # Detect the public base in the background: it does several HTTP
                 # requests and must never freeze the UI thread (which would make
                 # the 「启用」 checkbox un-clickable).
+                extra = ''
+                if cfg.webApiEnabled:
+                    extra = (f'；网站 API 已开启：/api/qq/messages、/api/qq/images、'
+                             f'/api/qq/stream（Token '
+                             f'{"已设置" if cfg.webApiToken else "未设置，建议设置"}）')
                 self._post_ui({'kind': 'log', 'level': 'info',
-                               'message': f'图片服务已启动（端口 {cfg.imageHttpPort}），公网地址探测中…'})
+                               'message': f'图片服务已启动（端口 {cfg.imageHttpPort}）'
+                                          f'{extra}，公网地址探测中…'})
                 threading.Thread(target=self._log_public_base, daemon=True).start()
             except Exception as e:  # noqa: BLE001
                 self._post_ui({'kind': 'log', 'level': 'error',
@@ -1501,9 +1511,25 @@ class Controller:
             self._post_ui({'kind': 'qqStatus', 'state': 'disconnected'})
 
     def _relay_qq_message(self, ev: Dict[str, Any]) -> None:
+        qq = self.config.qq
+        # Save images once: they are needed by both the website API and the
+        # in-game link relay (and must still be saved when MC is offline).
+        saved: List[Dict[str, str]] = []
+        if (qq.imageAsLink or qq.webApiEnabled) and ev.get('images'):
+            try:
+                saved = self._prepare_qq_images(ev)
+            except Exception as e:  # noqa: BLE001
+                self._post_ui({'kind': 'log', 'level': 'error',
+                               'message': '[QQ] 图片处理失败: ' + str(e)})
+        if qq.webApiEnabled:
+            try:
+                self._photo.record_qq_message(ev, [x['name'] for x in saved])
+            except Exception as e:  # noqa: BLE001
+                self._post_ui({'kind': 'log', 'level': 'warn',
+                               'message': '[QQ] 记录网站消息失败: ' + str(e)})
         # Direction switch: turning QQ->MC off only stops forwarding; the QQ /
         # OneBot connection (and MC->QQ) keeps running.
-        if not self.config.qq.qqToMcEnabled:
+        if not qq.qqToMcEnabled:
             return
         if not self._engine.running:
             # Surface *why* nothing was forwarded instead of silently dropping.
@@ -1515,12 +1541,8 @@ class Controller:
                                           '请先点顶部「连接」进入服务器。'})
             return
         content = ev.get('content') or ''
-        if self.config.qq.imageAsLink and ev.get('images'):
-            try:
-                content = self._attach_image_links(ev, content)
-            except Exception as e:  # noqa: BLE001
-                self._post_ui({'kind': 'log', 'level': 'error',
-                               'message': '[QQ] 图片处理失败: ' + str(e)})
+        if qq.imageAsLink and saved:
+            content = self._attach_image_links(ev, content, saved)
         text = self._format_qq_message(ev, content=content)
         if not text:
             return
@@ -1581,26 +1603,43 @@ class Controller:
                 continue
         return fallback
 
-    def _attach_image_links(self, ev: Dict[str, Any], content: str) -> str:
-        images = ev.get('images') or []
-        if not images:
-            return content
-        base = self._image_base_url()
-        out = content
-        for candidates in images:
+    def _prepare_qq_images(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
+        """把一条 QQ 消息里的图片保存到 ``pic_http/``。
+
+        返回 ``[{'name': 文件名, 'url': '/pic_http/文件名'}, ...]``；下载失败的
+        图片会被跳过。网站 API 与 MC 公屏链接共用这一份结果，避免重复下载。
+        """
+        saved: List[Dict[str, str]] = []
+        for candidates in (ev.get('images') or []):
             data = None
+            hint = ''
             for cand in (candidates or []):
+                if not isinstance(cand, dict):
+                    continue
+                if not hint:
+                    hint = str(cand.get('value') or '')
                 data = self._fetch_image_bytes(cand)
                 if data:
                     break
             if not data:
                 continue
-            hint = ''
-            for cand in (candidates or []):
-                hint = str(cand.get('value') or '')
-                if hint:
-                    break
             name = save_image_bytes(data, hint)
+            saved.append({'name': name, 'url': '/pic_http/' + name})
+        return saved
+
+    def _attach_image_links(self, ev: Dict[str, Any], content: str,
+                            saved: Optional[List[Dict[str, str]]] = None) -> str:
+        """把 ``[图片]`` 依次替换成公屏可点的图片链接。"""
+        if saved is None:
+            saved = self._prepare_qq_images(ev)
+        if not saved:
+            return content
+        base = self._image_base_url()
+        out = content or ''
+        for item in saved:
+            name = str(item.get('name') if isinstance(item, dict) else item)
+            if not name:
+                continue
             link = base + '/pic_http/' + name
             out = out.replace('[图片]', '[图片] ' + link, 1)
         return out

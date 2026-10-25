@@ -1841,6 +1841,8 @@ class AiPlayerGUI:
         self.var_qq_image_link = tk.BooleanVar(value=False)
         self.var_qq_img_port = tk.StringVar()
         self.var_qq_img_base = tk.StringVar()
+        self.var_qq_web_api = tk.BooleanVar(value=False)
+        self.var_qq_web_token = tk.StringVar()
         r = ttk.Frame(img)
         r.pack(fill='x', pady=2)
         ttk.Checkbutton(r, text='图片转链接', variable=self.var_qq_image_link).pack(side='left')
@@ -1849,7 +1851,17 @@ class AiPlayerGUI:
         ttk.Label(r, text='公网地址').pack(side='left', padx=(12, 4))
         ttk.Entry(r, textvariable=self.var_qq_img_base).pack(
             side='left', fill='x', expand=True, padx=(4, 0))
-        ttk.Label(img, text='留空=自动探测公网 IP，例 http://1.2.3.4:8765；图片存到项目 pic_http/，需在路由器把端口转发到本机。',
+        r2 = ttk.Frame(img)
+        r2.pack(fill='x', pady=(4, 2))
+        ttk.Checkbutton(r2, text='启用网站 API（QQ → 网站）',
+                        variable=self.var_qq_web_api).pack(side='left')
+        ttk.Label(r2, text='Token').pack(side='left', padx=(12, 4))
+        ttk.Entry(r2, textvariable=self.var_qq_web_token, width=26,
+                  show='*').pack(side='left')
+        ttk.Label(r2, text='接口：/api/qq/messages · /api/qq/images · /api/qq/stream',
+                  foreground='#888888').pack(side='left', padx=(10, 0))
+        ttk.Label(img, text='留空=自动探测公网 IP，例 http://1.2.3.4:8765；图片存到项目 pic_http/，需在路由器把端口转发到本机。'
+                            '网站 API 建议配合 Nginx/Caddy 反代并设置 Token。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
 
     def _build_roster_frame(self, parent) -> None:
@@ -2296,6 +2308,8 @@ class AiPlayerGUI:
         self.var_qq_image_link.set(bool(cfg.qq.imageAsLink))
         self.var_qq_img_port.set(str(cfg.qq.imageHttpPort))
         self.var_qq_img_base.set(cfg.qq.imagePublicBase or '')
+        self.var_qq_web_api.set(bool(cfg.qq.webApiEnabled))
+        self.var_qq_web_token.set(cfg.qq.webApiToken or '')
         self.var_qq_autoreconnect.set(bool(cfg.qq.autoReconnect))
         self.var_qq_health.set(str(cfg.qq.healthCheckSeconds))
         self.var_qq_autoconfig.set(bool(cfg.qq.napcat.autoConfigNewAccounts))
@@ -2645,6 +2659,8 @@ class AiPlayerGUI:
         qq.imageAsLink = self.var_qq_image_link.get()
         qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8765)
         qq.imagePublicBase = self.var_qq_img_base.get().strip()
+        qq.webApiEnabled = bool(self.var_qq_web_api.get())
+        qq.webApiToken = self.var_qq_web_token.get().strip()
         qq.autoReconnect = self.var_qq_autoreconnect.get()
         qq.healthCheckSeconds = self._parse_int(self.var_qq_health.get(), 30)
         qq.mcToQqEnabled = self.var_mc2qq_enabled.get()

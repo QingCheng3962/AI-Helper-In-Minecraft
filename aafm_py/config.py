@@ -500,6 +500,12 @@ class QqConfig:
     # auto-detect the machine's public IP, falling back to 127.0.0.1.
     imagePublicBase: str = ''
 
+    # Website integration: expose QQ group messages/images via /api/qq/*
+    # (JSON + SSE). ``webApiToken`` empty => no auth (only use on localhost or
+    # behind a reverse proxy that adds its own auth).
+    webApiEnabled: bool = False
+    webApiToken: str = ''
+
     # MC -> QQ relay: when an in-game chat message starts with ``mcTrigger``,
     # send the rest to a QQ group. ``mcTargetGroup`` empty => first ``groups``
     # entry; ``[sentQ:群号] 内容`` overrides the target for one message.
@@ -575,6 +581,8 @@ class QqConfig:
         self.autoReconnect = bool(self.autoReconnect)
         self.healthCheckSeconds = _clamp_int(self.healthCheckSeconds, 0, 3600)
         self.imagePublicBase = str(self.imagePublicBase or '').strip().rstrip('/')
+        self.webApiEnabled = bool(self.webApiEnabled)
+        self.webApiToken = str(self.webApiToken or '').strip()
         self.lastLoginUin = str(self.lastLoginUin or '').strip()
 
 
