@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>{{title}}</h1>
+    <div class="top-actions">
+      <span id="qq-status" class="muted">加载中…</span>
+      <form method="post" action="/logout" class="logout-form">
+        <input type="hidden" name="csrf" value="{{csrf}}">
+        <button type="submit" class="logout">退出</button>
+      </form>
+    </div>
+  </header>
+
+  <main id="qq-app">
+    <div id="qq-list" class="messages" aria-live="polite"></div>
+    <p id="qq-empty" class="muted empty" hidden>还没有消息，去 QQ 群发一条试试。</p>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

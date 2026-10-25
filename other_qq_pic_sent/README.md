@@ -1,16 +1,16 @@
-# other_qq_pic_sent
+# other_qq_pic_sent（Python 版）
 
-方案二（A/B 分离）的**独立目录**：B 机器上运行的中继 + 安全示例前后端。
+方案二（A/B 分离）的独立目录：**B 机器上用 Python 收 A 的消息/图片，并直接带一个登录图片墙**。
 
 ```
 A（bot，内网） ──HTTP──▶ B：other_qq_pic_sent
-                         ├─ relay.py       内网接收 + 对外转发
-                         ├─ relay_data/    消息 SQLite + 图片（运行时生成，不要放进 webroot）
-                         └─ web/           PHP 登录页 + 图片墙（只读）
+                         ├─ relay.py        去 A 拉消息/图片
+                         ├─ webapp.py       登录页 + 图片墙 + 只读 API（Python 后端）
+                         ├─ relay_data/     消息 SQLite + 图片（运行时生成）
+                         └─ web/            HTML 模板 + CSS/JS
 ```
 
-> 方案一（A 自己开、网站同机）不需要这个目录，直接用机器人 GUI 里的
-> 「启用网站 API」 + `127.0.0.1:8765`。
+> 不需要 PHP、不需要 Nginx（可选）、不需要数据库服务；只依赖 Python 3.9+ 标准库。
 
 ---
 
@@ -18,20 +18,25 @@ A（bot，内网） ──HTTP──▶ B：other_qq_pic_sent
 
 | 路径 | 作用 |
 |---|---|
-| `relay.py` | Python 中继：轮询 A、下载图片、SQLite 存消息、对外提供 `/api/qq/*` 与 `/pic_http/*` |
-| `relay.example.json` | 中继配置模板 |
-| `qq-relay.service` | Linux systemd 模板 |
-| `web/` | PHP 安全示例（登录 + 消息/图片展示） |
-| `web/public/` | 唯一对外目录 |
-| `web/src/` | 配置与会话逻辑（**不能**放进 webroot） |
-| `web/hash.php` | 生成登录密码哈希 |
-| `web/nginx.conf.example` | B 的 Nginx 模板 |
+| `relay.py` | 内网同步：轮询 A、下载图片、SQLite 存消息 |
+| `webapp.py` | Python Web 后端：登录、会话、CSRF、限速、图片墙、`/api/messages` |
+| `hash_password.py` | 生成 PBKDF2 密码哈希 |
+| `relay.example.json` | 配置模板（中继 + Web） |
+| `web/templates/` | `login.html`、`index.html` |
+| `web/static/` | `app.js`、`style.css` |
+| `qq-relay.service` | systemd 模板（运行 webapp.py） |
 
 ---
 
-## 二、启动中继
+## 二、快速开始
 
-1. 复制 `relay.example.json` 为 `relay.json`，修改：
+### 1. 配置
+
+```bash
+cp relay.example.json relay.json
+```
+
+编辑 `relay.json`：
 
 ```json
 {
@@ -39,141 +44,140 @@ A（bot，内网） ──HTTP──▶ B：other_qq_pic_sent
   "upstream_token": "A 的 webApiToken",
   "listen_host": "127.0.0.1",
   "listen_port": 18765,
-  "token": "给网站用的 Token",
   "public_base": "https://pic.qingchengsep.top",
   "data_dir": "relay_data",
-  "poll_seconds": 2
+  "poll_seconds": 2,
+  "web": {
+    "listen_host": "127.0.0.1",
+    "listen_port": 8080,
+    "password_hash": "",
+    "session_ttl": 86400,
+    "secure_cookie": true,
+    "title": "QQ 群图片"
+  }
 }
 ```
 
-2. 启动：
+### 2. 生成登录密码
 
 ```bash
-python3 relay.py --config relay.json
+python3 hash_password.py '你的密码'
 ```
 
-3. 验证：
+把输出（`pbkdf2_sha256$...`）填到 `web.password_hash`。
+
+> `web.secure_cookie`：正式 HTTPS 用 `true`；本地 `http://127.0.0.1` 调试时临时改 `false`。
+
+### 3. 启动
 
 ```bash
-curl http://127.0.0.1:18765/health
+python3 webapp.py --config relay.json
 ```
 
-`upstream_ok: true` 才说明连上 A。
+看到：
+
+```
+Web 后台：http://127.0.0.1:8080  （中继 API：http://127.0.0.1:18765）
+```
+
+### 4. 访问
+
+- 本机：`http://127.0.0.1:8080`
+- 公网：Cloudflare Tunnel `service: http://127.0.0.1:8080`
+- 也可以在前面放 Nginx：`proxy_pass http://127.0.0.1:8080;`
+
+登录后每 3 秒自动拉新消息，图片点开看大图。
 
 ---
 
-## 三、启动示例网站
+## 三、端口与数据流
 
-要求：PHP 8.0+（推荐 8.2/8.3）、PHP-FPM、Nginx。
+| 端口 | 谁 | 说明 |
+|---|---|---|
+| A:8765 | 机器人 | B 的中继去访问它 |
+| B:18765 | relay.py | 给外部程序用的 Token API（只监听 127.0.0.1） |
+| B:8080 | webapp.py | 登录页 + 图片墙；Cloudflare 指向它 |
 
-### 1. 生成密码哈希
-
-```bash
-php web/hash.php '你的登录密码'
+```
+Cloudflare → B:8080（webapp.py）→ relay_data/（本地 SQLite + 图片）
+                ▲
+                └── relay.py 后台线程每 2 秒从 A:8765 同步
 ```
 
-### 2. 配置环境变量（PHP-FPM）
-
-在 PHP-FPM pool（如 `/etc/php/8.2/fpm/pool.d/www.conf`）里：
-
-```ini
-env[QQ_RELAY_BASE] = http://127.0.0.1:18765
-env[QQ_RELAY_TOKEN] = 给网站用的 Token
-env[QQ_PIC_BASE] = https://pic.qingchengsep.top
-env[QQ_PIC_PASSWORD_HASH] = 上一步输出的哈希
-```
-
-重启 PHP-FPM：
-
-```bash
-systemctl restart php8.2-fpm
-```
-
-> 不要把 Token/密码哈希写进 `config.php` 再提交到仓库。
-
-### 3. Nginx
-
-```bash
-cp web/nginx.conf.example /etc/nginx/conf.d/qqpic.conf
-# 改域名、目录、PHP-FPM socket
-nginx -t && systemctl reload nginx
-```
-
-### 4. 验证
-
-- 打开站点 → 应跳转登录页
-- 未登录直接访问 `/api.php` → 303 到登录页（不会泄露数据）
-- 登录后 → 每 3 秒轮询新消息
-- `curl -I https://你的域名/` 应看到 `X-Frame-Options: DENY`、CSP 等
+- `relay_data/relay.db`：消息（本地 id 递增）
+- `relay_data/pic_http/`：图片（文件名保持 A 的原名）
+- 两个目录都不在 `web/` 下，浏览器无法直接列目录
 
 ---
 
-## 四、安全设计（对应你担心的几类问题）
+## 四、安全设计（对应木马 / 暴库 / 越权）
 
-| 风险 | 本示例的做法 |
+| 风险 | 做法 |
 |---|---|
-| **木马/上传** | 没有任何上传接口；只读 GET；`web/public` 之外不放可执行文件；Nginx 禁止点文件/备份文件 |
-| **SQL 注入** | Web 端不连数据库；中继的 SQLite 全部使用参数化查询 |
-| **暴库** | 中继数据在 `relay_data/`（不在 webroot）；Web 端不存密码明文；登录限速 5 次/10 分钟 |
-| **越权** | 会话登录（`HttpOnly` + `SameSite=Strict` + 登录后 `session_regenerate_id`）；`api.php` 强制登录；没有管理接口 |
-| **CSRF** | 登录表单带 CSRF token；只读接口无副作用 |
-| **XSS** | 前端全部用 `textContent`，不拼 HTML；CSP 禁止内联脚本；图片 URL 白名单校验 |
-| **SSRF** | 中继地址来自配置，不接受用户传入 URL；cURL 只允许 HTTP/HTTPS、禁止跟随跳转 |
-| **路径穿越** | 中继用 `basename` 白名单校验文件名；Nginx 禁止 `..`/点文件 |
+| **木马/上传** | 没有任何上传接口；只读 GET；不能通过网站写文件 |
+| **SQL 注入** | Web 端不执行用户 SQL；中继 SQLite 全部参数化查询 |
+| **暴库** | 数据在 `relay_data/`（webroot 之外）；无数据库服务；无堆栈回显 |
+| **越权** | 登录会话（随机 32 字节 token，内存存储）；`HttpOnly` + `SameSite=Strict`；登录后换 session |
+| **CSRF** | 登录/退出都有 CSRF token；API 只读 |
+| **暴力破解** | 每个 IP 5 次失败 / 10 分钟 |
+| **XSS** | 前端只用 `textContent`；CSP 禁止内联脚本；图片只允许同源 `/pic_http/` |
+| **SSRF** | 中继地址来自配置；Web 端不接受用户 URL |
+| **路径穿越** | 图片文件名 `basename` + 目录校验 |
 | **点击劫持** | `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` |
-| **Token 泄露** | Token 只在 PHP 服务端使用，浏览器 JS 拿不到 |
-| **密码** | `password_hash()`（bcrypt/argon2），不存明文；哈希放环境变量 |
+| **密码** | PBKDF2-SHA256（310,000 次），只存哈希 |
+| **Token 泄露** | A 的 Token 只在中继进程内使用，浏览器拿不到 |
 
-> 这是**只读展示**示例。如果你以后加“上传图片/发消息/管理后台”，必须额外做：
-> 文件类型与大小校验、随机文件名、存到 webroot 之外、逐用户权限、审计日志。
+> 示例是**只读**的。以后如果加上传/发消息/管理后台，必须另做文件类型与大小校验、随机文件名、逐用户权限和审计日志。
 
 ---
 
-## 五、文件与权限建议
+## 五、常驻运行
+
+Linux：
 
 ```bash
-# 中继数据目录：只给运行用户
-chown -R qqrelay:qqrelay /opt/other_qq_pic_sent/relay_data
-chmod 700 /opt/other_qq_pic_sent/relay_data
-
-# Web 代码只读
-chown -R www-data:www-data /var/www/other_qq_pic_sent/web
-find /var/www/other_qq_pic_sent/web -type f -exec chmod 644 {} \;
+cp qq-relay.service /etc/systemd/system/qq-relay.service
+# 改 WorkingDirectory / User / 配置路径
+systemctl daemon-reload
+systemctl enable --now qq-relay
+journalctl -u qq-relay -f
 ```
 
-- 中继和 PHP-FPM 可以用不同用户；中继只需要读 A、写 `relay_data/`。
-- `relay_data/` 绝不能放在 `web/public` 下。
-- 备份只需要 `relay_data/relay.db` 和 `relay_data/pic_http/`。
+Windows 任务计划：
+
+- 程序：`python.exe`
+- 参数：`other_qq_pic_sent\webapp.py --config other_qq_pic_sent\relay.json`
+- 起始目录：项目根目录
+- 勾选“不管用户是否登录都运行”
 
 ---
 
 ## 六、Cloudflare
 
-推荐链路：
-
+```yaml
+ingress:
+  - hostname: pic.qingchengsep.top
+    service: http://127.0.0.1:8080
+  - service: http_status:404
 ```
-浏览器 → Cloudflare → cloudflared(B) → Nginx(B:80) → PHP/中继
-```
 
-- 隧道 `service: http://127.0.0.1:80`
-- 或者不用 Nginx：`service: http://127.0.0.1:18765`（但就没有 PHP 登录页了，只暴露 API/图片）
-- 需要更强鉴权时，可在 Cloudflare Zero Trust 加 Access 策略
+HTTPS 由 Cloudflare 负责；`webapp.py` 继续监听 `127.0.0.1` 即可。
 
 ---
 
 ## 七、常见问题
 
-**Q：登录页提示“管理员尚未配置 QQ_PIC_PASSWORD_HASH”？**
-A：环境变量没生效。确认 PHP-FPM pool 的 `env[...]` 已加并重启 FPM；用 `php -i | grep QQ_` 检查 CLI 是否能看到。
+**Q：登录页 500 / 显示未配置密码？**
+A：`web.password_hash` 为空。运行 `hash_password.py` 并填入，重启。
 
 **Q：登录后一直“连接失败”？**
-A：`QQ_RELAY_BASE`/`QQ_RELAY_TOKEN` 不对，或中继没启动。先在 B 上 `curl 127.0.0.1:18765/health`。
+A：看 webapp 日志里的「同步失败」。先在 B 上 `curl http://A:8765/health`。
 
-**Q：图片不显示？**
-A：检查 `QQ_PIC_BASE` 与 Nginx `/pic_http/` 反代；或中继 `public_base` 没配。
+**Q：图片 404？**
+A：确认 `relay_data/pic_http/` 有文件；等中继同步完成。
 
 **Q：忘记密码？**
-A：重新生成哈希并更新 `QQ_PIC_PASSWORD_HASH`，重启 PHP-FPM。
+A：重新运行 `hash_password.py`，替换 `web.password_hash`，重启。
 
-**Q：中继日志在哪？**
-A：systemd 用 `journalctl -u qq-relay -f`；手动运行直接看终端输出。
+**Q：能不用内置网页，只拿 API？**
+A：可以，用 `relay.py` 的 `/api/qq/messages`（Token），见 `../docs/QQ图片网站接入.md`。
