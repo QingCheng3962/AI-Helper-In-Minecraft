@@ -505,6 +505,9 @@ class QqConfig:
     # behind a reverse proxy that adds its own auth).
     webApiEnabled: bool = False
     webApiToken: str = ''
+    # Keep the original QQ image file name (sanitised, with a collision suffix)
+    # instead of the default timestamp_random name.
+    imagePreserveName: bool = False
 
     # MC -> QQ relay: when an in-game chat message starts with ``mcTrigger``,
     # send the rest to a QQ group. ``mcTargetGroup`` empty => first ``groups``
@@ -583,6 +586,7 @@ class QqConfig:
         self.imagePublicBase = str(self.imagePublicBase or '').strip().rstrip('/')
         self.webApiEnabled = bool(self.webApiEnabled)
         self.webApiToken = str(self.webApiToken or '').strip()
+        self.imagePreserveName = bool(self.imagePreserveName)
         self.lastLoginUin = str(self.lastLoginUin or '').strip()
 
 

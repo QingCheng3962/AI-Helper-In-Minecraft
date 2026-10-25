@@ -1839,15 +1839,20 @@ class AiPlayerGUI:
         img = ttk.LabelFrame(parent, text='图片转本地链接（Python HTTP 服务，仅暴露 /pic_http/）', padding=6)
         img.pack(fill='x', pady=(8, 0))
         self.var_qq_image_link = tk.BooleanVar(value=False)
+        self.var_qq_img_host = tk.StringVar()
         self.var_qq_img_port = tk.StringVar()
         self.var_qq_img_base = tk.StringVar()
         self.var_qq_web_api = tk.BooleanVar(value=False)
         self.var_qq_web_token = tk.StringVar()
+        self.var_qq_img_preserve = tk.BooleanVar(value=False)
         r = ttk.Frame(img)
         r.pack(fill='x', pady=2)
         ttk.Checkbutton(r, text='图片转链接', variable=self.var_qq_image_link).pack(side='left')
-        ttk.Label(r, text='监听端口').pack(side='left', padx=(12, 4))
-        ttk.Entry(r, textvariable=self.var_qq_img_port, width=8).pack(side='left')
+        ttk.Label(r, text='监听地址').pack(side='left', padx=(12, 4))
+        ttk.Combobox(r, textvariable=self.var_qq_img_host, width=12,
+                     values=('127.0.0.1', '0.0.0.0')).pack(side='left')
+        ttk.Label(r, text='端口').pack(side='left', padx=(8, 4))
+        ttk.Entry(r, textvariable=self.var_qq_img_port, width=7).pack(side='left')
         ttk.Label(r, text='公网地址').pack(side='left', padx=(12, 4))
         ttk.Entry(r, textvariable=self.var_qq_img_base).pack(
             side='left', fill='x', expand=True, padx=(4, 0))
@@ -1860,7 +1865,12 @@ class AiPlayerGUI:
                   show='*').pack(side='left')
         ttk.Label(r2, text='接口：/api/qq/messages · /api/qq/images · /api/qq/stream',
                   foreground='#888888').pack(side='left', padx=(10, 0))
-        ttk.Label(img, text='留空=自动探测公网 IP，例 http://1.2.3.4:8765；图片存到项目 pic_http/，需在路由器把端口转发到本机。'
+        r3 = ttk.Frame(img)
+        r3.pack(fill='x', pady=(2, 2))
+        ttk.Checkbutton(r3, text='保留 QQ 图片原始文件名（重复自动加 _2/_3）',
+                        variable=self.var_qq_img_preserve).pack(side='left')
+        ttk.Label(img, text='监听地址：127.0.0.1=只给本机反代；0.0.0.0=允许 B 机器经内网访问（需防火墙限制）。'
+                            '公网地址留空=自动探测公网 IP，例 https://pic.qingchengsep.top。'
                             '网站 API 建议配合 Nginx/Caddy 反代并设置 Token。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
 
@@ -2306,10 +2316,12 @@ class AiPlayerGUI:
         self.var_qq_groups.set(', '.join(cfg.qq.groups or []))
         self.var_qq_format.set(cfg.qq.format or '')
         self.var_qq_image_link.set(bool(cfg.qq.imageAsLink))
+        self.var_qq_img_host.set(cfg.qq.imageHttpHost or '0.0.0.0')
         self.var_qq_img_port.set(str(cfg.qq.imageHttpPort))
         self.var_qq_img_base.set(cfg.qq.imagePublicBase or '')
         self.var_qq_web_api.set(bool(cfg.qq.webApiEnabled))
         self.var_qq_web_token.set(cfg.qq.webApiToken or '')
+        self.var_qq_img_preserve.set(bool(cfg.qq.imagePreserveName))
         self.var_qq_autoreconnect.set(bool(cfg.qq.autoReconnect))
         self.var_qq_health.set(str(cfg.qq.healthCheckSeconds))
         self.var_qq_autoconfig.set(bool(cfg.qq.napcat.autoConfigNewAccounts))
@@ -2657,10 +2669,12 @@ class AiPlayerGUI:
         qq.groups = [x for x in re.split(r'[,，;\s]+', self.var_qq_groups.get()) if x]
         qq.format = self.var_qq_format.get().strip() or '&7&o[{group}][{name}]：{message}'
         qq.imageAsLink = self.var_qq_image_link.get()
+        qq.imageHttpHost = (self.var_qq_img_host.get() or '0.0.0.0').strip()
         qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8765)
         qq.imagePublicBase = self.var_qq_img_base.get().strip()
         qq.webApiEnabled = bool(self.var_qq_web_api.get())
         qq.webApiToken = self.var_qq_web_token.get().strip()
+        qq.imagePreserveName = bool(self.var_qq_img_preserve.get())
         qq.autoReconnect = self.var_qq_autoreconnect.get()
         qq.healthCheckSeconds = self._parse_int(self.var_qq_health.get(), 30)
         qq.mcToQqEnabled = self.var_mc2qq_enabled.get()

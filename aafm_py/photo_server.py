@@ -16,6 +16,7 @@ import json
 import mimetypes
 import os
 import random
+import re
 import threading
 import time
 import urllib.parse
@@ -52,14 +53,64 @@ def guess_ext(data: bytes, hint: str = '') -> str:
     return '.jpg'
 
 
-def save_image_bytes(data: bytes, hint: str = '') -> str:
-    """Save ``data`` under ``pic_http/`` and return the generated file name."""
+_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')
+
+
+def _safe_stem(hint: str) -> str:
+    """把 QQ 给的路径/URL 变成安全的文件名主干（不含扩展名）。"""
+    raw = str(hint or '').strip()
+    if not raw:
+        return ''
+    if '://' in raw:
+        raw = urllib.parse.urlsplit(raw).path
+    else:
+        raw = raw.split('?', 1)[0]
+    raw = urllib.parse.unquote(raw).replace('\\', '/')
+    base = os.path.basename(raw)
+    stem, ext = os.path.splitext(base)
+    if ext.lower() not in _IMAGE_EXTS:
+        return ''
+    # 允许中文/英文/数字/._-，其余换成 _；去掉首尾的点/下划线，防止隐藏文件/穿越
+    stem = re.sub(r'[^0-9A-Za-z\u4e00-\u9fff._-]+', '_', stem)
+    stem = stem.strip('._-')[:60]
+    return stem
+
+
+def _unique_name(stem: str, ext: str) -> str:
+    """同名文件自动加 _2/_3…，不覆盖已有图片。"""
+    name = stem + ext
+    full = os.path.join(PHOTO_DIR, name)
+    i = 1
+    while os.path.exists(full):
+        i += 1
+        name = f'{stem}_{i}{ext}'
+        full = os.path.join(PHOTO_DIR, name)
+        if i > 500:
+            name = f'{stem}_{random.randint(0, 0xffffff):06x}{ext}'
+            full = os.path.join(PHOTO_DIR, name)
+            break
+    return name
+
+
+def save_image_bytes(data: bytes, hint: str = '',
+                     preserve_name: bool = False) -> str:
+    """Save ``data`` under ``pic_http/`` and return the generated file name.
+
+    ``preserve_name=True`` 时尽量保留 QQ 原始文件名（只保留安全字符，重复自动
+    加后缀），扩展名仍按真实图片格式修正，避免 MIME 不一致。
+    """
     os.makedirs(PHOTO_DIR, exist_ok=True)
     ext = guess_ext(data, hint)
-    now = time.time()
-    stamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(now))
-    ms = int((now - int(now)) * 1000)
-    name = f'{stamp}_{ms:03d}_{random.randint(0, 0xffff):04x}{ext}'
+    name = ''
+    if preserve_name:
+        stem = _safe_stem(hint)
+        if stem:
+            name = _unique_name(stem, ext)
+    if not name:
+        now = time.time()
+        stamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(now))
+        ms = int((now - int(now)) * 1000)
+        name = f'{stamp}_{ms:03d}_{random.randint(0, 0xffff):04x}{ext}'
     full = os.path.join(PHOTO_DIR, name)
     with open(full, 'wb') as f:
         f.write(data)

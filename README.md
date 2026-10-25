@@ -54,7 +54,8 @@
 - **网站接入（QQ → 网站）**：`qq.webApiEnabled` + `qq.webApiToken`；内置 HTTP 服务新增 `GET /api/qq/messages?since=&limit=`、`GET /api/qq/images?limit=`、`GET /api/qq/stream`（SSE）和 `GET /health`，支持 `X-Token` / `Authorization: Bearer` / `?token=`，CORS 可配置。
 - **纯图片消息不再丢弃**：`qq_engine.js` 先解析图片再判断文本，纯图片消息以 `[图片]` 进入网站 API 与 MC 转述。
 - **图片只落盘一次**：网站 API 与 MC 公屏链接共用 `_prepare_qq_images()` 的结果，MC 离线时图片仍会保存供网站读取。
-- GUI「QQ 转述 → 图片转本地链接」新增「启用网站 API」开关与 Token 输入框；配置项见 `qq.webApiEnabled` / `qq.webApiToken`。
+- GUI「QQ 转述 → 图片转本地链接」新增「监听地址」「启用网站 API」开关、「Token」输入框与「保留 QQ 图片原始文件名」开关；配置项见 `qq.imageHttpHost` / `qq.webApiEnabled` / `qq.webApiToken` / `qq.imagePreserveName`。
+- A/B 分离部署模板：`docs/deploy/nginx-pic.conf`（B 机器 Nginx 反代 A 的 8765）与 `docs/deploy/cloudflared-pic.yml`（Cloudflare Tunnel 指向 B）。
 - 完整接入文档（Nginx/Caddy、原生 PHP、ThinkPHP、Laravel、前端轮询/SSE 示例）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
 
 ### v0.3.2

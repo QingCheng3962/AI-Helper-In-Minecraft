@@ -144,4 +144,7 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] `_build_qq_runtime_config()`：开启网站 API 时向 qq_engine 传 `collectImages: true`
 - [x] 回归测试：`tests/test_photo_api.py`（鉴权、消息/图片列表、CORS、图片文件、Controller 落盘与公屏链接），全套 86 项通过
 - [x] 文档：新增 `docs/QQ图片网站接入.md`（数据流、配置、Nginx/Caddy、API、原生 PHP / ThinkPHP / Laravel、前端轮询/SSE、安全与清理）
+- [x] GUI：新增「监听地址」下拉（127.0.0.1 / 0.0.0.0，可手填）与「保留 QQ 图片原始文件名」开关
+- [x] 图片命名：`save_image_bytes(..., preserve_name=True)` 保留 QQ 原名（安全字符过滤、扩展名按真实格式修正、重名自动 `_2/_3`、防路径穿越）
+- [x] 部署模板：`docs/deploy/nginx-pic.conf`（B 机器反代 A）与 `docs/deploy/cloudflared-pic.yml`（CF 隧道指向 B）
 
