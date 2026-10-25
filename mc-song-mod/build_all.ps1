@@ -1,4 +1,4 @@
-# 全版本构建脚本（可在任意目录/任意电脑运行）
+﻿# 全版本构建脚本（可在任意目录/任意电脑运行）
 # 用法：powershell -ExecutionPolicy Bypass -File build_all.ps1
 
 $ErrorActionPreference = "Stop"
@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 # 工程目录 = 脚本所在目录（不再写死某台电脑的路径）
 $proj = $PSScriptRoot
 if (-not $proj) { $proj = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not (Test-Path (Join-Path $proj "build.gradle"))) { $proj = (Get-Location).Path }
 $dist = Join-Path $proj "dist"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
@@ -38,8 +39,9 @@ Write-Output "JAVA_HOME = $env:JAVA_HOME"
 
 # --- Gradle：优先项目自带 wrapper，其次 PATH 里的 gradle ---
 $gradlew = Join-Path $proj "gradlew.bat"
+if (-not (Test-Path $gradlew)) { $gradlew = Join-Path (Get-Location).Path "gradlew.bat" }
 if (Test-Path $gradlew) {
-    $g = $gradlew
+    $g = (Resolve-Path $gradlew).Path
 } else {
     $cmd = Get-Command "gradle.bat" -ErrorAction SilentlyContinue
     if (-not $cmd) { $cmd = Get-Command "gradle" -ErrorAction SilentlyContinue }
@@ -47,7 +49,11 @@ if (Test-Path $gradlew) {
         Write-Error "找不到 Gradle。请把 Gradle 加入 PATH，或在 mc-song-mod 下提供 gradlew.bat。"
         exit 1
     }
-    $g = $cmd.Source
+    $g = if ($cmd.Path) { $cmd.Path } else { $cmd.Source }
+    if (-not $g) {
+        Write-Error "找到了 Gradle 命令但无法确定路径（可能是别名），请改用 gradlew.bat。"
+        exit 1
+    }
 }
 Write-Output "Gradle = $g"
 
@@ -74,7 +80,10 @@ foreach ($v in $vers) {
     if (Test-Path $src) { Remove-Item $src -Force -ErrorAction SilentlyContinue }
     if (Test-Path $dst) { Remove-Item $dst -Force -ErrorAction SilentlyContinue }
 
-    $log = & $g -p $proj build "-Pmcver=$v" --no-daemon --console=plain 2>&1
+    # 用 cmd.exe 调用，避免 Windows PowerShell 把 Gradle 的 stderr 警告
+    # 当成 terminating error（$ErrorActionPreference = "Stop"）。
+    $cmdLine = '"' + $g + '" -p "' + $proj + '" build "-Pmcver=' + $v + '" --no-daemon --console=plain 2>&1'
+    $log = cmd.exe /c $cmdLine
     $exitCode = $LASTEXITCODE
     $ok = ($exitCode -eq 0) -and (Test-Path $src)
     if ($ok) {

@@ -62,6 +62,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - Version bumped to **v0.3.2**; `package.json` / `package-lock.json` updated.
 - **Changelog split**: README keeps only the latest release; v0.3.1 and earlier moved to [更新日志.md](更新日志.md).
 - Node requirement is now explicitly **`node >= 22`**.
+- **Client mod built for all 15 versions** (1.21.1–1.21.11, 26.1–26.2) into `mc-song-mod/dist/Song_0.1.0_<gameVersion>.jar`; `build_all.ps1` also fixed for Windows PowerShell 5.1 (script encoding and Gradle output handling).
 
 
 ## Project Layout

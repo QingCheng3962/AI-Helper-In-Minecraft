@@ -130,4 +130,7 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 版本号升至 **v0.3.2**（`README*.md` / `package.json` / `package-lock.json` / `AGENTS.md`）
 - [x] 更新日志拆分：README 只保留最新版 v0.3.2；v0.3.1 及更早（中英）移入 `更新日志.md`
 - [x] `package.json` 增加 `engines.node >= 22`；README 环境要求同步（#30）
+- [x] `build_all.ps1` 修复 Windows PowerShell 5.1 下的两个问题：①脚本需带 UTF-8 BOM，否则中文注释被按 ANSI 解析、`$g` 变空；②用 `cmd.exe /c` 调用 Gradle，避免 stderr 警告被 `$ErrorActionPreference=Stop` 当成致命错误
+- [x] **Mod 全量构建通过（15/15）**：1.21.1 ~ 1.21.11、26.1 ~ 26.2，产物 `mc-song-mod/dist/Song_0.1.0_<游戏版本>.jar`；已逐个校验 `fabric.mod.json` 的 `version=0.1.0` 与按版本注入的 `minecraft` / `java` 依赖
+- [x] 构建期网络问题处理：Mojang `client.jar` / `server.jar` 从 BMCLAPI 镜像补齐到 Loom 缓存；1.21.10 mappings 临时下载失败后重试成功
 
