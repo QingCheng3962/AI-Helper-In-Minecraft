@@ -3,10 +3,18 @@
   "upstream_token": "A 机器的 webApiToken",
   "listen_host": "127.0.0.1",
   "listen_port": 18765,
-  "token": "给网站用的 Token（可与上游不同）",
+  "token": "给外部 API 用的 Token（可选）",
   "public_base": "https://pic.qingchengsep.top",
   "data_dir": "relay_data",
   "poll_seconds": 2,
   "request_timeout": 15,
-  "cors_origin": "*"
+  "cors_origin": "*",
+  "web": {
+    "listen_host": "127.0.0.1",
+    "listen_port": 8080,
+    "password_hash": "",
+    "session_ttl": 86400,
+    "secure_cookie": true,
+    "title": "QQ 群图片"
+  }
 }

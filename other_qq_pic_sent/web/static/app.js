@@ -2,36 +2,16 @@
 (() => {
   'use strict';
 
-  const app = document.getElementById('qq-app');
   const list = document.getElementById('qq-list');
   const statusEl = document.getElementById('qq-status');
   const emptyEl = document.getElementById('qq-empty');
-  if (!app || !list) return;
-
-  const imageBase = app.dataset.imageBase || '';
-  let allowedImageHost = location.host;
-  try {
-    if (imageBase) allowedImageHost = new URL(imageBase).host;
-  } catch (_) { /* 配置错误时退回同源 */ }
+  if (!list) return;
 
   let lastId = 0;
   let busy = false;
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
-  }
-
-  function safeImageUrl(raw) {
-    if (!raw) return '';
-    try {
-      const url = new URL(raw, location.href);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
-      if (url.origin === location.origin) return url.href;
-      if (allowedImageHost && url.host === allowedImageHost) return url.href;
-      return '';
-    } catch (_) {
-      return '';
-    }
   }
 
   function formatTime(seconds) {
@@ -66,14 +46,16 @@
     }
 
     for (const img of msg.images || []) {
-      const src = safeImageUrl(img.url);
-      if (!src) continue;
+      const raw = img.url || '';
+      // 只允许同源 /pic_http/，防止消息里塞入外部或 javascript: URL
+      if (raw.indexOf('/pic_http/') !== 0) continue;
+
       const link = document.createElement('a');
-      link.href = src;
+      link.href = raw;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       const el = document.createElement('img');
-      el.src = src;
+      el.src = raw;
       el.alt = img.name || 'QQ 图片';
       el.loading = 'lazy';
       el.referrerPolicy = 'no-referrer';
@@ -88,13 +70,13 @@
     if (busy) return;
     busy = true;
     try {
-      const resp = await fetch(`api.php?since=${lastId}&limit=50`, {
+      const resp = await fetch(`/api/messages?since=${lastId}&limit=50`, {
         credentials: 'same-origin',
         headers: { 'Accept': 'application/json' },
         cache: 'no-store',
       });
       if (resp.status === 401 || resp.status === 403) {
-        location.replace('login.php');
+        location.replace('/login');
         return;
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

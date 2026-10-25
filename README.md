@@ -30,7 +30,7 @@
 - 自动重登：LittleSkin 会话失效（如 "Invalid access token"）时自动拉起登录流程并重新连接。
 - QQ 群聊转述（OneBot 11）：配合 NapCat / Lagrange / go-cqhttp 等网关，在「QQ 转述」页填好网关地址/Token 与群号后，即可把群消息按 `&7&o[群名][昵称]：内容` 的灰色斜体格式发到服务器公共聊天；支持正向连接与反向监听两种模式，图片/表情等非文本以 `[图片]`/`[表情]` 占位；可选把图片保存到本地并由内置 Python HTTP 服务以链接形式发出。
 - MC → QQ 反向转述：公屏消息以触发词（默认 `[sentQ]`，可逗号分隔多个）开头即发送到 QQ 群，支持 `[sentQ:群号] 内容` 临时指定群、冷却时间、自动去除 MC 颜色码，非法字符以 `?` 代替；并在公屏回执「转述成功/失败」（话术可配置，支持 `{player}`）。
-- **网站接入（QQ → 网站）**：QQ 转述页勾选「启用网站 API」后，内置 HTTP 服务提供 `GET /api/qq/messages`、`GET /api/qq/images`、`GET /api/qq/stream`（SSE）和 `GET /health`，可选 Token 鉴权；纯图片消息也会以 `[图片]` 记录。配合 Nginx/Caddy 反代即可在 PHP 网站展示群消息与图片，详见 [`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
+- **网站接入（QQ → 网站）**：QQ 转述页勾选「启用网站 API」后，内置 HTTP 服务提供 `GET /api/qq/messages`、`GET /api/qq/images`、`GET /api/qq/stream`（SSE）和 `GET /health`，可选 Token 鉴权；纯图片消息也会以 `[图片]` 记录。配合 Nginx/Caddy 反代或直接用内置 Python 页面即可展示群消息与图片，详见 [`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
 - 自动重连与踢出处理（**重连/踢出** 页）：连接意外结束（掉线 / 被踢）时按设定延迟自动重连，可设最大次数（重连成功后重置）；被踢出并重连成功后可自动发送 `/lobby`。手动点「断开」不会触发重连。
 - 外置登录/网络服务异常友好化：当 LittleSkin 的外置登录接口返回 **5xx**（如 `Response is not JSON. Status code: 504`）、网络超时/不可达时，不再刷一屏原始报错，而是提示「外置登录/会话服务暂时不可用（对方问题）」并按**指数退避**重试（5s→10s→20s… 最高 15 分钟），且同类提示**最多每 60 秒一条**；连上后自动恢复正常。
 - 外置登录请求统一 **20 秒硬超时**：OAuth 换 token、角色列表、MC token、以及登录时的 `session/join`（yggdrasil 包，原本用 node-fetch **没有超时**，皮肤站卡住会无限挂起）都改用 `AbortSignal.timeout(20000)`；可用环境变量 `AAF_AUTH_TIMEOUT_MS` 覆盖。
@@ -57,9 +57,9 @@
 - GUI「QQ 转述 → 图片转本地链接」新增「监听地址」「启用网站 API」开关、「Token」输入框与「保留 QQ 图片原始文件名」开关；配置项见 `qq.imageHttpHost` / `qq.webApiEnabled` / `qq.webApiToken` / `qq.imagePreserveName`。
 - **两种接入方案**：① **此设备出站**（A 自己开、网站/CF 直连 8765）；② **内网其他设备出站**（B 上跑 `other_qq_pic_sent/relay.py` 中继，去 A 收消息/图片，再对外提供 API 和图片）。GUI 的「网站出站方式」可直接切换。
 - **Python 中继**（`other_qq_pic_sent/relay.py`，标准库无依赖）：轮询 A、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地递增 id、指纹去重、A 重启 id 归零自动处理；对外提供同一套 `/api/qq/*` 与 `/pic_http/*`。
-- **安全示例前后端**（`other_qq_pic_sent/web/`）：PHP 登录页 + 图片墙，只读、会话鉴权、CSRF、登录限速、CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。
+- **Python Web 后台**（`other_qq_pic_sent/webapp.py`）：登录页 + 图片墙 + 只读 API，全部标准库；PBKDF2 密码、会话 Cookie、CSRF、登录限速、CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。
 - A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`other_qq_pic_sent/qq-relay.service`。
-- 完整接入文档（两个方案、Cloudflare、原生 PHP、ThinkPHP、Laravel、前端轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
+- 完整接入文档（两个方案、Cloudflare、Python Web 后台、自己的网站用 Flask/FastAPI 接入、轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
 
 ### v0.3.2
 
@@ -125,7 +125,7 @@
 │  ├─ src/main/java/...   #   zmusic:packet 协议编码 + 网易云搜索 + 点歌逻辑
 │  └─ dist/               #   已构建好的 ZMusicBridge-1.0.0.jar
 ├─ docs/                  # 接入文档（QQ 图片/消息接入网站等）
-├─ other_qq_pic_sent/     # 方案二 B 端：relay.py + 安全 PHP 前后端 + 部署模板
+├─ other_qq_pic_sent/     # 方案二 B 端：relay.py + Python Web 后台（登录/图片墙）+ 部署模板
 ├─ promo/                 # 宣传片：单文件网页（1920×1080，全屏录屏即出片）
 ├─ run_with_api.py        # 带本地 HTTP 接口的启动器（供网站借用机器人发消息，可选）
 ├─ 更新日志.md            # 历史版本更新记录（v0.3.1 及更早；最新版见 README）

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}} · 登录</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+  <main class="login-box">
+    <h1>{{title}}</h1>
+    <p class="muted">仅限授权用户查看</p>
+    <p class="error" role="alert">{{error}}</p>
+    <form method="post" action="/login" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password"
+             autocomplete="current-password" required autofocus>
+      <button type="submit">登录</button>
+    </form>
+  </main>
+</body>
+</html>
