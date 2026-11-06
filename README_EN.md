@@ -37,7 +37,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ### v0.3.3
 
 - **QQ group command `[AI]在线玩家`**: reply with the online player list in the same group (also accepts `[AI] 在线玩家`, case-insensitive); reports when the bot is not connected. The bot's own replies are not relayed back.
-- **Fixed emoticon codes being swallowed by media URLs**: a space is always inserted after `[图片]`/`[视频]` links, and the final MC text gets a URL-boundary pass so `...gif[哭]` cannot break the server's `URI.create()` / system-chat packet.
+- **Fixed emoticon codes being swallowed by media URLs**: a space is always inserted after `[图片]`/`[视频]` links, and the final MC text gets a URL-boundary pass so `...gif[哭]` cannot break the server's `URI.create()` / system-chat packet (thanks to [@FurryAoao](https://github.com/FurryAoao) for [#38](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/38)).
 - **QQ text can no longer spoof colour codes or media placeholders**: `&c` / `§c` are neutralised; literal `[图片]`/`[视频]` in user text no longer consumes real media links (private-use markers in the engine).
 - **Range support** for media: A/B/Web servers return `206` / `Content-Range` / `Accept-Ranges`, so `<video>` seeking works and iOS/Safari is happier.
 - **Media size / disk protection**: per-file limit (default 100 MB) and low-disk pause threshold (default 200 MB), with skip + notice.
@@ -139,6 +139,18 @@ npm run login:msa          # Microsoft account login only
 4. Calling LLM APIs may incur costs, which are billed to your own API account and are unrelated to the author.
 5. This project may be detected or banned by servers in any way. The author is not liable for any direct or indirect loss, including but not limited to account bans, kicks and data loss.
 6. This project is provided "as is" without any express or implied warranty (including but not limited to merchantability, fitness for a particular purpose, and non-infringement).
+
+## Acknowledgements
+
+Thanks to the following people for filing issues and pull requests that helped find and fix many problems:
+
+- [@HU-TAO-520](https://github.com/HU-TAO-520)
+  - Issues **#1, #2, #5–#34**: check-in / book-writing consistency, command blocking, QQ reverse auth, config saving, AI work queue, song cancellation, daily data, CSV/pagination, build scripts and dependency security (P1–P3); #1 was encouragement for the project.
+  - PRs **#3, #35–#37**: fixes for write confirmation, check-in rewards, command blocking, QQ reverse auth, atomic config saving, AI scheduling and song cancellation.
+- [@FurryAoao](https://github.com/FurryAoao)
+  - Issue **#38**: when an image was followed by an emoticon code such as `[哭]`, the `open_url` regex swallowed it and `URI.create()` failed, dropping the whole relayed message; fixed in **v0.3.3**.
+
+Thanks also to every player and developer who reported feedback, helped test or suggested improvements.
 
 ## License
 

@@ -52,7 +52,7 @@
 ### v0.3.3
 
 - **QQ 群内在线玩家**：群内发送 `[AI]在线玩家`（也认 `[AI] 在线玩家`、大小写不敏感），机器人直接在该群回复在线玩家列表；机器人未连服务器时提示未连接。机器人自己的回复不会被再次转述（OneBot 自消息过滤）。
-- **修复表情代码被并进图片 URL**：`[图片]` 后紧跟 `[哭]` 等表情代码时，链接后强制补空格；同时对最终 MC 文本做 URL 边界处理，避免服务端 `URI.create(...gif[哭])` 解析失败导致整条 system_chat 丢包。
+- **修复表情代码被并进图片 URL**：`[图片]` 后紧跟 `[哭]` 等表情代码时，链接后强制补空格；同时对最终 MC 文本做 URL 边界处理，避免服务端 `URI.create(...gif[哭])` 解析失败导致整条 system_chat 丢包（感谢 [@FurryAoao](https://github.com/FurryAoao) 报告 [#38](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/38)）。
 - **QQ 文本不再能伪造颜色码/占位符**：群友正文里的 `&c` / `§c` 会被中和，`[图片]` / `[视频]` 字面量不会抢走真正的媒体链接（引擎改用内部私有区标记）。
 - **视频 Range 支持**：A/B/Web 的媒体服务支持 `Range`（206 / `Content-Range` / `Accept-Ranges`），浏览器 `<video>` 可拖动进度条，iOS/Safari 兼容性更好。
 - **媒体大小与磁盘保护**：单文件上限（默认 100 MB）、磁盘剩余低于阈值（默认 200 MB）暂停保存；超限/空间不足会跳过并提示。
@@ -288,8 +288,15 @@ npm run login:msa          # 仅执行微软账号登录
 
 ## 致谢 / Acknowledgements
 
-- 感谢 [@HU-TAO-520](https://github.com/HU-TAO-520) 报告并协助定位了「写入未确认仍推进进度」的问题（[#2](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/2)）。
-  Thanks to [@HU-TAO-520](https://github.com/HU-TAO-520) for reporting and helping pin down the "progress advanced before the write was confirmed" bug ([#2](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/2)).
+感谢以下朋友提交 Issue / PR，帮助项目发现并修复了大量问题：
+
+- [@HU-TAO-520](https://github.com/HU-TAO-520)
+  - 提交 Issue **#1、#2、#5–#34**：签到/写书一致性、命令拦截、QQ 反向验证、配置保存、AI 工作队列、点歌取消、每日数据、CSV/分页、构建脚本、依赖安全等 P1–P3 问题；其中 #1 是对项目的支持与鼓励。
+  - 提交 PR **#3、#35–#37**：实际修复写书确认、签到发奖、命令拦截、QQ 反向验证、配置原子保存、AI 调度、点歌取消等问题。
+- [@FurryAoao](https://github.com/FurryAoao)
+  - 提交 Issue **#38**：图片后紧跟 `[哭]` 等表情代码时，`open_url` 正则误匹配导致 `URI.create()` 失败、整条转发消息丢失；该问题已在 **v0.3.3** 修复。
+
+也感谢所有提交反馈、帮忙测试和提出建议的玩家与开发者。
 
 ## 贡献者 / Contributors
 
