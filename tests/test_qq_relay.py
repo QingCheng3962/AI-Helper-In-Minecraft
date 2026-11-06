@@ -24,6 +24,7 @@ def _free_port() -> int:
 
 
 PNG = b'\x89PNG\r\n\x1a\n' + b'relay-test'
+MP4 = b'\x00\x00\x00\x18ftypmp42' + b'relay-video'
 
 
 class _Upstream:
@@ -58,9 +59,11 @@ class _Upstream:
                                      'messages': rows})
                     return
                 if path.startswith('/pic_http/'):
-                    body = PNG
+                    is_video = path.lower().endswith(('.mp4', '.m4v', '.mov'))
+                    body = MP4 if is_video else PNG
                     self.send_response(200)
-                    self.send_header('Content-Type', 'image/png')
+                    self.send_header('Content-Type',
+                                     'video/mp4' if is_video else 'image/png')
                     self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
@@ -74,7 +77,7 @@ class _Upstream:
         self.httpd.daemon_threads = True
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
-    def add(self, text, images=None, ts=None):
+    def add(self, text, images=None, ts=None, videos=None):
         self.last_id += 1
         msg = {
             'id': self.last_id,
@@ -84,6 +87,7 @@ class _Upstream:
             'sender': 'Alice',
             'text': text,
             'images': images or [],
+            'videos': videos or [],
         }
         self.messages.append(msg)
         return msg
@@ -151,6 +155,25 @@ class RelayTest(unittest.TestCase):
 
         status, _body = self._get('/api/qq/messages', token=None)
         self.assertEqual(status, 401)
+
+    def test_sync_download_and_serve_mp4(self):
+        self.up.add('[视频] 看这个', videos=[{
+            'name': '20261025_2.mp4', 'url': '/pic_http/20261025_2.mp4'}])
+        self.assertEqual(self.relay.sync_once(), 1)
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, 'pic_http',
+                                                    '20261025_2.mp4')))
+
+        self.relay.start_http()
+        status, body = self._get('/api/qq/messages')
+        self.assertEqual(status, 200)
+        msg = json.loads(body)['messages'][0]
+        self.assertEqual(msg['videos'][0]['url'], '/20261025_2.mp4')
+        self.assertEqual(msg['videos'][0]['abs_url'],
+                         'https://pic.example.top/20261025_2.mp4')
+
+        status, body = self._get('/20261025_2.mp4', token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, MP4)
 
     def test_duplicate_and_upstream_id_reset(self):
         msg = self.up.add('hello')

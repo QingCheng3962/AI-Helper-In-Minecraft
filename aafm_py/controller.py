@@ -150,6 +150,10 @@ URL_MARK_HTTPS = '¥'
 
 
 class Controller:
+    # 支持转成公屏链接的媒体扩展名（图片 + 视频）。
+    _MEDIA_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
+                   '.mp4', '.m4v', '.mov')
+
     def __init__(self) -> None:
         self.config: AppConfig = AppConfig.load()
         self.ai_config: AiPlayerConfig = AiPlayerConfig.load()
@@ -1514,18 +1518,22 @@ class Controller:
 
     def _relay_qq_message(self, ev: Dict[str, Any]) -> None:
         qq = self.config.qq
-        # Save images once: they are needed by both the website API and the
+        # Save media once: they are needed by both the website API and the
         # in-game link relay (and must still be saved when MC is offline).
-        saved: List[Dict[str, str]] = []
-        if (qq.imageAsLink or qq.webApiEnabled) and ev.get('images'):
+        saved_images: List[Dict[str, str]] = []
+        saved_videos: List[Dict[str, str]] = []
+        if (qq.imageAsLink or qq.webApiEnabled) and (ev.get('images') or ev.get('videos')):
             try:
-                saved = self._prepare_qq_images(ev)
+                saved_images = self._prepare_qq_images(ev)
+                saved_videos = self._prepare_qq_videos(ev)
             except Exception as e:  # noqa: BLE001
                 self._post_ui({'kind': 'log', 'level': 'error',
-                               'message': '[QQ] 图片处理失败: ' + str(e)})
+                               'message': '[QQ] 图片/视频处理失败: ' + str(e)})
         if qq.webApiEnabled:
             try:
-                self._photo.record_qq_message(ev, [x['name'] for x in saved])
+                self._photo.record_qq_message(
+                    ev, [x['name'] for x in saved_images],
+                    [x['name'] for x in saved_videos])
             except Exception as e:  # noqa: BLE001
                 self._post_ui({'kind': 'log', 'level': 'warn',
                                'message': '[QQ] 记录网站消息失败: ' + str(e)})
@@ -1543,8 +1551,8 @@ class Controller:
                                           '请先点顶部「连接」进入服务器。'})
             return
         content = ev.get('content') or ''
-        if qq.imageAsLink and saved:
-            content = self._attach_image_links(ev, content, saved)
+        if qq.imageAsLink and (saved_images or saved_videos):
+            content = self._attach_image_links(ev, content, saved_images, saved_videos)
         text = self._format_qq_message(ev, content=content)
         if not text:
             return
@@ -1607,7 +1615,7 @@ class Controller:
 
     @staticmethod
     def _image_hint(candidates) -> str:
-        """优先挑「像文件名」的候选（带图片扩展名），否则退回第一个。"""
+        """优先挑「像文件名」的候选（带图片/视频扩展名），否则退回第一个。"""
         fallback = ''
         for cand in (candidates or []):
             if not isinstance(cand, dict):
@@ -1616,28 +1624,28 @@ class Controller:
             if not value:
                 continue
             base = value.replace('\\', '/').split('?', 1)[0].rsplit('/', 1)[-1]
-            if base.lower().endswith(('.png', '.jpg', '.jpeg', '.gif',
-                                      '.webp', '.bmp')):
+            if base.lower().endswith(Controller._MEDIA_EXTS):
                 return value
             if not fallback:
                 fallback = value
         return fallback
 
-    def _prepare_qq_images(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
-        """把一条 QQ 消息里的图片保存到 ``pic_http/``。
+    def _prepare_qq_media(self, candidates_list,
+                          timeout: float = 8.0) -> List[Dict[str, str]]:
+        """把一组 QQ 图片/视频候选下载到 ``pic_http/``。
 
         返回 ``[{'name': 文件名, 'url': '/pic_http/文件名'}, ...]``；下载失败的
-        图片会被跳过。网站 API 与 MC 公屏链接共用这一份结果，避免重复下载。
+        项目会被跳过。网站 API 与 MC 公屏链接共用这一份结果，避免重复下载。
         """
         saved: List[Dict[str, str]] = []
         preserve = bool(getattr(self.config.qq, 'imagePreserveName', False))
-        for candidates in (ev.get('images') or []):
+        for candidates in (candidates_list or []):
             data = None
             hint = self._image_hint(candidates)
             for cand in (candidates or []):
                 if not isinstance(cand, dict):
                     continue
-                data = self._fetch_image_bytes(cand)
+                data = self._fetch_image_bytes(cand, timeout=timeout)
                 if data:
                     break
             if not data:
@@ -1646,24 +1654,58 @@ class Controller:
             saved.append({'name': name, 'url': '/pic_http/' + name})
         return saved
 
-    def _attach_image_links(self, ev: Dict[str, Any], content: str,
-                            saved: Optional[List[Dict[str, str]]] = None) -> str:
-        """把 ``[图片]`` 依次替换成公屏可点的图片链接。"""
-        if saved is None:
-            saved = self._prepare_qq_images(ev)
+    def _prepare_qq_images(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
+        """保存一条 QQ 消息里的图片（``ev['images']``）。"""
+        return self._prepare_qq_media(ev.get('images') or [])
+
+    def _prepare_qq_videos(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
+        """保存一条 QQ 消息里的视频（``ev['videos']``，如 .mp4）。
+
+        视频比图片大，给更长的下载超时。
+        """
+        return self._prepare_qq_media(ev.get('videos') or [], timeout=30.0)
+
+    def _apply_media_links(self, content: str, saved,
+                           placeholder: str) -> str:
+        """把占位符依次替换成可点链接。
+
+        链接**后面强制加一个空格**：MC 客户端按「非空白」识别 URL，若紧跟
+        中文/英文正文，正文会被并入链接，点开就变成 404。
+        """
         if not saved:
-            return content
+            return content or ''
         base = self._image_base_url()
         out = content or ''
+        pending: List[str] = []
         for item in saved:
-            name = str(item.get('name') if isinstance(item, dict) else item)
-            if not name:
-                continue
-            link = base + '/pic_http/' + name
-            out = out.replace('[图片]', '[图片] ' + link, 1)
+            name = str(item.get('name') if isinstance(item, dict) else item or '')
+            if name:
+                pending.append(base + '/pic_http/' + name)
+        for link in list(pending):
+            idx = out.find(placeholder)
+            if idx < 0:
+                break
+            end = idx + len(placeholder)
+            # 链接后已有空白就不重复加；否则补一个空格，防止正文被并入 URL。
+            tail = '' if end >= len(out) or out[end].isspace() else ' '
+            out = out[:end] + ' ' + link + tail + out[end:]
+            pending.remove(link)
+        # 没有对应占位符（如纯视频消息被网关省略了 [视频]）时补到末尾。
+        for link in pending:
+            out = out.rstrip() + ' ' + placeholder + ' ' + link
         return out
 
-    def _fetch_image_bytes(self, cand) -> Optional[bytes]:
+    def _attach_image_links(self, ev: Dict[str, Any], content: str,
+                            saved: Optional[List[Dict[str, str]]] = None,
+                            videos: Optional[List[Dict[str, str]]] = None) -> str:
+        """把 ``[图片]`` / ``[视频]`` 依次替换成公屏可点的链接。"""
+        if saved is None and videos is None:
+            saved = self._prepare_qq_images(ev)
+            videos = self._prepare_qq_videos(ev)
+        out = self._apply_media_links(content, saved or [], '[图片]')
+        return self._apply_media_links(out, videos or [], '[视频]')
+
+    def _fetch_image_bytes(self, cand, timeout: float = 8.0) -> Optional[bytes]:
         if not isinstance(cand, dict):
             return None
         kind = cand.get('type')
@@ -1697,7 +1739,7 @@ class Controller:
         if kind == 'url':
             try:
                 import httpx
-                r = httpx.get(value, timeout=8.0, follow_redirects=True,
+                r = httpx.get(value, timeout=timeout, follow_redirects=True,
                               headers={'User-Agent': 'Mozilla/5.0',
                                        'Referer': 'https://qun.qq.com/'})
                 if r.status_code == 200 and r.content:

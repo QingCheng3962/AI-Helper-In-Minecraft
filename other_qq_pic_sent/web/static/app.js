@@ -65,6 +65,23 @@
       article.appendChild(link);
     }
 
+    for (const vid of msg.videos || []) {
+      const raw = vid.url || '';
+      // 只允许同源视频路径：/文件名 或 /pic_http/文件名
+      const safe = raw.indexOf('/pic_http/') === 0
+        || /^\/[^/?#]+\.(mp4|m4v|mov)$/i.test(raw);
+      if (!safe) continue;
+
+      const el = document.createElement('video');
+      el.className = 'video';
+      el.src = raw;
+      el.controls = true;
+      el.preload = 'metadata';
+      el.playsInline = true;
+      el.referrerPolicy = 'no-referrer';
+      article.appendChild(el);
+    }
+
     return article;
   }
 

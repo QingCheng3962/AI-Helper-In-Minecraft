@@ -190,7 +190,7 @@ ingress:
 | 地址 | 鉴权 | 给谁用 |
 |---|---|---|
 | `GET /api/messages`（webapp :8080） | 默认公开；开启登录后要会话 Cookie | 内置图片墙 / 自己的前端同源调用 |
-| `GET /<文件名>`（webapp :8080） | 默认公开；开启登录后要会话 Cookie | 图片（推荐地址） |
+| `GET /<文件名>`（webapp :8080） | 默认公开；开启登录后要会话 Cookie | 图片 / `.mp4` 视频（推荐地址） |
 | `GET /api/qq/messages`（relay :18765） | `X-Token` | 其他程序 / 自己的后端 |
 | `GET /api/qq/images`（relay :18765） | `X-Token` | 图片列表 |
 | `GET /api/qq/stream`（relay :18765） | `X-Token` | SSE 实时 |
@@ -216,11 +216,21 @@ ingress:
           "url": "/20261025_143012_123_ab12.jpg",
           "abs_url": "https://pic.qingchengsep.top/20261025_143012_123_ab12.jpg"
         }
+      ],
+      "videos": [
+        {
+          "name": "20261025_143100_456_cd34.mp4",
+          "url": "/20261025_143100_456_cd34.mp4",
+          "abs_url": "https://pic.qingchengsep.top/20261025_143100_456_cd34.mp4"
+        }
       ]
     }
   ]
 }
 ```
+
+- `images` / `videos` 都是媒体列表；视频一般来自 QQ 的 `video` 段（`.mp4` / `.m4v` / `.mov`）
+- `[图片] 链接` / `[视频] 链接` 后面会自动留空格，避免正文被 MC 当成 URL 的一部分
 
 - `since`：上次的 `last_id`，首次 0
 - 中继用自己的本地 id，A 重启不会影响网站游标

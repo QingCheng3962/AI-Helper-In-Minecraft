@@ -211,9 +211,9 @@ class WebApp:
                                  'geolocation=(), microphone=(), camera=()')
                 self.send_header(
                     'Content-Security-Policy',
-                    "default-src 'self'; img-src 'self' data:; script-src 'self'; "
-                    "style-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
-                    "form-action 'self'")
+                    "default-src 'self'; img-src 'self' data:; media-src 'self'; "
+                    "script-src 'self'; style-src 'self'; frame-ancestors 'none'; "
+                    "base-uri 'none'; form-action 'self'")
                 for key, value in (extra or {}).items():
                     self.send_header(key, value)
                 self.end_headers()
@@ -447,7 +447,8 @@ class WebApp:
 
             def _is_image_path(self, path: str) -> bool:
                 return path.count('/') == 1 and path.lower().endswith(
-                    ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'))
+                    ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
+                     '.mp4', '.m4v', '.mov'))
 
             def _image(self, path: str) -> bool:
                 raw = path[len('/pic_http/'):] if path.startswith('/pic_http/') \

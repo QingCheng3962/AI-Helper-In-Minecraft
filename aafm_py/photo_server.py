@@ -1,13 +1,15 @@
-﻿"""本地 HTTP 服务：QQ 图片 + QQ 消息 API（供网站接入）。
+﻿"""本地 HTTP 服务：QQ 图片/视频 + QQ 消息 API（供网站接入）。
 
 两类路径：
 
-- ``/pic_http/<file>`` —— 只读图片（保持原有行为，可被网站 ``<img>`` 直接引用）；
+- ``/pic_http/<file>`` —— 只读图片/视频（保持原有行为，可被网站 ``<img>`` /
+  ``<video>`` 直接引用）；
 - ``/api/qq/messages``、``/api/qq/images``、``/api/qq/stream``、``/health``
   —— 给网站的 JSON / SSE 接口（可选 Token 鉴权）。
 
-图片保存在 ``<project>/pic_http/``，文件名由 :func:`save_image_bytes` 生成。
-消息只保存在内存环形缓冲（默认最近 500 条），重启后清空；图片文件仍在磁盘上。
+图片/视频保存在 ``<project>/pic_http/``，文件名由 :func:`save_image_bytes`
+生成。消息只保存在内存环形缓冲（默认最近 500 条），重启后清空；媒体文件仍在
+磁盘上。
 """
 from __future__ import annotations
 
@@ -39,6 +41,10 @@ _EXT_BY_MAGIC = (
     (b'GIF89a', '.gif'),
 )
 
+_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')
+_VIDEO_EXTS = ('.mp4', '.m4v', '.mov')
+_MEDIA_EXTS = _IMAGE_EXTS + _VIDEO_EXTS
+
 
 def guess_ext(data: bytes, hint: str = '') -> str:
     """Pick a file extension from magic bytes, falling back to the hint."""
@@ -47,13 +53,16 @@ def guess_ext(data: bytes, hint: str = '') -> str:
             return ext
     if len(data) > 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
         return '.webp'
-    m = os.path.splitext(str(hint or ''))[1].lower()
-    if m and len(m) <= 6 and m[1:].isalnum():
-        return m
+    clean_hint = str(hint or '').split('?', 1)[0].split('#', 1)[0]
+    hint_ext = os.path.splitext(clean_hint)[1].lower()
+    # MP4 / MOV share the ISO-BMFF ``ftyp`` header; prefer the hint's extension.
+    if len(data) > 12 and data[4:8] == b'ftyp':
+        if hint_ext in _VIDEO_EXTS:
+            return hint_ext
+        return '.mp4'
+    if hint_ext and len(hint_ext) <= 6 and hint_ext[1:].isalnum():
+        return hint_ext
     return '.jpg'
-
-
-_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')
 
 
 def _safe_stem(hint: str) -> str:
@@ -68,7 +77,7 @@ def _safe_stem(hint: str) -> str:
     raw = urllib.parse.unquote(raw).replace('\\', '/')
     base = os.path.basename(raw)
     stem, ext = os.path.splitext(base)
-    if ext.lower() not in _IMAGE_EXTS:
+    if ext.lower() not in _MEDIA_EXTS:
         return ''
     # 允许中文/英文/数字/._-，其余换成 _；去掉首尾的点/下划线，防止隐藏文件/穿越
     stem = re.sub(r'[^0-9A-Za-z\u4e00-\u9fff._-]+', '_', stem)
@@ -96,8 +105,9 @@ def save_image_bytes(data: bytes, hint: str = '',
                      preserve_name: bool = False) -> str:
     """Save ``data`` under ``pic_http/`` and return the generated file name.
 
-    ``preserve_name=True`` 时尽量保留 QQ 原始文件名（只保留安全字符，重复自动
-    加后缀），扩展名仍按真实图片格式修正，避免 MIME 不一致。
+    ``data`` 可以是图片，也可以是 QQ 视频（.mp4 等）。``preserve_name=True``
+    时尽量保留 QQ 原始文件名（只保留安全字符，重复自动加后缀），扩展名仍按
+    真实媒体格式修正，避免 MIME 不一致。
     """
     os.makedirs(PHOTO_DIR, exist_ok=True)
     ext = guess_ext(data, hint)
@@ -375,12 +385,25 @@ class PhotoServer:
             }
             for name in event.get('images') or []
         ]
+        out['videos'] = [
+            {
+                'name': name,
+                'url': PHOTO_PREFIX + name,
+                'abs_url': self._public_url(name),
+            }
+            for name in event.get('videos') or []
+        ]
         return out
 
     def record_qq_message(self, ev: Dict[str, Any],
-                          images: Optional[List[str]] = None) -> Dict[str, Any]:
-        """记录一条 QQ 群消息（供网站读取）。``images`` 是文件名列表。"""
+                          images: Optional[List[str]] = None,
+                          videos: Optional[List[str]] = None) -> Dict[str, Any]:
+        """记录一条 QQ 群消息（供网站读取）。
+
+        ``images`` / ``videos`` 都是文件名列表（视频一般为 .mp4）。
+        """
         names = [str(n) for n in (images or []) if n]
+        video_names = [str(n) for n in (videos or []) if n]
         now = time.time()
         with self._lock:
             self._seq += 1
@@ -392,6 +415,7 @@ class PhotoServer:
                 'sender': str(ev.get('sender') or ''),
                 'text': str(ev.get('content') or ''),
                 'images': names,
+                'videos': video_names,
             }
             self._events.append(event)
             for name in names:

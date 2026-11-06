@@ -72,6 +72,20 @@ class PhotoApiTest(unittest.TestCase):
         images = json.loads(body)['images']
         self.assertTrue(any(i['name'] == '20261025_120000_000_abcd.jpg' for i in images))
 
+    def test_records_video_and_serializes_videos(self):
+        self.server.record_qq_message(
+            {'groupId': '123', 'groupName': '测试群', 'sender': 'Bob',
+             'content': '[视频] 看这个'},
+            ['20261025_120000_000_abcd.jpg'],
+            ['20261025_120100_000_ef01.mp4'])
+        status, _headers, body = self._get('/api/qq/messages?since=0&limit=50')
+        self.assertEqual(status, 200)
+        msgs = json.loads(body)['messages']
+        msg = [m for m in msgs if m['sender'] == 'Bob'][-1]
+        self.assertEqual(msg['videos'][0]['name'], '20261025_120100_000_ef01.mp4')
+        self.assertEqual(msg['videos'][0]['url'],
+                         '/pic_http/20261025_120100_000_ef01.mp4')
+
     def test_cors_preflight_and_health(self):
         status, headers, _body = self._get('/api/qq/messages', token=None,
                                           method='OPTIONS')
@@ -102,10 +116,53 @@ class PhotoApiTest(unittest.TestCase):
             text = ctrl._attach_image_links(
                 {}, '[图片] 你好', saved)
             self.assertIn('https://pic.example.top/pic_http/' + name, text)
+            # 链接后面必须留空格，否则正文会被 MC 当成 URL 的一部分。
+            self.assertIn('https://pic.example.top/pic_http/' + name + ' 你好',
+                          text)
         finally:
             os.unlink(path)
             if name:
                 os.unlink(os.path.join(PHOTO_DIR, name))
+
+    def test_attach_links_adds_space_after_url(self):
+        from aafm_py.controller import Controller
+        ctrl = object.__new__(Controller)
+        ctrl.config = SimpleNamespace(
+            qq=SimpleNamespace(imagePublicBase='https://pic.example.top'))
+        saved = [{'name': 'a.png'}]
+        self.assertEqual(
+            ctrl._attach_image_links({}, '[图片]你好', saved, []),
+            '[图片] https://pic.example.top/pic_http/a.png 你好')
+        # 纯图片（占位符后无正文）也不会把后续内容粘进链接。
+        self.assertEqual(
+            ctrl._attach_image_links({}, '你好[图片]', saved, []),
+            '你好[图片] https://pic.example.top/pic_http/a.png')
+        # 视频占位符单独替换。
+        self.assertEqual(
+            ctrl._attach_image_links({}, '[视频]文字', [], [{'name': 'v.mp4'}]),
+            '[视频] https://pic.example.top/pic_http/v.mp4 文字')
+
+    def test_mp4_saved_and_served(self):
+        payload = b'\x00\x00\x00\x18ftypmp42' + b'mp4-test'
+        created = []
+        try:
+            name = save_image_bytes(payload, r'C:\QQ\片段 01.mp4',
+                                    preserve_name=True)
+            created.append(name)
+            self.assertEqual(name, '片段_01.mp4')
+            full = os.path.join(PHOTO_DIR, name)
+            self.assertTrue(os.path.isfile(full))
+            status, headers, body = self._get('/pic_http/' + urllib.parse.quote(name),
+                                              token=None)
+            self.assertEqual(status, 200)
+            self.assertEqual(body, payload)
+            self.assertIn('video/mp4', headers.get('Content-Type', ''))
+        finally:
+            for name in created:
+                try:
+                    os.unlink(os.path.join(PHOTO_DIR, name))
+                except OSError:
+                    pass
 
     def test_preserve_original_image_name(self):
         payload = b'\x89PNG\r\n\x1a\n' + b'name-test'
