@@ -119,6 +119,23 @@ class WebAppTest(unittest.TestCase):
         status, _resp, _body = self._req('GET', '/pic_http/p.png')
         self.assertEqual(status, 303)
 
+    def test_media_range_support(self):
+        payload = b'\x00\x00\x00\x18ftypmp42' + bytes(range(40))
+        with open(os.path.join(self.relay.pic_dir, 'p.mp4'), 'wb') as f:
+            f.write(payload)
+        status, resp, token, _csrf = self._login()
+        self.assertEqual(status, 303)
+        new_token = re.search(r'qqpic_sid=([^;]+)',
+                              resp.getheader('Set-Cookie', '')).group(1)
+        status, resp, body = self._req(
+            'GET', '/p.mp4',
+            {'Cookie': f'qqpic_sid={new_token}', 'Range': 'bytes=5-9'})
+        self.assertEqual(status, 206)
+        self.assertEqual(body, payload[5:10])
+        self.assertEqual(resp.getheader('Content-Range'),
+                         f'bytes 5-9/{len(payload)}')
+        self.assertEqual(resp.getheader('Accept-Ranges'), 'bytes')
+
     def test_wrong_csrf_rejected(self):
         status, resp, _body = self._req('GET', '/login')
         token = re.search(r'qqpic_sid=([^;]+)', resp.getheader('Set-Cookie')).group(1)

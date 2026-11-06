@@ -513,6 +513,14 @@ class QqConfig:
     # instead of the default timestamp_random name.
     imagePreserveName: bool = False
 
+    # Media safety: reject oversized files, stop saving when the disk is low,
+    # and clean up old media in ``pic_http/`` periodically.
+    mediaMaxMB: int = 100
+    mediaMinFreeMB: int = 200
+    mediaAutoClean: bool = True
+    mediaKeepDays: int = 7
+    mediaMaxTotalMB: int = 2048
+
     # MC -> QQ relay: when an in-game chat message starts with ``mcTrigger``,
     # send the rest to a QQ group. ``mcTargetGroup`` empty => first ``groups``
     # entry; ``[sentQ:群号] 内容`` overrides the target for one message.
@@ -593,6 +601,11 @@ class QqConfig:
         if self.webMode not in ('local', 'relay'):
             self.webMode = 'local'
         self.imagePreserveName = bool(self.imagePreserveName)
+        self.mediaMaxMB = _clamp_int(self.mediaMaxMB, 1, 2048)
+        self.mediaMinFreeMB = _clamp_int(self.mediaMinFreeMB, 0, 102400)
+        self.mediaAutoClean = bool(self.mediaAutoClean)
+        self.mediaKeepDays = _clamp_int(self.mediaKeepDays, 0, 3650)
+        self.mediaMaxTotalMB = _clamp_int(self.mediaMaxTotalMB, 0, 1048576)
         self.lastLoginUin = str(self.lastLoginUin or '').strip()
 
 

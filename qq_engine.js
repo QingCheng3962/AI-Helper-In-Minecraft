@@ -120,6 +120,7 @@ const activeMode = mode;
 let reconnectTimer = null;
 let retry = 0;
 let lastState = null;
+let selfId = '';
 const clients = new Set();
 let forwardWs = null;
 
@@ -190,6 +191,7 @@ function stopHealthCheck() {
 function setStatus(state, extra) {
     const payload = Object.assign({ event: 'status', state, mode: activeMode }, extra || {});
     emitEvent(payload);
+    if (extra && extra.selfId != null) selfId = String(extra.selfId);
     lastState = state;
 }
 
@@ -201,6 +203,11 @@ function atText(data) {
     return '@' + (name || q || '');
 }
 
+// Private-use markers: the Python side turns these into real links, so a user
+// typing the literal text "[图片]"/"[视频]" can never consume a real media link.
+const IMAGE_TOKEN = '\uE000';
+const VIDEO_TOKEN = '\uE001';
+
 function segmentText(seg) {
     if (!seg || typeof seg !== 'object') return '';
     const data = seg.data || {};
@@ -211,14 +218,14 @@ function segmentText(seg) {
             return atText(data);
         case 'image':
         case 'flash':
-            return '[图片]';
+            return IMAGE_TOKEN;
         case 'face':
         case 'mface':
             return '[表情]';
         case 'record':
             return '[语音]';
         case 'video':
-            return '[视频]';
+            return VIDEO_TOKEN;
         case 'file':
             return '[文件]';
         case 'json':
@@ -385,7 +392,14 @@ async function handleObj(obj) {
         }
         return;
     }
+    if (obj.self_id != null && !selfId) selfId = String(obj.self_id);
     if (obj.post_type !== 'message' || obj.message_type !== 'group') return;
+
+    // Never relay the bot's own group messages (e.g. the [AI]在线玩家 reply).
+    // Some OneBot implementations echo sent messages back as normal events.
+    const senderId = obj.user_id != null ? String(obj.user_id)
+        : String((obj.sender && obj.sender.user_id) || '');
+    if (selfId && senderId && senderId === selfId) return;
 
     const groupId = String(obj.group_id);
     // Diagnostic: show every received group message so it is obvious whether
@@ -421,7 +435,7 @@ async function handleObj(obj) {
         }
     }
     const content = extractText(message)
-        || (images.length ? '[图片]' : (videos.length ? '[视频]' : ''));
+        || (images.length ? IMAGE_TOKEN : (videos.length ? VIDEO_TOKEN : ''));
     if (!content) {
         log('info', `群 ${groupId} 的消息没有可转述的文本内容（卡片/文件等），已跳过。`);
         return;

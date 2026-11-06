@@ -31,9 +31,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Deque, Dict, Optional, Tuple
 
 try:
-    from .relay import Relay
+    from .relay import Relay, parse_range
 except ImportError:  # 直接 python webapp.py 运行时
-    from relay import Relay
+    from relay import Relay, parse_range
 
 
 DEFAULT_WEB = {
@@ -466,16 +466,44 @@ class WebApp:
                 except OSError:
                     return False
                 ctype = mimetypes.guess_type(full)[0] or 'application/octet-stream'
-                self._headers(ctype, extra={
-                    'Content-Length': str(size),
-                    'Cache-Control': 'private, max-age=3600',
-                })
+                rng = parse_range(self.headers.get('Range') or '', size)
+                if rng is False:
+                    f.close()
+                    self._headers('text/plain; charset=utf-8', 416, {
+                        'Content-Range': f'bytes */{size}',
+                        'Content-Length': '0',
+                        'Accept-Ranges': 'bytes',
+                    })
+                    return True
+                if rng:
+                    start, end = rng
+                    length = end - start + 1
+                    try:
+                        f.seek(start)
+                    except OSError:
+                        f.close()
+                        return False
+                    self._headers(ctype, 206, {
+                        'Content-Range': f'bytes {start}-{end}/{size}',
+                        'Content-Length': str(length),
+                        'Accept-Ranges': 'bytes',
+                        'Cache-Control': 'private, max-age=3600',
+                    })
+                else:
+                    length = size
+                    self._headers(ctype, extra={
+                        'Content-Length': str(length),
+                        'Accept-Ranges': 'bytes',
+                        'Cache-Control': 'private, max-age=3600',
+                    })
                 try:
-                    while True:
-                        chunk = f.read(64 * 1024)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = f.read(min(64 * 1024, remaining))
                         if not chunk:
                             break
                         self.wfile.write(chunk)
+                        remaining -= len(chunk)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:

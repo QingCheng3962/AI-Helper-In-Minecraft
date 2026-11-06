@@ -113,6 +113,30 @@ test('reverse keeps no-token mode and normal message/close lifecycle', () => {
     assert.deepEqual(f.exits, []);
 });
 
+test('skips the bot own messages and marks real media with private tokens', async () => {
+    const f = fixture('');
+    const ws = f.connect('/?access_token=');
+    const base = {
+        post_type: 'message', message_type: 'group', group_id: 42,
+        self_id: 123, group_name: 'g',
+        sender: { user_id: 123, nickname: 'bot' },
+        message: [{ type: 'text', data: { text: '[AI]在线玩家' } }]
+    };
+    ws.emit('message', JSON.stringify(base));
+    ws.emit('message', JSON.stringify({
+        ...base, user_id: 456,
+        sender: { user_id: 456, nickname: 'Alice' },
+        message: [
+            { type: 'image', data: {} },
+            { type: 'text', data: { text: '[哭]' } }
+        ]
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const msgs = f.events.filter((e) => e.event === 'qqMessage');
+    assert.equal(msgs.length, 1);
+    assert.equal(msgs[0].content, '\uE000[哭]');
+});
+
 test('real loopback WebSocket rejects bad credentials then accepts a valid connection', async (t) => {
     const WebSocket = require('ws');
     const f = fixture('test-token', true);
