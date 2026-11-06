@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """tools/qq_relay.py 回归测试：A(bot) -> B(relay) -> 网站。"""
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import shutil
 import socket
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -60,7 +61,10 @@ class _Upstream:
                     return
                 if path.startswith('/pic_http/'):
                     is_video = path.lower().endswith(('.mp4', '.m4v', '.mov'))
-                    body = MP4 if is_video else PNG
+                    if 'big' in path.lower():
+                        body = b'x' * (2 * 1024 * 1024)
+                    else:
+                        body = MP4 if is_video else PNG
                     self.send_response(200)
                     self.send_header('Content-Type',
                                      'video/mp4' if is_video else 'image/png')
@@ -81,7 +85,7 @@ class _Upstream:
         self.last_id += 1
         msg = {
             'id': self.last_id,
-            'time': ts if ts is not None else 1792912345.0 + self.last_id,
+            'time': ts if ts is not None else time.time() + self.last_id,
             'group_id': '123',
             'group_name': '测试群',
             'sender': 'Alice',
@@ -118,15 +122,17 @@ class RelayTest(unittest.TestCase):
         self.up.stop()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _get(self, path, token='web-token'):
+    def _get(self, path, token='web-token', headers=None):
         req = urllib.request.Request(self.base + path)
         if token is not None:
             req.add_header('X-Token', token)
+        for key, value in (headers or {}).items():
+            req.add_header(key, value)
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
-                return r.status, r.read()
+                return r.status, dict(r.headers), r.read()
         except urllib.error.HTTPError as e:
-            return e.code, e.read()
+            return e.code, dict(e.headers), e.read()
 
     def test_sync_download_and_serve(self):
         self.up.add('[图片] 你好', [{'name': '20261025_1.png',
@@ -136,7 +142,7 @@ class RelayTest(unittest.TestCase):
                                                     '20261025_1.png')))
 
         self.relay.start_http()
-        status, body = self._get('/api/qq/messages')
+        status, _headers, body = self._get('/api/qq/messages')
         self.assertEqual(status, 200)
         msg = json.loads(body)['messages'][0]
         self.assertEqual(msg['text'], '[图片] 你好')
@@ -144,16 +150,16 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(msg['images'][0]['abs_url'],
                          'https://pic.example.top/20261025_1.png')
 
-        status, body = self._get('/pic_http/20261025_1.png', token=None)
+        status, _headers, body = self._get('/pic_http/20261025_1.png', token=None)
         self.assertEqual(status, 200)
         self.assertEqual(body, PNG)
 
         # B 端对外根路径：/文件名
-        status, body = self._get('/20261025_1.png', token=None)
+        status, _headers, body = self._get('/20261025_1.png', token=None)
         self.assertEqual(status, 200)
         self.assertEqual(body, PNG)
 
-        status, _body = self._get('/api/qq/messages', token=None)
+        status, _headers, _body = self._get('/api/qq/messages', token=None)
         self.assertEqual(status, 401)
 
     def test_sync_download_and_serve_mp4(self):
@@ -164,16 +170,50 @@ class RelayTest(unittest.TestCase):
                                                     '20261025_2.mp4')))
 
         self.relay.start_http()
-        status, body = self._get('/api/qq/messages')
+        status, _headers, body = self._get('/api/qq/messages')
         self.assertEqual(status, 200)
         msg = json.loads(body)['messages'][0]
         self.assertEqual(msg['videos'][0]['url'], '/20261025_2.mp4')
         self.assertEqual(msg['videos'][0]['abs_url'],
                          'https://pic.example.top/20261025_2.mp4')
 
-        status, body = self._get('/20261025_2.mp4', token=None)
+        status, _headers, body = self._get('/20261025_2.mp4', token=None)
         self.assertEqual(status, 200)
         self.assertEqual(body, MP4)
+
+        status, headers, body = self._get(
+            '/20261025_2.mp4', token=None,
+            headers={'Range': 'bytes=4-11'})
+        self.assertEqual(status, 206)
+        self.assertEqual(body, MP4[4:12])
+        self.assertEqual(headers.get('Content-Range'),
+                         f'bytes 4-11/{len(MP4)}')
+
+    def test_media_size_limit_and_cleanup(self):
+        self.relay.media_max_mb = 1
+        self.up.add('big', images=[{'name': 'big.png',
+                                    'url': '/pic_http/big.png'}])
+        self.assertEqual(self.relay.sync_once(), 1)
+        self.assertFalse(os.path.exists(
+            os.path.join(self.tmp, 'pic_http', 'big.png')))
+
+        # 清理：把消息和文件都设成 10 天前，keep_days=1 应删除。
+        self.up.messages = []
+        self.up.last_id = 0
+        self.relay._upstream_since = 0
+        self.relay.media_max_mb = 100
+        self.relay.media_keep_days = 0     # 先让 sync 不要顺手清掉它
+        self.up.add('[图片] old', images=[{'name': 'old.png',
+                                           'url': '/pic_http/old.png'}],
+                    ts=time.time() - 10 * 86400)
+        self.relay.sync_once()
+        old_path = os.path.join(self.tmp, 'pic_http', 'old.png')
+        self.assertTrue(os.path.isfile(old_path))
+        self.relay.media_keep_days = 1
+        self.relay.cleanup_media(force=True)
+        self.assertFalse(os.path.exists(old_path))
+        msgs = self.relay.messages_since(0, 50)
+        self.assertFalse(any(m['text'] == '[图片] old' for m in msgs))
 
     def test_duplicate_and_upstream_id_reset(self):
         msg = self.up.add('hello')

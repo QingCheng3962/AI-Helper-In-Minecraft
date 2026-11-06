@@ -28,6 +28,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import shutil
 import sqlite3
 import threading
 import time
@@ -49,6 +50,11 @@ DEFAULT_CONFIG = {
     'poll_seconds': 2.0,
     'request_timeout': 15.0,
     'cors_origin': '*',
+    # 媒体安全：单文件上限、磁盘剩余保护、自动清理。
+    'media_max_mb': 100,
+    'media_min_free_mb': 200,
+    'media_keep_days': 7,
+    'media_max_total_mb': 2048,
 }
 
 MAX_BODY = 64 * 1024
@@ -57,6 +63,10 @@ SSE_MAX_SECONDS = 30 * 60
 
 def log(msg: str) -> None:
     print(time.strftime('[%Y-%m-%d %H:%M:%S] ') + msg, flush=True)
+
+
+class MediaTooLarge(Exception):
+    """Downloaded media exceeds the configured per-file limit."""
 
 
 def _json_request(url: str, token: str = '', timeout: float = 15.0) -> Dict[str, Any]:
@@ -68,13 +78,32 @@ def _json_request(url: str, token: str = '', timeout: float = 15.0) -> Dict[str,
         return json.loads(resp.read().decode('utf-8'))
 
 
-def _bytes_request(url: str, token: str = '', timeout: float = 30.0) -> bytes:
+def _bytes_request(url: str, token: str = '', timeout: float = 30.0,
+                   max_bytes: int = 0) -> bytes:
     headers = {'User-Agent': 'qq-relay/1.0'}
     if token:
         headers['X-Token'] = token
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        if max_bytes:
+            length = resp.headers.get('Content-Length')
+            if length:
+                try:
+                    if int(length) > max_bytes:
+                        raise MediaTooLarge(length)
+                except ValueError:
+                    pass
+        chunks = []
+        total = 0
+        while True:
+            chunk = resp.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if max_bytes and total > max_bytes:
+                raise MediaTooLarge(total)
+            chunks.append(chunk)
+        return b''.join(chunks)
 
 
 def _fingerprint(msg: Dict[str, Any], names: List[str],
@@ -112,6 +141,37 @@ def re_media_name(name: str) -> bool:
 # 兼容旧调用名
 re_image_name = re_media_name
 
+_MEDIA_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
+               '.mp4', '.m4v', '.mov')
+
+
+def parse_range(header: str, size: int):
+    """Parse one ``Range: bytes=...`` header (same semantics as photo_server)."""
+    text = str(header or '').strip()
+    if not text.lower().startswith('bytes='):
+        return None
+    spec = text[6:].strip()
+    if not spec or ',' in spec:
+        return None
+    if '-' not in spec:
+        return False
+    start_s, end_s = spec.split('-', 1)
+    try:
+        if not start_s:
+            n = int(end_s)
+            if n <= 0 or size <= 0:
+                return False
+            start = max(0, size - n)
+            end = size - 1
+        else:
+            start = int(start_s)
+            end = int(end_s) if end_s else size - 1
+    except ValueError:
+        return False
+    if size <= 0 or start < 0 or start >= size or end < start:
+        return False
+    return start, min(end, size - 1)
+
 
 class Relay:
     """消息/图片同步 + 对外 HTTP 服务。"""
@@ -130,6 +190,11 @@ class Relay:
         self.poll_seconds = max(0.5, float(cfg['poll_seconds'] or 2.0))
         self.request_timeout = max(3.0, float(cfg['request_timeout'] or 15.0))
         self.cors_origin = str(cfg['cors_origin'] or '*')
+        self.media_max_mb = max(0, int(cfg['media_max_mb'] or 0))
+        self.media_min_free_mb = max(0, int(cfg['media_min_free_mb'] or 0))
+        self.media_keep_days = max(0, int(cfg['media_keep_days'] or 0))
+        self.media_max_total_mb = max(0, int(cfg['media_max_total_mb'] or 0))
+        self._last_cleanup = 0.0
 
         os.makedirs(self.pic_dir, exist_ok=True)
         self.db_path = os.path.join(self.data_dir, 'relay.db')
@@ -205,12 +270,25 @@ class Relay:
         full = os.path.join(self.pic_dir, name)
         if os.path.isfile(full) and os.path.getsize(full) > 0:
             return True
+        if self.media_min_free_mb:
+            try:
+                free_mb = shutil.disk_usage(self.pic_dir).free / (1024 * 1024)
+            except OSError:
+                free_mb = float(self.media_min_free_mb)
+            if free_mb < self.media_min_free_mb:
+                log(f'磁盘剩余 {free_mb:.0f} MB，低于 {self.media_min_free_mb} MB，'
+                    f'跳过媒体 {name}')
+                return False
         src = url if re_url(url) else self.upstream_base + url
         # 视频文件通常更大，给更长的下载超时。
         is_video = name.lower().endswith(('.mp4', '.m4v', '.mov'))
         timeout = self.request_timeout * (6 if is_video else 2)
+        max_bytes = self.media_max_mb * 1024 * 1024 if self.media_max_mb else 0
         try:
-            data = _bytes_request(src, self.upstream_token, timeout)
+            data = _bytes_request(src, self.upstream_token, timeout, max_bytes)
+        except MediaTooLarge:
+            log(f'媒体超过单文件上限 {self.media_max_mb} MB，跳过 {name}')
+            return False
         except Exception as e:  # noqa: BLE001
             log(f'媒体下载失败 {name}: {e}')
             return False
@@ -291,6 +369,7 @@ class Relay:
 
         # 重试最近 100 条里缺失的媒体
         self._retry_missing_images(100)
+        self.cleanup_media()
 
         self._upstream_since = max(max_seen, last_id)
         self._set_meta('upstream_since', self._upstream_since)
@@ -314,6 +393,130 @@ class Relay:
                     name = _safe_name(str(item.get('name') or ''))
                     if name and not os.path.isfile(os.path.join(self.pic_dir, name)):
                         self._download_image(name, str(item.get('url') or ''))
+
+    @staticmethod
+    def _row_media_names(raw_images, raw_videos) -> List[str]:
+        names: List[str] = []
+        for raw in (raw_images, raw_videos):
+            try:
+                items = json.loads(raw or '[]')
+            except ValueError:
+                continue
+            for item in items:
+                name = _safe_name(str(item.get('name') or ''))
+                if name:
+                    names.append(name)
+        return names
+
+    def cleanup_media(self, force: bool = False) -> None:
+        """按保留天数 / 总大小清理 relay_data/pic_http 与旧消息。"""
+        now = time.time()
+        if not force and now - self._last_cleanup < 3600:
+            return
+        self._last_cleanup = now
+        removed = 0
+        freed = 0
+
+        def _drop(name: str) -> None:
+            nonlocal removed, freed
+            full = os.path.join(self.pic_dir, name)
+            try:
+                size = os.path.getsize(full)
+                os.unlink(full)
+                removed += 1
+                freed += size
+            except OSError:
+                pass
+
+        cutoff = (now - self.media_keep_days * 86400
+                  if self.media_keep_days > 0 else 0)
+        if cutoff:
+            with self._lock:
+                rows = self._conn.execute(
+                    'SELECT id, images, videos FROM messages WHERE time < ?',
+                    (cutoff,)).fetchall()
+                if rows:
+                    self._conn.execute('DELETE FROM messages WHERE time < ?',
+                                       (cutoff,))
+                    self._conn.commit()
+            for _mid, raw_images, raw_videos in rows:
+                for name in self._row_media_names(raw_images, raw_videos):
+                    _drop(name)
+
+        with self._lock:
+            rows = self._conn.execute('SELECT images, videos FROM messages').fetchall()
+        referenced = set()
+        for raw_images, raw_videos in rows:
+            referenced.update(self._row_media_names(raw_images, raw_videos))
+
+        try:
+            names = os.listdir(self.pic_dir)
+        except OSError:
+            names = []
+        for name in names:
+            full = os.path.join(self.pic_dir, name)
+            if not os.path.isfile(full):
+                continue
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            lower = name.lower()
+            if lower.endswith('.part') and now - st.st_mtime > 3600:
+                _drop(name)
+            elif (name not in referenced and lower.endswith(_MEDIA_EXTS)
+                  and (not cutoff or st.st_mtime < cutoff)):
+                _drop(name)
+
+        limit = self.media_max_total_mb * 1024 * 1024 if self.media_max_total_mb else 0
+        if limit:
+            entries = []
+            for name in os.listdir(self.pic_dir):
+                if not name.lower().endswith(_MEDIA_EXTS):
+                    continue
+                full = os.path.join(self.pic_dir, name)
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                entries.append((st.st_mtime, st.st_size, name))
+            total = sum(e[1] for e in entries)
+            # 先删没有消息引用的旧文件。
+            for _mtime, size, name in sorted(entries):
+                if total <= limit:
+                    break
+                if name not in referenced:
+                    _drop(name)
+                    total -= size
+            # 还超就按时间从旧到新删消息（连同其媒体）。
+            while total > limit:
+                with self._lock:
+                    row = self._conn.execute(
+                        'SELECT id, images, videos FROM messages '
+                        'ORDER BY time ASC LIMIT 1').fetchone()
+                if not row:
+                    break
+                mid, raw_images, raw_videos = row
+                with self._lock:
+                    self._conn.execute('DELETE FROM messages WHERE id = ?', (mid,))
+                    self._conn.commit()
+                for name in self._row_media_names(raw_images, raw_videos):
+                    with self._lock:
+                        still = self._conn.execute(
+                            'SELECT 1 FROM messages WHERE images LIKE ? OR videos LIKE ? '
+                            'LIMIT 1', ('%' + name + '%', '%' + name + '%')).fetchone()
+                    if still:
+                        continue
+                    full = os.path.join(self.pic_dir, name)
+                    try:
+                        size = os.path.getsize(full)
+                    except OSError:
+                        continue
+                    _drop(name)
+                    total -= size
+
+        if removed:
+            log(f'媒体清理：删除 {removed} 个文件，释放 {freed / (1024 * 1024):.1f} MB')
 
     # ------------------------------------------------------------------
     # local queries
@@ -538,9 +741,33 @@ class Relay:
                     self.send_error(404, 'Not Found')
                     return
                 ctype = mimetypes.guess_type(full)[0] or 'application/octet-stream'
-                self.send_response(200)
+                rng = parse_range(self.headers.get('Range') or '', size)
+                if rng is False:
+                    f.close()
+                    self.send_response(416)
+                    self.send_header('Content-Range', f'bytes */{size}')
+                    self.send_header('Content-Length', '0')
+                    self.send_header('Accept-Ranges', 'bytes')
+                    self._cors()
+                    self.end_headers()
+                    return
+                if rng:
+                    start, end = rng
+                    length = end - start + 1
+                    try:
+                        f.seek(start)
+                    except OSError:
+                        f.close()
+                        self.send_error(416, 'Range Not Satisfiable')
+                        return
+                    self.send_response(206)
+                    self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+                else:
+                    length = size
+                    self.send_response(200)
                 self.send_header('Content-Type', ctype)
-                self.send_header('Content-Length', str(size))
+                self.send_header('Content-Length', str(length))
+                self.send_header('Accept-Ranges', 'bytes')
                 self.send_header('Cache-Control', 'public, max-age=86400')
                 self._cors()
                 self.end_headers()
@@ -548,11 +775,13 @@ class Relay:
                     f.close()
                     return
                 try:
-                    while True:
-                        chunk = f.read(64 * 1024)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = f.read(min(64 * 1024, remaining))
                         if not chunk:
                             break
                         self.wfile.write(chunk)
+                        remaining -= len(chunk)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:

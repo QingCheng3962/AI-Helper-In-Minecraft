@@ -1,4 +1,4 @@
-# QQ 图片 / 消息接入网站（Python 版）
+# QQ 图片 / 视频 / 消息接入网站（Python 版）
 
 > 两个方案，按部署方式二选一：
 >
@@ -118,6 +118,10 @@ cp relay.example.json relay.json
   "public_base": "https://pic.qingchengsep.top",
   "data_dir": "relay_data",
   "poll_seconds": 2,
+  "media_max_mb": 100,
+  "media_min_free_mb": 200,
+  "media_keep_days": 7,
+  "media_max_total_mb": 2048,
   "web": {
     "listen_host": "127.0.0.1",
     "listen_port": 8080,
@@ -129,6 +133,15 @@ cp relay.example.json relay.json
 ```
 
 默认 `require_login: false`，**打开网页直接看，不需要密码**。
+
+媒体配置（B 端）：
+
+- `media_max_mb`：单文件上限，默认 100；超过跳过。
+- `media_min_free_mb`：磁盘剩余低于该值时暂停下载，默认 200。
+- `media_keep_days`：保留天数，默认 7；0=不按天删除。
+- `media_max_total_mb`：媒体总大小上限，默认 2048；0=不限。
+
+A 端对应 GUI「QQ 转述 → 图片/视频转本地链接」里的媒体上限/清理选项。图片/视频接口都支持 `Range`，`<video>` 可拖动进度条。
 
 如果以后要加登录：
 

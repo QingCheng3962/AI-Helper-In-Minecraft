@@ -127,6 +127,98 @@ def save_image_bytes(data: bytes, hint: str = '',
     return name
 
 
+def parse_range(header: str, size: int):
+    """Parse a single ``Range: bytes=...`` header.
+
+    Returns ``(start, end)`` (inclusive), ``None`` when there is no usable
+    Range header, or ``False`` when the range is unsatisfiable.
+    """
+    text = str(header or '').strip()
+    if not text.lower().startswith('bytes='):
+        return None
+    spec = text[6:].strip()
+    if not spec or ',' in spec:      # multi-range: serve the whole file
+        return None
+    if '-' not in spec:
+        return False
+    start_s, end_s = spec.split('-', 1)
+    try:
+        if not start_s:
+            # Suffix range: the last N bytes.
+            n = int(end_s)
+            if n <= 0 or size <= 0:
+                return False
+            start = max(0, size - n)
+            end = size - 1
+        else:
+            start = int(start_s)
+            end = int(end_s) if end_s else size - 1
+    except ValueError:
+        return False
+    if size <= 0 or start < 0 or start >= size or end < start:
+        return False
+    return start, min(end, size - 1)
+
+
+def cleanup_media_dir(directory: str, keep_days: int = 7,
+                      max_total_mb: int = 0,
+                      now: Optional[float] = None) -> tuple:
+    """Delete old media / stale temp files and enforce a total-size cap.
+
+    ``keep_days <= 0`` disables age-based deletion; ``max_total_mb <= 0``
+    disables the total-size cap. Returns ``(removed_count, freed_bytes)``.
+    """
+    now = time.time() if now is None else float(now)
+    removed = 0
+    freed = 0
+    try:
+        entries = []
+        for name in os.listdir(directory):
+            full = os.path.join(directory, name)
+            if not os.path.isfile(full):
+                continue
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            entries.append([st.st_mtime, st.st_size, full, name.lower()])
+    except OSError:
+        return 0, 0
+
+    def _drop(entry) -> None:
+        nonlocal removed, freed
+        try:
+            os.unlink(entry[2])
+            removed += 1
+            freed += entry[1]
+        except OSError:
+            pass
+
+    # Stale ``*.part`` from interrupted downloads (older than one hour).
+    for entry in list(entries):
+        if entry[3].endswith('.part') and now - entry[0] > 3600:
+            _drop(entry)
+            entries.remove(entry)
+
+    cutoff = now - max(0, int(keep_days)) * 86400 if int(keep_days) > 0 else 0
+    if cutoff:
+        for entry in list(entries):
+            if entry[3].endswith(_MEDIA_EXTS) and entry[0] < cutoff:
+                _drop(entry)
+                entries.remove(entry)
+
+    limit = max(0, int(max_total_mb)) * 1024 * 1024
+    if limit:
+        media = [e for e in entries if e[3].endswith(_MEDIA_EXTS)]
+        total = sum(e[1] for e in media)
+        for entry in sorted(media):
+            if total <= limit:
+                break
+            _drop(entry)
+            total -= entry[1]
+    return removed, freed
+
+
 class _PhotoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -217,9 +309,33 @@ class _PhotoHandler(BaseHTTPRequestHandler):
             self.send_error(404, 'Not Found')
             return
         ctype = mimetypes.guess_type(full)[0] or 'application/octet-stream'
-        self.send_response(200)
+        rng = parse_range(self.headers.get('Range') or '', size)
+        if rng is False:
+            f.close()
+            self.send_response(416)
+            self.send_header('Content-Range', f'bytes */{size}')
+            self.send_header('Content-Length', '0')
+            self.send_header('Accept-Ranges', 'bytes')
+            self._cors()
+            self.end_headers()
+            return
+        if rng:
+            start, end = rng
+            length = end - start + 1
+            try:
+                f.seek(start)
+            except OSError:
+                f.close()
+                self.send_error(416, 'Range Not Satisfiable')
+                return
+            self.send_response(206)
+            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        else:
+            length = size
+            self.send_response(200)
         self.send_header('Content-Type', ctype)
-        self.send_header('Content-Length', str(size))
+        self.send_header('Content-Length', str(length))
+        self.send_header('Accept-Ranges', 'bytes')
         self.send_header('Cache-Control', 'public, max-age=86400')
         self._cors()
         self.end_headers()
@@ -227,11 +343,13 @@ class _PhotoHandler(BaseHTTPRequestHandler):
             f.close()
             return
         try:
-            while True:
-                chunk = f.read(64 * 1024)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(64 * 1024, remaining))
                 if not chunk:
                     break
                 self.wfile.write(chunk)
+                remaining -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:

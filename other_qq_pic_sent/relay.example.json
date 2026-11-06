@@ -9,6 +9,10 @@
   "poll_seconds": 2,
   "request_timeout": 15,
   "cors_origin": "*",
+  "media_max_mb": 100,
+  "media_min_free_mb": 200,
+  "media_keep_days": 7,
+  "media_max_total_mb": 2048,
   "web": {
     "listen_host": "127.0.0.1",
     "listen_port": 8080,

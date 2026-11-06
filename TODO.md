@@ -161,13 +161,18 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 更新日志：README 只留 v0.3.3-beta；v0.3.2（中英）移入 \更新日志.md- [x] B 端默认免登录、图片地址 \/文件名\、Python relay + webapp
 - [x] 全量测试 100 项通过
 
-## 2026-11-06 v0.3.4-beta
+## 2026-11-06 v0.3.3
 
-- [x] 修复 QQ 图片转链接后正文被粘进 URL：`_attach_image_links()` 在 `[图片]` / `[视频]` 链接后自动补空格（已有空白不重复），MC 点击链接不再 404
+- [x] QQ 群内命令 `[AI]在线玩家`：直接在该群回复在线列表；兼容空格/大小写，未连服有提示；OneBot 自消息过滤，避免机器人自己的回复被再次转述
+- [x] 修复图片链接后跟 `[哭]` 等表情代码被并进 URL：链接后强制空格 + 最终 MC 文本 URL 边界处理，避免服务端 `URI.create()` 失败导致整条 system_chat 丢包
+- [x] QQ 文本颜色码/占位符防注入：`&`/`§` 中和；引擎用私有区标记真图片/真视频，群友字面量 `[图片]`/`[视频]` 不再抢链接
+- [x] 视频 Range：`photo_server.py` / `relay.py` / `webapp.py` 支持 206、`Content-Range`、`Accept-Ranges`
+- [x] 媒体大小与磁盘保护：默认单文件 100 MB、磁盘剩余低于 200 MB 暂停保存；超限/空间不足跳过并提示
+- [x] 媒体自动清理：A 端每小时最多一次，按保留天数（7 天）/ 总大小（2 GB）清理 `pic_http/` 与过期 `.part`；B 端中继同步清理旧消息与媒体
 - [x] 新增 `.mp4` 视频支持：`qq_engine.js` 收集 `video` 段（`videos` 字段）；`controller.py` 新增 `_prepare_qq_videos()`，与图片共用落盘/链接逻辑
 - [x] `photo_server.py`：识别 ISO-BMFF `ftyp` 头（`.mp4`/`.m4v`/`.mov`），保留原始文件名；消息序列化增加 `videos`
 - [x] `other_qq_pic_sent/relay.py`：同步/下载/入库视频，旧 SQLite 自动补 `videos` 列；根路径 `/文件名.mp4` 可直接访问
 - [x] Web 后台：CSP 增加 `media-src 'self'`，图片墙用 `<video controls>` 播放视频
-- [x] GUI / 配置说明同步改为「图片/视频转链接」
-- [x] 回归测试：链接空格、`.mp4` 落盘与访问、视频字段序列化、B 端 mp4 同步；Python 全量 104 项、Node 7 项通过
-- [x] 版本号升至 **v0.3.4-beta**（README / README_EN / package.json / package-lock / AGENTS）
+- [x] GUI / 配置说明同步改为「图片/视频转链接」，新增媒体上限/清理配置项
+- [x] 回归测试：链接空格、表情代码 URL 分离、`.mp4` 落盘与访问、Range、媒体上限/清理、视频字段序列化、B 端 mp4 同步、QQ 在线玩家命令
+- [x] 版本号设为 **v0.3.3**（README / README_EN / package.json / package-lock / AGENTS）

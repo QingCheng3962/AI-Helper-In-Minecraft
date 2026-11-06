@@ -7,6 +7,7 @@ import os
 import queue
 import random
 import re
+import shutil
 import socket
 import subprocess
 import threading
@@ -22,7 +23,8 @@ from .bot_engine import BotEngine, BASE_DIR, SendResult
 from .config import (AiPlayerConfig, AppConfig, BOOK_PROGRESS_FILE,
                      DEFAULT_BASE_URLS, load_auth_profile, save_json)
 from .log_saver import LogSaver
-from .photo_server import PhotoServer, save_image_bytes
+from .photo_server import (PHOTO_DIR, PhotoServer, cleanup_media_dir,
+                           save_image_bytes)
 from .qq_engine import QqEngine
 from .roster import Roster, RosterError
 
@@ -77,6 +79,38 @@ def _resolve_llm_endpoint(provider: str, base: str) -> str:
 
 
 _MC_COLOR_RE = re.compile(r'(?:&|§)[0-9a-fk-orA-FK-OR]|(?:&|§)x(?:[0-9a-fA-F](?:&|§)?){6}')
+
+# qq_engine.js 用私有区字符标记「真图片/真视频」，避免群友在正文里打
+# ``[图片]`` / ``[视频]`` 时把真正的链接“吃掉”。
+QQ_IMAGE_TOKEN = '\ue000'
+QQ_VIDEO_TOKEN = '\ue001'
+
+
+class _MediaTooLarge(Exception):
+    """媒体超过单文件大小上限（由配置决定）。"""
+
+
+def _escape_mc_codes(text: str) -> str:
+    """Neutralise Minecraft colour codes coming from QQ user text.
+
+    ``&`` is visually preserved as the full-width ``＆`` so a QQ user cannot
+    recolour / spoof the relayed chat line with ``&c`` / ``§c``.
+    """
+    return str(text or '').replace('&', '＆').replace('§', '?')
+
+
+_MC_URL_ILLEGAL_RE = re.compile(r'(https?://[^\s\[\]{}"<>\\^`|]+)(?=[\[\]{}"<>\\^`|])')
+
+
+def _separate_mc_urls(text: str) -> str:
+    """Insert a space between a URL and a following URI-illegal character.
+
+    Some servers build a click event with ``URI.create(url)``; a URL glued to a
+    QQ emoticon code such as ``x.gif[哭]`` makes ``[`` part of the URL and the
+    whole system-chat packet fails to encode. Images/emotes are the common
+    trigger, but user-typed URLs are handled here too.
+    """
+    return _MC_URL_ILLEGAL_RE.sub(r'\1 ', str(text or ''))
 
 
 def _strip_mc_codes(text: str) -> str:
@@ -184,6 +218,8 @@ class Controller:
         self._players_req_at: float = 0.0
         self._players_got_at: float = 0.0
         self._mass_running: bool = False
+        # 媒体自动清理（每小时最多跑一次）
+        self._last_media_cleanup: float = 0.0
         # 最近发过的歌：key -> (时间, 队列条目快照)。同一首歌又被点时直接复用，**不再搜一遍**
         # （链接里带的 id: 还能让 Mod 自己兜底重取）。
         self._song_recent: Dict[str, Any] = {}
@@ -1518,6 +1554,9 @@ class Controller:
 
     def _relay_qq_message(self, ev: Dict[str, Any]) -> None:
         qq = self.config.qq
+        # QQ 群内命令（如 [AI]在线玩家）只回复群，不转发到 MC / 网站。
+        if self._handle_qq_command(ev):
+            return
         # Save media once: they are needed by both the website API and the
         # in-game link relay (and must still be saved when MC is offline).
         saved_images: List[Dict[str, str]] = []
@@ -1531,8 +1570,10 @@ class Controller:
                                'message': '[QQ] 图片/视频处理失败: ' + str(e)})
         if qq.webApiEnabled:
             try:
+                display_ev = dict(ev)
+                display_ev['content'] = self._qq_display_text(ev.get('content') or '')
                 self._photo.record_qq_message(
-                    ev, [x['name'] for x in saved_images],
+                    display_ev, [x['name'] for x in saved_images],
                     [x['name'] for x in saved_videos])
             except Exception as e:  # noqa: BLE001
                 self._post_ui({'kind': 'log', 'level': 'warn',
@@ -1553,6 +1594,8 @@ class Controller:
         content = ev.get('content') or ''
         if qq.imageAsLink and (saved_images or saved_videos):
             content = self._attach_image_links(ev, content, saved_images, saved_videos)
+        # 下载失败/未开转链接时，把内部标记还原成可读占位符。
+        content = self._qq_display_text(content)
         text = self._format_qq_message(ev, content=content)
         if not text:
             return
@@ -1566,12 +1609,54 @@ class Controller:
         if len(self._qq_pending_relays) > 50:
             del self._qq_pending_relays[:len(self._qq_pending_relays) - 50]
 
+    # ------------------------------------------------------------------
+    # QQ 群内命令
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _qq_display_text(content: str) -> str:
+        """把内部媒体标记还原成网站/日志里可读的 ``[图片]`` / ``[视频]``。"""
+        return (str(content or '')
+                .replace(QQ_IMAGE_TOKEN, '[图片]')
+                .replace(QQ_VIDEO_TOKEN, '[视频]'))
+
+    def _handle_qq_command(self, ev: Dict[str, Any]) -> bool:
+        """处理 QQ 群内命令；返回 True 表示已消费（不再转发到 MC）。"""
+        content = str(ev.get('content') or '').strip()
+        # 支持 ``[AI]在线玩家`` / ``[AI] 在线玩家``（AI 不区分大小写）。
+        if not re.fullmatch(r'(?i)\[ai\]\s*在线玩家', content):
+            return False
+        group_id = str(ev.get('groupId') or '').strip()
+        if not group_id:
+            return True
+        if not self._engine.running:
+            reply = '机器人未连接游戏服务器，暂时查不到在线玩家。'
+        else:
+            players = self.refresh_player_list(wait=1.5)
+            me = (self._bot_username or '').strip().lower()
+            names = []
+            for name in players:
+                name = str(name or '').strip()
+                if not name or (me and name.lower() == me):
+                    continue
+                if name not in names:
+                    names.append(name)
+            names.sort(key=str.lower)
+            if names:
+                reply = f'在线玩家（{len(names)}）：' + '、'.join(names)
+            else:
+                reply = '当前没有其他在线玩家。'
+        self._qq.send_group(group_id, reply)
+        self._post_ui({'kind': 'log', 'level': 'qq',
+                       'message': f'[QQ] 在线玩家查询（{group_id}）：{reply}'})
+        return True
+
     def _format_qq_message(self, ev: Dict[str, Any], content: Optional[str] = None) -> str:
         cfg = self.config.qq
         template = cfg.format or '&7&o[{group}][{name}]：{message}'
-        group = _sanitize_text(ev.get('groupName') or ev.get('groupId') or '')
-        name = _sanitize_text(ev.get('sender') or '')
-        message = _sanitize_text(content if content is not None else (ev.get('content') or ''))
+        group = _escape_mc_codes(_sanitize_text(ev.get('groupName') or ev.get('groupId') or ''))
+        name = _escape_mc_codes(_sanitize_text(ev.get('sender') or ''))
+        message = _escape_mc_codes(_sanitize_text(
+            content if content is not None else (ev.get('content') or '')))
         try:
             text = template.format(group=group, name=name, message=message)
         except (KeyError, IndexError, ValueError):
@@ -1580,7 +1665,8 @@ class Controller:
         limit = max(20, int(cfg.maxLength or 220))
         if len(text) > limit:
             text = text[:limit - 1] + '…'
-        return text
+        # 防止 URL 把后面的 [哭] 之类表情代码吞进 clickEvent.open_url。
+        return _separate_mc_urls(text)
 
     # ------------------------------------------------------------------
     # QQ image -> local HTTP links
@@ -1630,6 +1716,24 @@ class Controller:
                 fallback = value
         return fallback
 
+    def _media_limits(self):
+        qq = self.config.qq
+        try:
+            max_mb = int(getattr(qq, 'mediaMaxMB', 100) or 0)
+        except (TypeError, ValueError):
+            max_mb = 100
+        try:
+            min_free_mb = int(getattr(qq, 'mediaMinFreeMB', 0) or 0)
+        except (TypeError, ValueError):
+            min_free_mb = 0
+        return max(0, max_mb) * 1024 * 1024, max(0, min_free_mb)
+
+    def _log_media(self, level: str, message: str) -> None:
+        try:
+            self._post_ui({'kind': 'log', 'level': level, 'message': message})
+        except Exception:  # noqa: BLE001
+            pass
+
     def _prepare_qq_media(self, candidates_list,
                           timeout: float = 8.0) -> List[Dict[str, str]]:
         """把一组 QQ 图片/视频候选下载到 ``pic_http/``。
@@ -1639,15 +1743,36 @@ class Controller:
         """
         saved: List[Dict[str, str]] = []
         preserve = bool(getattr(self.config.qq, 'imagePreserveName', False))
+        max_bytes, min_free_mb = self._media_limits()
+        if min_free_mb:
+            try:
+                free_mb = shutil.disk_usage(BASE_DIR).free / (1024 * 1024)
+            except OSError:
+                free_mb = float(min_free_mb)
+            if free_mb < min_free_mb:
+                now = time.time()
+                if now - getattr(self, '_media_warn_at', 0.0) > 60:
+                    self._media_warn_at = now
+                    self._log_media('warn',
+                                    f'[QQ] 磁盘剩余 {free_mb:.0f} MB，低于 {min_free_mb} MB，'
+                                    '已暂停保存图片/视频')
+                return saved
         for candidates in (candidates_list or []):
             data = None
             hint = self._image_hint(candidates)
-            for cand in (candidates or []):
-                if not isinstance(cand, dict):
-                    continue
-                data = self._fetch_image_bytes(cand, timeout=timeout)
-                if data:
-                    break
+            try:
+                for cand in (candidates or []):
+                    if not isinstance(cand, dict):
+                        continue
+                    data = self._fetch_image_bytes(cand, timeout=timeout,
+                                                   max_bytes=max_bytes)
+                    if data:
+                        break
+            except _MediaTooLarge:
+                self._log_media('warn',
+                                f'[QQ] 媒体超过单文件上限 {max_bytes // (1024 * 1024)} MB，'
+                                '已跳过')
+                continue
             if not data:
                 continue
             name = save_image_bytes(data, hint, preserve_name=preserve)
@@ -1666,7 +1791,7 @@ class Controller:
         return self._prepare_qq_media(ev.get('videos') or [], timeout=30.0)
 
     def _apply_media_links(self, content: str, saved,
-                           placeholder: str) -> str:
+                           placeholder: str, token: str = '') -> str:
         """把占位符依次替换成可点链接。
 
         链接**后面强制加一个空格**：MC 客户端按「非空白」识别 URL，若紧跟
@@ -1681,15 +1806,20 @@ class Controller:
             name = str(item.get('name') if isinstance(item, dict) else item or '')
             if name:
                 pending.append(base + '/pic_http/' + name)
+        # 新引擎用私有区标记真图片/真视频；老内容仍兼容 ``[图片]`` 占位符。
+        use_token = bool(token and token in out)
+        marker = token if use_token else placeholder
         for link in list(pending):
-            idx = out.find(placeholder)
+            idx = out.find(marker)
             if idx < 0:
                 break
-            end = idx + len(placeholder)
+            end = idx + len(marker)
             # 链接后已有空白就不重复加；否则补一个空格，防止正文被并入 URL。
             tail = '' if end >= len(out) or out[end].isspace() else ' '
             out = out[:end] + ' ' + link + tail + out[end:]
             pending.remove(link)
+        if use_token:
+            out = out.replace(token, placeholder)
         # 没有对应占位符（如纯视频消息被网关省略了 [视频]）时补到末尾。
         for link in pending:
             out = out.rstrip() + ' ' + placeholder + ' ' + link
@@ -1702,10 +1832,13 @@ class Controller:
         if saved is None and videos is None:
             saved = self._prepare_qq_images(ev)
             videos = self._prepare_qq_videos(ev)
-        out = self._apply_media_links(content, saved or [], '[图片]')
-        return self._apply_media_links(out, videos or [], '[视频]')
+        out = self._apply_media_links(content, saved or [], '[图片]',
+                                      QQ_IMAGE_TOKEN)
+        return self._apply_media_links(out, videos or [], '[视频]',
+                                       QQ_VIDEO_TOKEN)
 
-    def _fetch_image_bytes(self, cand, timeout: float = 8.0) -> Optional[bytes]:
+    def _fetch_image_bytes(self, cand, timeout: float = 8.0,
+                           max_bytes: int = 0) -> Optional[bytes]:
         if not isinstance(cand, dict):
             return None
         kind = cand.get('type')
@@ -1730,6 +1863,8 @@ class Controller:
                 p = p[1:]
             try:
                 if os.path.isfile(p):
+                    if max_bytes and os.path.getsize(p) > max_bytes:
+                        raise _MediaTooLarge(p)
                     with open(p, 'rb') as f:
                         return f.read()
             except OSError:
@@ -1739,11 +1874,30 @@ class Controller:
         if kind == 'url':
             try:
                 import httpx
-                r = httpx.get(value, timeout=timeout, follow_redirects=True,
-                              headers={'User-Agent': 'Mozilla/5.0',
-                                       'Referer': 'https://qun.qq.com/'})
-                if r.status_code == 200 and r.content:
-                    return r.content
+                headers = {'User-Agent': 'Mozilla/5.0',
+                           'Referer': 'https://qun.qq.com/'}
+                with httpx.stream('GET', value, timeout=timeout,
+                                  follow_redirects=True, headers=headers) as r:
+                    if r.status_code != 200:
+                        return None
+                    if max_bytes:
+                        cl = r.headers.get('content-length')
+                        if cl:
+                            try:
+                                if int(cl) > max_bytes:
+                                    raise _MediaTooLarge(cl)
+                            except ValueError:
+                                pass
+                    chunks = []
+                    total = 0
+                    for chunk in r.iter_bytes(64 * 1024):
+                        total += len(chunk)
+                        if max_bytes and total > max_bytes:
+                            raise _MediaTooLarge(total)
+                        chunks.append(chunk)
+                    return b''.join(chunks) if chunks else None
+            except _MediaTooLarge:
+                raise
             except Exception:  # noqa: BLE001
                 return None
         return None
@@ -2683,6 +2837,29 @@ class Controller:
                            'message': '新的一天：每日数据已重置，旧库备份到 '
                                       + str(info.get('backup') or 'db_backup/')})
 
+    def _maybe_media_cleanup(self) -> None:
+        """每小时最多一次：按保留天数 / 总大小上限清理 pic_http/。"""
+        qq = getattr(getattr(self, 'config', None), 'qq', None)
+        if qq is None:
+            return
+        if not bool(getattr(qq, 'mediaAutoClean', False)):
+            return
+        now = time.time()
+        if now - self._last_media_cleanup < 3600:
+            return
+        self._last_media_cleanup = now
+        try:
+            keep_days = int(getattr(qq, 'mediaKeepDays', 7) or 0)
+            max_total_mb = int(getattr(qq, 'mediaMaxTotalMB', 0) or 0)
+            removed, freed = cleanup_media_dir(PHOTO_DIR, keep_days, max_total_mb,
+                                               now=now)
+        except Exception:  # noqa: BLE001
+            return
+        if removed:
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': f'[QQ] 已清理旧媒体 {removed} 个，'
+                                      f'释放 {freed / (1024 * 1024):.1f} MB'})
+
     def _song_tick(self) -> None:
         """每秒调用：当前放完就播下一首；开了「立刻插播」就新歌一到马上放（打断当前这首）。"""
         with self._song_lock:
@@ -3194,6 +3371,7 @@ class Controller:
                 self._maybe_auto_lobby()
                 self._maybe_online_check()
                 self._maybe_daily_rotate()
+                self._maybe_media_cleanup()
                 try:
                     self._song_tick()
                 except Exception:  # noqa: BLE001
