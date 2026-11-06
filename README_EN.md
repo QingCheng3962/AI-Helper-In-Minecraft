@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.3-beta** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.4-beta** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -32,7 +32,14 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ## Changelog
 
 > All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.2 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
-> Current version: **`v0.3.3-beta`**; the client mod stays at `0.1.0` (jar names unchanged).
+> Current version: **`v0.3.4-beta`**; the client mod stays at `0.1.0` (jar names unchanged).
+
+### v0.3.4-beta
+
+- **Fix links glued to following text**: `[图片] link` (and `[视频] link`) now always gets a trailing space (existing whitespace is not duplicated), so subsequent Chinese/English text is no longer absorbed into the clickable URL (which previously led to a 404).
+- **Added `.mp4` video support**: QQ videos (`.mp4` / `.m4v` / `.mov`) are downloaded to `pic_http/` like images, relayed to MC chat as `[视频] link`, and returned by the website API in a new `videos` field (rendered with `<video>`); original video filenames are preserved when that option is on.
+- **Relay syncs videos**: `other_qq_pic_sent/relay.py` downloads/stores/serves videos, upgrades old SQLite databases with a `videos` column, and serves `/filename.mp4` on the root path; the web app CSP now allows `media-src 'self'`.
+- Regression tests added for link spacing, `.mp4` save/serve, video serialization and relay mp4 sync.
 
 ### v0.3.3-beta
 

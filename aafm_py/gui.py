@@ -1783,7 +1783,8 @@ class AiPlayerGUI:
         ttk.Entry(r, textvariable=self.var_qq_format).pack(
             side='left', fill='x', expand=True, padx=(4, 8))
         ttk.Label(r, text='{group} {name} {message}', foreground='#888888').pack(side='left')
-        ttk.Label(q2m, text='图片/表情等非文本以 [图片]/[表情] 占位；勾选「图片转本地链接」后图片会变成链接。',
+        ttk.Label(q2m, text='图片/表情/视频等非文本以 [图片]/[表情]/[视频] 占位；'
+                            '勾选「图片/视频转本地链接」后图片和 .mp4 视频会变成链接。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
 
         m2q = ttk.LabelFrame(relay, text='MC → QQ：公屏消息以触发词开头即发送到群', padding=6)
@@ -1835,8 +1836,8 @@ class AiPlayerGUI:
         ttk.Label(sec, text='连接因疑似风控被关闭、或在线检测连续失败时，会告警并停止自动重连，避免反复登录加重风控；恢复后点「重连」。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
 
-        # ============ 模块 4：图片转本地链接 ============
-        img = ttk.LabelFrame(parent, text='图片转本地链接（Python HTTP 服务，仅暴露 /pic_http/）', padding=6)
+        # ============ 模块 4：图片/视频转本地链接 ============
+        img = ttk.LabelFrame(parent, text='图片/视频转本地链接（Python HTTP 服务，仅暴露 /pic_http/）', padding=6)
         img.pack(fill='x', pady=(8, 0))
         self.var_qq_image_link = tk.BooleanVar(value=False)
         self.var_qq_img_host = tk.StringVar()
@@ -1848,7 +1849,7 @@ class AiPlayerGUI:
         self.var_qq_img_preserve = tk.BooleanVar(value=False)
         r = ttk.Frame(img)
         r.pack(fill='x', pady=2)
-        ttk.Checkbutton(r, text='图片转链接', variable=self.var_qq_image_link).pack(side='left')
+        ttk.Checkbutton(r, text='图片/视频转链接', variable=self.var_qq_image_link).pack(side='left')
         ttk.Label(r, text='监听地址').pack(side='left', padx=(12, 4))
         ttk.Combobox(r, textvariable=self.var_qq_img_host, width=12,
                      values=('127.0.0.1', '0.0.0.0')).pack(side='left')
@@ -1868,7 +1869,7 @@ class AiPlayerGUI:
                   foreground='#888888').pack(side='left', padx=(10, 0))
         r3 = ttk.Frame(img)
         r3.pack(fill='x', pady=(2, 2))
-        ttk.Checkbutton(r3, text='保留 QQ 图片原始文件名（重复自动加 _2/_3）',
+        ttk.Checkbutton(r3, text='保留 QQ 图片/视频原始文件名（重复自动加 _2/_3）',
                         variable=self.var_qq_img_preserve).pack(side='left')
         r4 = ttk.Frame(img)
         r4.pack(fill='x', pady=(2, 2))

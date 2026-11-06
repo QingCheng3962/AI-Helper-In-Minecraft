@@ -77,14 +77,19 @@ def _bytes_request(url: str, token: str = '', timeout: float = 30.0) -> bytes:
         return resp.read()
 
 
-def _fingerprint(msg: Dict[str, Any], names: List[str]) -> str:
-    raw = json.dumps([
+def _fingerprint(msg: Dict[str, Any], names: List[str],
+                 video_names: Optional[List[str]] = None) -> str:
+    payload = [
         str(msg.get('group_id') or ''),
         str(msg.get('sender') or ''),
         float(msg.get('time') or 0),
         str(msg.get('text') or ''),
         names,
-    ], ensure_ascii=False, sort_keys=True)
+    ]
+    # 只在有视频时追加，保持老版本已入库消息的指纹不变（避免升级后重复入库）。
+    if video_names:
+        payload.append(video_names)
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(raw.encode('utf-8')).hexdigest()
 
 
@@ -97,9 +102,15 @@ def _safe_name(name: str) -> str:
     return name
 
 
-def re_image_name(name: str) -> bool:
+def re_media_name(name: str) -> bool:
+    """允许通过根路径 ``/文件名`` 访问的媒体扩展名（图片 + mp4 视频）。"""
     return str(name or '').lower().endswith(
-        ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'))
+        ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
+         '.mp4', '.m4v', '.mov'))
+
+
+# 兼容旧调用名
+re_image_name = re_media_name
 
 
 class Relay:
@@ -152,7 +163,8 @@ class Relay:
                     group_name  TEXT,
                     sender      TEXT,
                     text        TEXT,
-                    images      TEXT
+                    images      TEXT,
+                    videos      TEXT
                 );
                 CREATE TABLE IF NOT EXISTS meta (
                     key   TEXT PRIMARY KEY,
@@ -160,6 +172,11 @@ class Relay:
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(time);
             ''')
+            # 旧库升级：补上 videos 列（2026-11 新增 .mp4 支持）。
+            cols = {row[1] for row in
+                    self._conn.execute('PRAGMA table_info(messages)').fetchall()}
+            if 'videos' not in cols:
+                self._conn.execute('ALTER TABLE messages ADD COLUMN videos TEXT')
             self._conn.commit()
 
     def _meta_int(self, key: str, default: int = 0) -> int:
@@ -189,10 +206,13 @@ class Relay:
         if os.path.isfile(full) and os.path.getsize(full) > 0:
             return True
         src = url if re_url(url) else self.upstream_base + url
+        # 视频文件通常更大，给更长的下载超时。
+        is_video = name.lower().endswith(('.mp4', '.m4v', '.mov'))
+        timeout = self.request_timeout * (6 if is_video else 2)
         try:
-            data = _bytes_request(src, self.upstream_token, self.request_timeout * 2)
+            data = _bytes_request(src, self.upstream_token, timeout)
         except Exception as e:  # noqa: BLE001
-            log(f'图片下载失败 {name}: {e}')
+            log(f'媒体下载失败 {name}: {e}')
             return False
         if not data:
             return False
@@ -203,7 +223,7 @@ class Relay:
             os.replace(tmp, full)
             return True
         except OSError as e:
-            log(f'图片保存失败 {name}: {e}')
+            log(f'媒体保存失败 {name}: {e}')
             try:
                 os.unlink(tmp)
             except OSError:
@@ -241,25 +261,35 @@ class Relay:
                     continue
                 url = str(img.get('url') or ('/pic_http/' + name))
                 images_json.append({'name': name, 'url': url})
+            videos_json: List[Dict[str, str]] = []
+            for vid in msg.get('videos') or []:
+                name = _safe_name(str(vid.get('name') or ''))
+                if not name:
+                    continue
+                url = str(vid.get('url') or ('/pic_http/' + name))
+                videos_json.append({'name': name, 'url': url})
             names = [x['name'] for x in images_json]
-            fp = _fingerprint(msg, names)
+            video_names = [x['name'] for x in videos_json]
+            fp = _fingerprint(msg, names, video_names)
             with self._lock:
                 cur = self._conn.execute(
                     'INSERT OR IGNORE INTO messages'
-                    '(fingerprint, upstream_id, time, group_id, group_name, sender, text, images) '
-                    'VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
+                    '(fingerprint, upstream_id, time, group_id, group_name, sender, '
+                    'text, images, videos) '
+                    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (fp, int(msg.get('id') or 0), float(msg.get('time') or time.time()),
                      str(msg.get('group_id') or ''), str(msg.get('group_name') or ''),
                      str(msg.get('sender') or ''), str(msg.get('text') or ''),
-                     json.dumps(images_json, ensure_ascii=False)))
+                     json.dumps(images_json, ensure_ascii=False),
+                     json.dumps(videos_json, ensure_ascii=False)))
                 if cur.rowcount:
                     inserted += 1
                 self._conn.commit()
-            for img in images_json:
-                self._download_image(img['name'], img['url'])
+            for item in images_json + videos_json:
+                self._download_image(item['name'], item['url'])
             max_seen = max(max_seen, int(msg.get('id') or 0))
 
-        # 重试最近 100 条里缺失的图片
+        # 重试最近 100 条里缺失的媒体
         self._retry_missing_images(100)
 
         self._upstream_since = max(max_seen, last_id)
@@ -272,16 +302,18 @@ class Relay:
     def _retry_missing_images(self, limit: int) -> None:
         with self._lock:
             rows = self._conn.execute(
-                'SELECT images FROM messages ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
-        for (raw,) in rows:
-            try:
-                images = json.loads(raw or '[]')
-            except ValueError:
-                continue
-            for img in images:
-                name = _safe_name(str(img.get('name') or ''))
-                if name and not os.path.isfile(os.path.join(self.pic_dir, name)):
-                    self._download_image(name, str(img.get('url') or ''))
+                'SELECT images, videos FROM messages ORDER BY id DESC LIMIT ?',
+                (limit,)).fetchall()
+        for raw_images, raw_videos in rows:
+            for raw in (raw_images, raw_videos):
+                try:
+                    items = json.loads(raw or '[]')
+                except ValueError:
+                    continue
+                for item in items:
+                    name = _safe_name(str(item.get('name') or ''))
+                    if name and not os.path.isfile(os.path.join(self.pic_dir, name)):
+                        self._download_image(name, str(item.get('url') or ''))
 
     # ------------------------------------------------------------------
     # local queries
@@ -292,11 +324,16 @@ class Relay:
         return (self.public_base + rel) if self.public_base else rel
 
     def _serialize(self, row: Tuple) -> Dict[str, Any]:
-        (mid, _fp, _uid, ts, gid, gname, sender, text, raw_images) = row
+        (mid, _fp, _uid, ts, gid, gname, sender, text, raw_images,
+         raw_videos) = row
         try:
             images = json.loads(raw_images or '[]')
         except ValueError:
             images = []
+        try:
+            videos = json.loads(raw_videos or '[]')
+        except ValueError:
+            videos = []
         out_images = []
         for img in images:
             name = str(img.get('name') or '')
@@ -305,18 +342,27 @@ class Relay:
                 'url': '/' + name,
                 'abs_url': self._public_url(name),
             })
+        out_videos = []
+        for vid in videos:
+            name = str(vid.get('name') or '')
+            out_videos.append({
+                'name': name,
+                'url': '/' + name,
+                'abs_url': self._public_url(name),
+            })
         return {
             'id': int(mid), 'time': float(ts or 0),
             'group_id': gid or '', 'group_name': gname or '',
             'sender': sender or '', 'text': text or '',
-            'images': out_images,
+            'images': out_images, 'videos': out_videos,
         }
 
     def messages_since(self, since: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
                 'SELECT id, fingerprint, upstream_id, time, group_id, group_name, '
-                'sender, text, images FROM messages WHERE id > ? ORDER BY id LIMIT ?',
+                'sender, text, images, videos FROM messages WHERE id > ? '
+                'ORDER BY id LIMIT ?',
                 (int(since), max(1, int(limit)))).fetchall()
         return [self._serialize(r) for r in rows]
 
@@ -324,7 +370,8 @@ class Relay:
         with self._lock:
             rows = self._conn.execute(
                 'SELECT id, fingerprint, upstream_id, time, group_id, group_name, '
-                'sender, text, images FROM messages ORDER BY id DESC LIMIT 200').fetchall()
+                'sender, text, images, videos FROM messages ORDER BY id DESC LIMIT 200'
+            ).fetchall()
         out: List[Dict[str, Any]] = []
         for row in rows:
             for img in self._serialize(row)['images']:

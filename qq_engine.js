@@ -314,7 +314,7 @@ function cand(type, value) {
     return value ? { type, value: String(value) } : null;
 }
 
-async function resolveImage(data) {
+async function resolveImage(data, isVideo) {
     if (!data) return [];
     const list = [];
     const push = (c) => { if (c) list.push(c); };
@@ -329,7 +329,8 @@ async function resolveImage(data) {
 
     const fileParam = data.file || data.file_id;
     if (fileParam) {
-        const res = await actionAsync('get_image', { file: fileParam }, 4000);
+        // 视频用 get_file（get_image 只对图片有效）。
+        const res = await actionAsync(isVideo ? 'get_file' : 'get_image', { file: fileParam }, 4000);
         const d = res && res.data;
         if (d) {
             if (d.file) list.unshift(cand('path', d.file));
@@ -339,12 +340,12 @@ async function resolveImage(data) {
     return list;
 }
 
-async function collectImages(message) {
+async function collectMedia(message, types) {
     const out = [];
     if (!Array.isArray(message)) return out;
     for (const seg of message) {
-        if (!seg || (seg.type !== 'image' && seg.type !== 'flash')) continue;
-        out.push(await resolveImage(seg.data || {}));
+        if (!seg || !types.includes(seg.type)) continue;
+        out.push(await resolveImage(seg.data || {}, seg.type === 'video'));
     }
     return out;
 }
@@ -403,17 +404,24 @@ async function handleObj(obj) {
     }
 
     const message = obj.message != null ? obj.message : obj.raw_message;
-    // Resolve images first: a pure-image message has no text, but it still
-    // must reach the website API / MC relay as "[图片]" (not be dropped).
+    // Resolve media first: a pure-image/video message has no text, but it still
+    // must reach the website API / MC relay as "[图片]" / "[视频]" (not be dropped).
     let images = [];
+    let videos = [];
     if (Array.isArray(message) && (config.imageAsLink || config.collectImages)) {
         try {
-            images = await collectImages(message);
+            images = await collectMedia(message, ['image', 'flash']);
         } catch (e) {
             images = [];
         }
+        try {
+            videos = await collectMedia(message, ['video']);
+        } catch (e) {
+            videos = [];
+        }
     }
-    const content = extractText(message) || (images.length ? '[图片]' : '');
+    const content = extractText(message)
+        || (images.length ? '[图片]' : (videos.length ? '[视频]' : ''));
     if (!content) {
         log('info', `群 ${groupId} 的消息没有可转述的文本内容（卡片/文件等），已跳过。`);
         return;
@@ -426,6 +434,7 @@ async function handleObj(obj) {
         sender: sanitizeText(senderName(obj)),
         content,
         images,
+        videos,
         raw: sanitizeText(obj.raw_message || '')
     });
 }

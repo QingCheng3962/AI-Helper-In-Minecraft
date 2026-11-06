@@ -80,6 +80,15 @@ main {
   background: #0b0d10;
 }
 
+.message video {
+  display: block;
+  max-width: min(100%, 480px);
+  max-height: 360px;
+  border-radius: 8px;
+  margin: 6px 0;
+  background: #0b0d10;
+}
+
 .empty { text-align: center; padding: 40px 0; }
 
 .login-page {

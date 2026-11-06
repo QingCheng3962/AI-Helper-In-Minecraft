@@ -490,9 +490,9 @@ class QqConfig:
     groups: List[str] = field(default_factory=list)
     format: str = '&7&o[{group}][{name}]：{message}'
     maxLength: int = 220
-    # When on, QQ images are downloaded, saved into the local ``pic_http/``
-    # folder, and relayed as a link served by the built-in Python HTTP server
-    # (only the ``/pic_http/`` path is exposed).
+    # When on, QQ images and videos (.mp4) are downloaded, saved into the local
+    # ``pic_http/`` folder, and relayed as a link served by the built-in Python
+    # HTTP server (only the ``/pic_http/`` path is exposed).
     imageAsLink: bool = False
     imageHttpHost: str = '0.0.0.0'
     imageHttpPort: int = 8765
