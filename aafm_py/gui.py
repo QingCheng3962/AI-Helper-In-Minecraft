@@ -1765,6 +1765,7 @@ class AiPlayerGUI:
         q2m.pack(fill='x')
         self.var_qq_groups = tk.StringVar()
         self.var_qq_format = tk.StringVar()
+        self.var_qq_tool_trigger = tk.StringVar()
         self.var_qq_to_mc = tk.BooleanVar(value=True)
         r = ttk.Frame(q2m)
         r.pack(fill='x', pady=2)
@@ -1786,6 +1787,14 @@ class AiPlayerGUI:
         ttk.Label(q2m, text='图片/表情/视频等非文本以 [图片]/[表情]/[视频] 占位；'
                             '勾选「图片/视频转本地链接」后图片和 .mp4 视频会变成链接。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
+        r_tool = ttk.Frame(q2m)
+        r_tool.pack(fill='x', pady=(4, 0))
+        ttk.Label(r_tool, text='群内工具提示词').pack(side='left')
+        ttk.Entry(r_tool, textvariable=self.var_qq_tool_trigger,
+                  width=18).pack(side='left', padx=(4, 8))
+        ttk.Label(r_tool, text='例：[AI工具]在线玩家 / [AI工具]视频 / [AI工具]音乐 歌名；'
+                               '与 AI 对话的提示词分开，避免冲突。',
+                  foreground='#888888').pack(side='left')
 
         m2q = ttk.LabelFrame(relay, text='MC → QQ：公屏消息以触发词开头即发送到群', padding=6)
         m2q.pack(fill='x', pady=(8, 0))
@@ -2353,6 +2362,7 @@ class AiPlayerGUI:
         self.var_qq_to_mc.set(bool(cfg.qq.qqToMcEnabled))
         self.var_qq_groups.set(', '.join(cfg.qq.groups or []))
         self.var_qq_format.set(cfg.qq.format or '')
+        self.var_qq_tool_trigger.set(getattr(cfg.qq, 'toolTrigger', '[AI工具]') or '[AI工具]')
         self.var_qq_image_link.set(bool(cfg.qq.imageAsLink))
         self.var_qq_img_host.set(cfg.qq.imageHttpHost or '0.0.0.0')
         self.var_qq_img_port.set(str(cfg.qq.imageHttpPort))
@@ -2712,6 +2722,7 @@ class AiPlayerGUI:
         qq.napcat.autoConfigNewAccounts = self.var_qq_autoconfig.get()
         qq.groups = [x for x in re.split(r'[,，;\s]+', self.var_qq_groups.get()) if x]
         qq.format = self.var_qq_format.get().strip() or '&7&o[{group}][{name}]：{message}'
+        qq.toolTrigger = self.var_qq_tool_trigger.get().strip() or '[AI工具]'
         qq.imageAsLink = self.var_qq_image_link.get()
         qq.imageHttpHost = (self.var_qq_img_host.get() or '0.0.0.0').strip()
         qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8765)

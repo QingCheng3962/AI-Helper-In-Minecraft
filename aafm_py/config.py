@@ -490,6 +490,9 @@ class QqConfig:
     groups: List[str] = field(default_factory=list)
     format: str = '&7&o[{group}][{name}]：{message}'
     maxLength: int = 220
+    # QQ 群内工具命令前缀（在线玩家 / 视频 / 音乐），默认与 AI 对话的提示词
+    # （如 ``[AI]``）分开，避免工具命令被当成聊天触发。
+    toolTrigger: str = '[AI工具]'
     # When on, QQ images and videos (.mp4) are downloaded, saved into the local
     # ``pic_http/`` folder, and relayed as a link served by the built-in Python
     # HTTP server (only the ``/pic_http/`` path is exposed).
@@ -566,6 +569,9 @@ class QqConfig:
         if not self.format:
             self.format = '&7&o[{group}][{name}]：{message}'
         self.maxLength = _clamp_int(self.maxLength, 20, 256)
+        self.toolTrigger = str(self.toolTrigger or '').strip()[:40] or '[AI工具]'
+        if '\n' in self.toolTrigger or '\r' in self.toolTrigger:
+            self.toolTrigger = '[AI工具]'
         if self.groups is None:
             self.groups = []
         norm = []

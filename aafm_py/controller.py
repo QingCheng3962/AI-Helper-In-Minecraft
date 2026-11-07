@@ -1619,36 +1619,177 @@ class Controller:
                 .replace(QQ_IMAGE_TOKEN, '[图片]')
                 .replace(QQ_VIDEO_TOKEN, '[视频]'))
 
+    def _qq_tool_trigger(self) -> str:
+        trigger = str(getattr(self.config.qq, 'toolTrigger', '') or '').strip()
+        return trigger or '[AI工具]'
+
+    def _qq_online_reply(self) -> str:
+        if not self._engine.running:
+            return '机器人未连接游戏服务器，暂时查不到在线玩家。'
+        players = self.refresh_player_list(wait=1.5)
+        me = (self._bot_username or '').strip().lower()
+        names = []
+        for name in players:
+            name = str(name or '').strip()
+            if not name or (me and name.lower() == me):
+                continue
+            if name not in names:
+                names.append(name)
+        names.sort(key=str.lower)
+        if names:
+            return f'在线玩家（{len(names)}）：' + '、'.join(names)
+        return '当前没有其他在线玩家。'
+
+    def _qq_usage(self) -> str:
+        t = self._qq_tool_trigger()
+        return ('群内工具命令：\n'
+                f'{t}在线玩家\n'
+                f'{t}视频\n'
+                f'{t}音乐 歌名')
+
+    def _qq_send_text(self, group_id: str, text: str, limit: int = 1500) -> None:
+        """把长文本按行/长度切成几条 QQ 消息发出去。"""
+        text = str(text or '').strip()
+        if not text:
+            return
+        while text:
+            if len(text) <= limit:
+                chunk, text = text, ''
+            else:
+                cut = text.rfind('\n', 0, limit)
+                if cut < limit // 3:
+                    cut = limit
+                chunk, text = text[:cut], text[cut:].lstrip('\n')
+            if not self._qq.send_group(group_id, chunk):
+                self._post_ui({'kind': 'log', 'level': 'warn',
+                               'message': '[QQ] 工具命令回复失败（QQ 未连接？）'})
+                return
+            if text:
+                time.sleep(0.3)
+
     def _handle_qq_command(self, ev: Dict[str, Any]) -> bool:
-        """处理 QQ 群内命令；返回 True 表示已消费（不再转发到 MC）。"""
+        """处理 QQ 群内工具命令；返回 True 表示已消费（不再转发到 MC）。"""
+        trigger = self._qq_tool_trigger()
         content = str(ev.get('content') or '').strip()
-        # 支持 ``[AI]在线玩家`` / ``[AI] 在线玩家``（AI 不区分大小写）。
-        if not re.fullmatch(r'(?i)\[ai\]\s*在线玩家', content):
+        m = re.match(r'^' + re.escape(trigger) + r'\s*(.*)$', content,
+                     re.IGNORECASE | re.DOTALL)
+        if not m:
             return False
         group_id = str(ev.get('groupId') or '').strip()
+        rest = m.group(1).strip()
+        sender = str(ev.get('sender') or '').strip()
+        low = rest.lower()
+        # 任何以工具前缀开头的消息都消费掉，避免落到 MC 里触发 AI 对话。
         if not group_id:
             return True
-        if not self._engine.running:
-            reply = '机器人未连接游戏服务器，暂时查不到在线玩家。'
-        else:
-            players = self.refresh_player_list(wait=1.5)
-            me = (self._bot_username or '').strip().lower()
-            names = []
-            for name in players:
-                name = str(name or '').strip()
-                if not name or (me and name.lower() == me):
-                    continue
-                if name not in names:
-                    names.append(name)
-            names.sort(key=str.lower)
-            if names:
-                reply = f'在线玩家（{len(names)}）：' + '、'.join(names)
-            else:
-                reply = '当前没有其他在线玩家。'
-        self._qq.send_group(group_id, reply)
-        self._post_ui({'kind': 'log', 'level': 'qq',
-                       'message': f'[QQ] 在线玩家查询（{group_id}）：{reply}'})
+        if not rest or low in ('帮助', 'help', '?', '？', '用法', '说明'):
+            self._qq_send_text(group_id, self._qq_usage())
+            return True
+        if (low in ('在线玩家', '在线人数', '玩家', '在线', '谁在线', 'players', 'list')
+                or low.startswith('在线玩家')):
+            reply = self._qq_online_reply()
+            self._qq_send_text(group_id, reply)
+            self._post_ui({'kind': 'log', 'level': 'qq',
+                           'message': f'[QQ] 在线玩家查询（{group_id}）：{reply}'})
+            return True
+        if (low in ('视频', '视频推荐', '推荐视频', 'b站', 'bilibili', '看看视频', '追番')
+                or low.startswith('视频')):
+            self._qq_video_request(group_id, sender)
+            return True
+        for word in ('音乐', '点歌', 'music', 'song', '搜歌'):
+            if low == word or low.startswith(word):
+                query = rest[len(word):].strip(' ：:，,、')
+                if not query:
+                    self._qq_send_text(group_id, f'用法：{trigger}音乐 歌名')
+                else:
+                    threading.Thread(target=self._qq_music_worker,
+                                     args=(group_id, query), daemon=True).start()
+                return True
+        self._qq_send_text(group_id, '不认识的工具命令。\n' + self._qq_usage())
         return True
+
+    def _qq_video_request(self, group_id: str, sender: str) -> None:
+        cfg = self._misc()
+        if not cfg.videoEnabled:
+            self._qq_send_text(group_id, '【视频推荐】这个功能没开（服主可在「杂项」页打开）')
+            return
+        if (cfg.videoSource or '') == 'fav' and not (cfg.biliCookie or '').strip():
+            self._qq_send_text(group_id, '【视频推荐】现在是「我的收藏夹」来源，'
+                                         '但还没配 B 站 Cookie，暂时用不了。')
+            return
+        now = time.time()
+        cool = float(cfg.videoCooldownSeconds)
+        last = self._video_last_at
+        if last and now - last < cool:
+            wait = int(cool - (now - last)) + 1
+            text = _strip_mc_codes(cfg.videoCoolText)
+            text = text.replace('{wait}', str(wait)).replace('{player}', sender)
+            self._qq_send_text(group_id, text or f'视频推荐冷却中，请 {wait} 秒后再试。')
+            return
+        self._video_last_at = now
+        threading.Thread(target=self._qq_video_worker,
+                         args=(group_id, sender), daemon=True).start()
+
+    def _qq_video_worker(self, group_id: str, sender: str) -> None:
+        from . import bilibili
+        cfg = self._misc()
+        source = cfg.videoSource or 'anime'
+        seen_key = source if source != 'fav' else 'fav:%d' % int(cfg.biliFavMediaId or 0)
+        count = int(cfg.videoCount or 5)
+        seen: Dict[str, List[str]] = getattr(self, '_video_seen', None) or {}
+        self._video_seen = seen
+        used = list(seen.get(seen_key) or [])
+        try:
+            items, why = bilibili.recommend_ex(source, count, exclude=used,
+                                               cookie=cfg.biliCookie,
+                                               media_id=cfg.biliFavMediaId)
+        except Exception as e:  # noqa: BLE001
+            items, why = [], f'{type(e).__name__}: {e}'
+        if not items:
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': f'[视频推荐] QQ 抓取失败（{cfg.source_name()}）：{why}'})
+            text = _strip_mc_codes(cfg.videoFailText).replace('{player}', sender)
+            self._qq_send_text(group_id, text or '视频推荐暂时抓取失败，请稍后再试。')
+            return
+        seen[seen_key] = (used + [str(x.get('id')) for x in items])[-60:]
+        lines = [f'【视频推荐】{cfg.source_name()}（{len(items)} 条）']
+        for i, it in enumerate(items, 1):
+            title = str(it.get('title') or '').strip()
+            owner = str(it.get('owner') or '').strip()
+            link = str(it.get('link') or '').strip()
+            line = f'{i}. {title}'
+            if owner:
+                line += f' - {owner}'
+            if link:
+                line += f'\n{link}'
+            lines.append(line)
+        self._qq_send_text(group_id, '\n'.join(lines))
+        self._post_ui({'kind': 'log', 'level': 'qq',
+                       'message': f'[视频推荐] QQ 群 {group_id} 推了 {len(items)} 条'
+                                  f'（{cfg.source_name()}，{sender} 点的）'})
+
+    def _qq_music_worker(self, group_id: str, query: str) -> None:
+        from . import netease
+        try:
+            song = netease.resolve(query, self.config.song.neteaseCookie)
+        except Exception as e:  # noqa: BLE001
+            self._qq_send_text(group_id, f'【音乐】搜索失败：{e}')
+            return
+        if not song:
+            self._qq_send_text(group_id, f'【音乐】没找到「{query}」')
+            return
+        title = str(song.get('title') or query).strip()
+        artists = ' / '.join(str(x) for x in (song.get('artists') or []) if x)
+        text = f'【音乐】{title}' + (f' - {artists}' if artists else '')
+        song_id = str(song.get('id') or '').strip()
+        if song_id:
+            text += f'\nhttps://music.163.com/song?id={song_id}'
+        note = str(song.get('note') or '').strip()
+        if note and not song.get('url'):
+            text += f'\n{note}'
+        self._qq_send_text(group_id, text)
+        self._post_ui({'kind': 'log', 'level': 'qq',
+                       'message': f'[音乐] QQ 群 {group_id} 搜索「{query}」→ {title}'})
 
     def _format_qq_message(self, ev: Dict[str, Any], content: Optional[str] = None) -> str:
         cfg = self.config.qq
