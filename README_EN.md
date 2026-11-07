@@ -36,7 +36,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.3
 
-- **QQ group command `[AI]在线玩家`**: reply with the online player list in the same group (also accepts `[AI] 在线玩家`, case-insensitive); reports when the bot is not connected. The bot's own replies are not relayed back.
+- **QQ group tool commands**: `[AI工具]在线玩家` lists online players, `[AI工具]视频` recommends Bilibili videos, and `[AI工具]音乐 <name>` returns a NetEase Cloud Music link. The prefix is configurable in the GUI (`qq.toolTrigger`, default `[AI工具]`) and is separate from the AI chat trigger to avoid conflicts; the old `[AI]在线玩家` is no longer treated as a tool command.
 - **Fixed emoticon codes being swallowed by media URLs**: a space is always inserted after `[图片]`/`[视频]` links, and the final MC text gets a URL-boundary pass so `...gif[哭]` cannot break the server's `URI.create()` / system-chat packet (thanks to [@FurryAoao](https://github.com/FurryAoao) for [#38](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/38)).
 - **QQ text can no longer spoof colour codes or media placeholders**: `&c` / `§c` are neutralised; literal `[图片]`/`[视频]` in user text no longer consumes real media links (private-use markers in the engine).
 - **Range support** for media: A/B/Web servers return `206` / `Content-Range` / `Accept-Ranges`, so `<video>` seeking works and iOS/Safari is happier.
