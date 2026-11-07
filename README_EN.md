@@ -44,6 +44,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Automatic cleanup**: `pic_http/` is cleaned at most hourly by keep-days (default 7) and total-size cap (default 2 GB, 0 = unlimited), including stale `.part` files; the B relay also prunes old messages/media.
 - **`.mp4` video support**: QQ videos (`.mp4` / `.m4v` / `.mov`) are downloaded like images, relayed as `[视频] link`, returned in the website API's `videos` field, and played with `<video>`; original video names are preserved when enabled.
 - **Relay syncs videos**: `other_qq_pic_sent/relay.py` downloads/stores/serves videos, upgrades old SQLite databases with a `videos` column, and serves `/filename.mp4`; the web app CSP allows `media-src 'self'`.
+- **Minecraft chat receipt printer**: a new toggle in **Misc** prints player chat / server messages / the bot's own lines to a Windows thermal receipt printer (ESC/POS + GBK). One chat line per ticket, queued in the background so MC is never blocked; 58/80mm, per-minute cap, skip `/` commands, preview-only mode. Config keys: `misc.mcChatPrint*`.
 - Regression tests added for link spacing, emoticon/URL separation, `.mp4` save/serve, Range, media limits/cleanup, video serialization, relay mp4 sync and the online-player command.
 
 ### v0.3.3-beta

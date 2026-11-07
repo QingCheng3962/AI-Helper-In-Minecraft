@@ -1052,6 +1052,124 @@ class AiPlayerGUI:
                              '建议 0.3～1 秒。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=4)
 
+        # ---------------- Minecraft 聊天小票机 ----------------
+        rp = ttk.LabelFrame(
+            sc.inner, text='Minecraft 聊天小票机（Windows 热敏打印机 / ESC-POS）', padding=8)
+        rp.pack(fill='x', pady=(8, 0))
+        self.var_misc_mcprint_enabled = tk.BooleanVar(value=False)
+        self.var_misc_mcprint_printer = tk.StringVar()
+        self.var_misc_mcprint_width = tk.StringVar(value='58')
+        self.var_misc_mcprint_body_lines = tk.StringVar(value='10')
+        self.var_misc_mcprint_server = tk.BooleanVar(value=True)
+        self.var_misc_mcprint_bot = tk.BooleanVar(value=True)
+        self.var_misc_mcprint_actionbar = tk.BooleanVar(value=False)
+        self.var_misc_mcprint_ignore_cmd = tk.BooleanVar(value=True)
+        self.var_misc_mcprint_dryrun = tk.BooleanVar(value=False)
+        self.var_misc_mcprint_max = tk.StringVar(value='20')
+        self.var_misc_mcprint_status = tk.StringVar(value='未选择打印机')
+
+        r1 = ttk.Frame(rp)
+        r1.pack(fill='x', pady=2)
+        ttk.Checkbutton(r1, text='打印 MC 聊天到小票机',
+                        variable=self.var_misc_mcprint_enabled).pack(side='left')
+        ttk.Label(r1, text='打印机').pack(side='left', padx=(12, 4))
+        self.cmb_mcprint_printer = ttk.Combobox(
+            r1, textvariable=self.var_misc_mcprint_printer, width=28)
+        self.cmb_mcprint_printer.pack(side='left')
+        ttk.Button(r1, text='刷新', command=self._on_mcprint_refresh).pack(
+            side='left', padx=(6, 0))
+
+        r2 = ttk.Frame(rp)
+        r2.pack(fill='x', pady=2)
+        ttk.Label(r2, text='纸宽').pack(side='left')
+        ttk.Combobox(r2, textvariable=self.var_misc_mcprint_width, width=5,
+                     values=('58', '80'), state='readonly').pack(side='left', padx=(4, 12))
+        ttk.Label(r2, text='正文最多行').pack(side='left')
+        ttk.Entry(r2, textvariable=self.var_misc_mcprint_body_lines,
+                  width=5).pack(side='left', padx=(4, 12))
+        ttk.Label(r2, text='每分钟最多').pack(side='left')
+        ttk.Entry(r2, textvariable=self.var_misc_mcprint_max,
+                  width=5).pack(side='left', padx=(4, 12))
+        ttk.Checkbutton(r2, text='只看预览（不真打印）',
+                        variable=self.var_misc_mcprint_dryrun).pack(side='left')
+
+        r3 = ttk.Frame(rp)
+        r3.pack(fill='x', pady=2)
+        ttk.Checkbutton(r3, text='打印服务器/系统消息',
+                        variable=self.var_misc_mcprint_server).pack(side='left')
+        ttk.Checkbutton(r3, text='打印机器人自己说的话',
+                        variable=self.var_misc_mcprint_bot).pack(side='left', padx=(12, 0))
+        ttk.Checkbutton(r3, text='打印 ActionBar',
+                        variable=self.var_misc_mcprint_actionbar).pack(side='left', padx=(12, 0))
+        ttk.Checkbutton(r3, text='跳过 / 命令',
+                        variable=self.var_misc_mcprint_ignore_cmd).pack(side='left', padx=(12, 0))
+
+        r4 = ttk.Frame(rp)
+        r4.pack(fill='x', pady=(4, 2))
+        ttk.Button(r4, text='测试打印', command=self._on_mcprint_test).pack(side='left')
+        ttk.Label(r4, textvariable=self.var_misc_mcprint_status,
+                  foreground='#888888').pack(side='left', padx=(10, 0))
+        ttk.Label(rp, text='一条聊天一张小票；打印任务在后台队列里执行，不会卡住 MC。'
+                           '没有 XP-58 时请点「刷新」选自己的小票机，避免打到 A4 打印机。',
+                  foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=4)
+        try:
+            self.root.after(300, self._on_mcprint_refresh)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_mcprint_refresh(self) -> None:
+        """刷新 Windows 打印机列表，默认优先选 XP-58。"""
+        try:
+            from . import receipt_printer
+            items = receipt_printer.list_printers()
+        except Exception as e:  # noqa: BLE001
+            self.var_misc_mcprint_status.set(f'读取失败：{e}')
+            return
+        names = [str(item.get('name') or '') for item in items if item.get('name')]
+        self.cmb_mcprint_printer.configure(values=names)
+        current = (self.var_misc_mcprint_printer.get() or '').strip()
+        if not current and names:
+            xp = [item for item in items
+                  if 'XP-58' in str(item.get('name') or '').upper()]
+            pick = next((str(item.get('name')) for item in xp
+                         if not item.get('offline')), None)
+            if not pick and xp:
+                pick = str(xp[0].get('name'))
+            self.var_misc_mcprint_printer.set(pick or names[0])
+        self.var_misc_mcprint_status.set(
+            f'已找到 {len(names)} 台打印机' if names else '没有检测到打印机')
+
+    def _on_mcprint_test(self) -> None:
+        """测试打印：用当前界面配置打一张示例聊天小票。"""
+        if not self._gather_config():
+            return
+        name = (self.var_misc_mcprint_printer.get() or '').strip()
+        width = 80 if (self.var_misc_mcprint_width.get() or '58') == '80' else 58
+        body_lines = self._parse_int(self.var_misc_mcprint_body_lines.get(), 10)
+        dry_run = bool(self.var_misc_mcprint_dryrun.get())
+        self.var_misc_mcprint_status.set('正在测试打印…')
+
+        def work() -> None:
+            try:
+                result = self.controller.test_receipt_print(
+                    printer_name=name, paper_width=width,
+                    body_lines=body_lines, dry_run=dry_run)
+                if result.dry_run:
+                    msg = f'已生成预览：{result.out_file}'
+                else:
+                    msg = f'已发送到 {result.printer_name}（{result.bytes_written} 字节）'
+                ok = True
+            except Exception as e:  # noqa: BLE001
+                msg = f'打印失败：{e}'
+                ok = False
+
+            def apply() -> None:
+                self.var_misc_mcprint_status.set(('✅ ' if ok else '❌ ') + msg)
+                self._append_log('[小票] ' + msg, 'info' if ok else 'error')
+            self.root.after(0, apply)
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _on_bili_folders(self) -> None:
         """读 B 站收藏夹：验证 Cookie + 把收藏夹填进下拉框。"""
         cookie = (self.var_misc_bili_cookie.get() or '').strip()
@@ -2503,6 +2621,16 @@ class AiPlayerGUI:
                 '已配置：%s' % misc.biliFavName if misc.biliFavName else '（还没读取）')
             self.var_misc_mass_gap.set(f'{float(misc.massGapSeconds):g}')
             self.var_misc_mass_skipself.set(bool(misc.massSkipSelf))
+            self.var_misc_mcprint_enabled.set(bool(getattr(misc, 'mcChatPrintEnabled', False)))
+            self.var_misc_mcprint_printer.set(getattr(misc, 'mcChatPrinterName', '') or '')
+            self.var_misc_mcprint_width.set('80' if int(getattr(misc, 'mcChatPaperWidth', 58) or 58) == 80 else '58')
+            self.var_misc_mcprint_body_lines.set(str(getattr(misc, 'mcChatBodyLines', 10)))
+            self.var_misc_mcprint_server.set(bool(getattr(misc, 'mcChatPrintServer', True)))
+            self.var_misc_mcprint_bot.set(bool(getattr(misc, 'mcChatPrintBot', True)))
+            self.var_misc_mcprint_actionbar.set(bool(getattr(misc, 'mcChatPrintActionBar', False)))
+            self.var_misc_mcprint_ignore_cmd.set(bool(getattr(misc, 'mcChatPrintIgnoreCommands', True)))
+            self.var_misc_mcprint_dryrun.set(bool(getattr(misc, 'mcChatPrintDryRun', False)))
+            self.var_misc_mcprint_max.set(str(getattr(misc, 'mcChatPrintMaxPerMinute', 20)))
         if hasattr(self, '_netease_status'):
             self._netease_status.set('已登录（会员 Cookie 已保存）'
                                      if (cfg.song.neteaseCookie or '').strip()
@@ -2847,6 +2975,16 @@ class AiPlayerGUI:
             misc.biliFavName = str(self._bili_fav_cur.get('name') or '')
         misc.massGapSeconds = self._parse_float(self.var_misc_mass_gap.get(), 0.5)
         misc.massSkipSelf = bool(self.var_misc_mass_skipself.get())
+        misc.mcChatPrintEnabled = bool(self.var_misc_mcprint_enabled.get())
+        misc.mcChatPrinterName = (self.var_misc_mcprint_printer.get() or '').strip()
+        misc.mcChatPaperWidth = 80 if (self.var_misc_mcprint_width.get() or '58') == '80' else 58
+        misc.mcChatBodyLines = self._parse_int(self.var_misc_mcprint_body_lines.get(), 10)
+        misc.mcChatPrintServer = bool(self.var_misc_mcprint_server.get())
+        misc.mcChatPrintBot = bool(self.var_misc_mcprint_bot.get())
+        misc.mcChatPrintActionBar = bool(self.var_misc_mcprint_actionbar.get())
+        misc.mcChatPrintIgnoreCommands = bool(self.var_misc_mcprint_ignore_cmd.get())
+        misc.mcChatPrintDryRun = bool(self.var_misc_mcprint_dryrun.get())
+        misc.mcChatPrintMaxPerMinute = self._parse_int(self.var_misc_mcprint_max.get(), 20)
         misc.validate()
 
         return self._save_configs(cfg, ai)
