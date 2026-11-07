@@ -634,8 +634,13 @@ function handleCommand(cmd) {
         case 'sendGroup': {
             const gid = String(cmd.groupId == null ? '' : cmd.groupId).trim();
             const text = String(cmd.text || '');
-            if (!gid || !text) return;
-            sendAction('send_group_msg', { group_id: gid, message: text });
+            const segments = Array.isArray(cmd.segments) ? cmd.segments : null;
+            if (!gid || (!text && !segments)) return;
+            // segments 用来发 @QQ号（at）；没有 segments 时保持原来的纯文本。
+            sendAction('send_group_msg', {
+                group_id: gid,
+                message: segments && segments.length ? segments : text
+            });
             break;
         }
         case 'setGroups':

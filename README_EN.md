@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.3** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.4** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -32,11 +32,18 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ## Changelog
 
 > All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.2 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
-> Current version: **`v0.3.3`**; the client mod stays at `0.1.0` (jar names unchanged).
+> Current version: **`v0.3.4`**; the client mod stays at `0.1.0` (jar names unchanged).
+
+### v0.3.4
+
+- **Configurable QQ group tool prefix**: default `[AI工具]`, editable in the GUI (`qq.toolTrigger`); supports `[AI工具]在线玩家`, `[AI工具]视频`, `[AI工具]音乐 <name>`, separate from the AI chat trigger. The old `[AI]在线玩家` is no longer a tool command.
+- **MC → QQ `@QQ number`**: writing `@123456789` in a relayed in-game message now becomes a real OneBot `at` segment in the QQ group instead of plain text.
+- **Minecraft chat receipt printer**: a new toggle in **Misc** prints **only player chat** to a Windows thermal receipt printer, effectively printing `chat.log` (ESC/POS + GBK). No server messages, bot lines, ActionBar, header, separator or cut; queued in the background, 58/80mm, per-minute cap, skip `/` commands, preview-only mode. Config keys: `misc.mcChatPrint*`.
+- Regression tests added for tool commands, `@QQ number` at segments, and receipt layout/preview/queue; Python 126 tests and Node 8 tests pass.
 
 ### v0.3.3
 
-- **QQ group tool commands**: `[AI工具]在线玩家` lists online players, `[AI工具]视频` recommends Bilibili videos, and `[AI工具]音乐 <name>` returns a NetEase Cloud Music link. The prefix is configurable in the GUI (`qq.toolTrigger`, default `[AI工具]`) and is separate from the AI chat trigger to avoid conflicts; the old `[AI]在线玩家` is no longer treated as a tool command.
+- **QQ group online players**: `[AI]在线玩家` replied with the online list (from v0.3.4 the tool prefix is configurable `[AI工具]`).
 - **Fixed emoticon codes being swallowed by media URLs**: a space is always inserted after `[图片]`/`[视频]` links, and the final MC text gets a URL-boundary pass so `...gif[哭]` cannot break the server's `URI.create()` / system-chat packet (thanks to [@FurryAoao](https://github.com/FurryAoao) for [#38](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/38)).
 - **QQ text can no longer spoof colour codes or media placeholders**: `&c` / `§c` are neutralised; literal `[图片]`/`[视频]` in user text no longer consumes real media links (private-use markers in the engine).
 - **Range support** for media: A/B/Web servers return `206` / `Content-Range` / `Accept-Ranges`, so `<video>` seeking works and iOS/Safari is happier.
@@ -44,7 +51,6 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Automatic cleanup**: `pic_http/` is cleaned at most hourly by keep-days (default 7) and total-size cap (default 2 GB, 0 = unlimited), including stale `.part` files; the B relay also prunes old messages/media.
 - **`.mp4` video support**: QQ videos (`.mp4` / `.m4v` / `.mov`) are downloaded like images, relayed as `[视频] link`, returned in the website API's `videos` field, and played with `<video>`; original video names are preserved when enabled.
 - **Relay syncs videos**: `other_qq_pic_sent/relay.py` downloads/stores/serves videos, upgrades old SQLite databases with a `videos` column, and serves `/filename.mp4`; the web app CSP allows `media-src 'self'`.
-- **Minecraft chat receipt printer**: a new toggle in **Misc** prints **only player chat** to a Windows thermal receipt printer, effectively printing `chat.log` (ESC/POS + GBK). No server messages, bot lines, ActionBar, header, separator or cut; queued in the background, 58/80mm, per-minute cap, skip `/` commands, preview-only mode. Config keys: `misc.mcChatPrint*`.
 - Regression tests added for link spacing, emoticon/URL separation, `.mp4` save/serve, Range, media limits/cleanup, video serialization, relay mp4 sync and the online-player command.
 
 ### v0.3.3-beta
