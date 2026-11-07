@@ -921,18 +921,12 @@ class MiscConfig:
     massSkipSelf: bool = True
 
     # ---------------- Minecraft 聊天小票机 ----------------
-    # 开启后，MC 聊天事件会排队打印到 Windows 小票机（ESC/POS）。
+    # 开启后，只把玩家聊天排队打印到 Windows 小票机（ESC/POS），相当于 chat.log。
     mcChatPrintEnabled: bool = False
     # 打印机名字（留空 = 自动找 XP-58，再退回系统默认）
     mcChatPrinterName: str = ''
     # 纸张宽度：58 或 80（mm）
     mcChatPaperWidth: int = 58
-    # 正文最多打印几行
-    mcChatBodyLines: int = 10
-    # 是否打印服务器/系统消息、机器人自己说的话、ActionBar
-    mcChatPrintServer: bool = True
-    mcChatPrintBot: bool = True
-    mcChatPrintActionBar: bool = False
     # 跳过以 / 开头的命令（/msg、/lobby 等）
     mcChatPrintIgnoreCommands: bool = True
     # 限速：每分钟最多几张、两张之间至少间隔多少秒（0 = 不限制）
@@ -987,10 +981,6 @@ class MiscConfig:
         self.mcChatPrintEnabled = bool(self.mcChatPrintEnabled)
         self.mcChatPrinterName = str(self.mcChatPrinterName or '').strip()[:120]
         self.mcChatPaperWidth = 80 if int(self.mcChatPaperWidth or 58) == 80 else 58
-        self.mcChatBodyLines = _clamp_int(self.mcChatBodyLines, 1, 40)
-        self.mcChatPrintServer = bool(self.mcChatPrintServer)
-        self.mcChatPrintBot = bool(self.mcChatPrintBot)
-        self.mcChatPrintActionBar = bool(self.mcChatPrintActionBar)
         self.mcChatPrintIgnoreCommands = bool(self.mcChatPrintIgnoreCommands)
         self.mcChatPrintMaxPerMinute = _clamp_int(self.mcChatPrintMaxPerMinute, 0, 600)
         self.mcChatPrintMinInterval = _clamp_float(self.mcChatPrintMinInterval, 0.0, 60.0)

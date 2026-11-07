@@ -223,7 +223,6 @@ class Controller:
         # Minecraft 聊天小票机：后台队列 + 限速（不阻塞 MC 事件线程）
         self._receipt_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
         self._receipt_thread: Optional[threading.Thread] = None
-        self._receipt_serial = 0
         self._receipt_last_at = 0.0
         self._receipt_times: List[float] = []
         self._receipt_error_at = 0.0
@@ -3014,7 +3013,9 @@ class Controller:
     # Minecraft 聊天小票机
     # ------------------------------------------------------------------
     def _queue_mc_receipt(self, kind: str, sender: str, text: str) -> None:
-        """把一条 MC 聊天排进小票机队列（不阻塞 MC 事件线程）。"""
+        """只把玩家聊天排进小票机队列（服务器消息 / 机器人 / ActionBar 都不打）。"""
+        if kind not in ('chat', 'private'):
+            return
         try:
             misc = self._misc()
         except Exception:  # noqa: BLE001
@@ -3023,12 +3024,6 @@ class Controller:
             return
         text = str(text or '').strip()
         if not text:
-            return
-        if kind == 'system' and not bool(getattr(misc, 'mcChatPrintServer', True)):
-            return
-        if kind == 'bot' and not bool(getattr(misc, 'mcChatPrintBot', True)):
-            return
-        if kind == 'actionbar' and not bool(getattr(misc, 'mcChatPrintActionBar', False)):
             return
         if bool(getattr(misc, 'mcChatPrintIgnoreCommands', True)) \
                 and text.lstrip().startswith('/'):
@@ -3090,7 +3085,6 @@ class Controller:
                         continue
                     self._receipt_times.append(now)
                 self._receipt_last_at = now
-                self._receipt_serial += 1
                 msg = receipt_printer.ChatMessage(
                     sender=str(item.get('sender') or ''),
                     text=str(item.get('text') or ''),
@@ -3100,11 +3094,9 @@ class Controller:
                 result = receipt_printer.print_chat_ticket(
                     msg,
                     paper_width=int(getattr(misc, 'mcChatPaperWidth', 58) or 58),
-                    body_lines=int(getattr(misc, 'mcChatBodyLines', 10) or 10),
                     printer_name=str(getattr(misc, 'mcChatPrinterName', '') or ''),
                     dry_run=bool(getattr(misc, 'mcChatPrintDryRun', False)),
                     preview_dir=os.path.join(BASE_DIR, 'preview'),
-                    serial=self._receipt_serial,
                 )
                 if result.dry_run:
                     self._post_ui({'kind': 'log', 'level': 'info',
@@ -3126,12 +3118,11 @@ class Controller:
                     pass
 
     def test_receipt_print(self, printer_name: str = '', paper_width: int = 58,
-                           body_lines: int = 10, dry_run: bool = False):
-        """GUI「测试打印」：打一张示例聊天小票。"""
+                           dry_run: bool = False):
+        """GUI「测试打印」：打一行示例聊天。"""
         from . import receipt_printer
         return receipt_printer.test_print(
             paper_width=paper_width,
-            body_lines=body_lines,
             printer_name=printer_name,
             dry_run=dry_run,
             preview_dir=os.path.join(BASE_DIR, 'preview'),
@@ -3674,7 +3665,6 @@ class Controller:
             raw = ev.get('raw') or ''
             if raw.strip():
                 self._post_ui({'kind': 'log', 'level': 'server', 'message': raw})
-                self._queue_mc_receipt('system', '服务器', raw)
                 if self.ai_player:
                     try:
                         self.ai_player.on_server_message(raw)
@@ -3709,7 +3699,6 @@ class Controller:
                                    'message': 'AI 处理消息出错: ' + str(e)})
         elif event == 'actionBar':
             self._post_ui({'kind': 'actionBar', 'text': ev.get('text', '')})
-            self._queue_mc_receipt('actionbar', '', ev.get('text', ''))
             self._check_reconnect_triggers(ev.get('text', ''))
         elif event == 'health':
             self._post_ui({'kind': 'health', 'health': ev.get('health'),
@@ -3794,7 +3783,6 @@ class Controller:
         elif event == 'chatSent':
             text = ev.get('text', '')
             self._remember_sent(text)      # 自触发防线：记下自己发过的话
-            self._queue_mc_receipt('bot', '机器人', text)
             if text in self._qq_pending_relays:
                 self._qq_pending_relays.remove(text)
                 self._post_ui({'kind': 'log', 'level': 'qq', 'message': '» ' + text})

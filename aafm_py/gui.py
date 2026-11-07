@@ -1059,10 +1059,6 @@ class AiPlayerGUI:
         self.var_misc_mcprint_enabled = tk.BooleanVar(value=False)
         self.var_misc_mcprint_printer = tk.StringVar()
         self.var_misc_mcprint_width = tk.StringVar(value='58')
-        self.var_misc_mcprint_body_lines = tk.StringVar(value='10')
-        self.var_misc_mcprint_server = tk.BooleanVar(value=True)
-        self.var_misc_mcprint_bot = tk.BooleanVar(value=True)
-        self.var_misc_mcprint_actionbar = tk.BooleanVar(value=False)
         self.var_misc_mcprint_ignore_cmd = tk.BooleanVar(value=True)
         self.var_misc_mcprint_dryrun = tk.BooleanVar(value=False)
         self.var_misc_mcprint_max = tk.StringVar(value='20')
@@ -1070,7 +1066,7 @@ class AiPlayerGUI:
 
         r1 = ttk.Frame(rp)
         r1.pack(fill='x', pady=2)
-        ttk.Checkbutton(r1, text='打印 MC 聊天到小票机',
+        ttk.Checkbutton(r1, text='只打印玩家聊天（相当于 chat.log）',
                         variable=self.var_misc_mcprint_enabled).pack(side='left')
         ttk.Label(r1, text='打印机').pack(side='left', padx=(12, 4))
         self.cmb_mcprint_printer = ttk.Combobox(
@@ -1084,33 +1080,22 @@ class AiPlayerGUI:
         ttk.Label(r2, text='纸宽').pack(side='left')
         ttk.Combobox(r2, textvariable=self.var_misc_mcprint_width, width=5,
                      values=('58', '80'), state='readonly').pack(side='left', padx=(4, 12))
-        ttk.Label(r2, text='正文最多行').pack(side='left')
-        ttk.Entry(r2, textvariable=self.var_misc_mcprint_body_lines,
-                  width=5).pack(side='left', padx=(4, 12))
         ttk.Label(r2, text='每分钟最多').pack(side='left')
         ttk.Entry(r2, textvariable=self.var_misc_mcprint_max,
                   width=5).pack(side='left', padx=(4, 12))
+        ttk.Checkbutton(r2, text='跳过 / 命令',
+                        variable=self.var_misc_mcprint_ignore_cmd).pack(side='left')
         ttk.Checkbutton(r2, text='只看预览（不真打印）',
-                        variable=self.var_misc_mcprint_dryrun).pack(side='left')
-
-        r3 = ttk.Frame(rp)
-        r3.pack(fill='x', pady=2)
-        ttk.Checkbutton(r3, text='打印服务器/系统消息',
-                        variable=self.var_misc_mcprint_server).pack(side='left')
-        ttk.Checkbutton(r3, text='打印机器人自己说的话',
-                        variable=self.var_misc_mcprint_bot).pack(side='left', padx=(12, 0))
-        ttk.Checkbutton(r3, text='打印 ActionBar',
-                        variable=self.var_misc_mcprint_actionbar).pack(side='left', padx=(12, 0))
-        ttk.Checkbutton(r3, text='跳过 / 命令',
-                        variable=self.var_misc_mcprint_ignore_cmd).pack(side='left', padx=(12, 0))
+                        variable=self.var_misc_mcprint_dryrun).pack(side='left', padx=(12, 0))
 
         r4 = ttk.Frame(rp)
         r4.pack(fill='x', pady=(4, 2))
         ttk.Button(r4, text='测试打印', command=self._on_mcprint_test).pack(side='left')
         ttk.Label(r4, textvariable=self.var_misc_mcprint_status,
                   foreground='#888888').pack(side='left', padx=(10, 0))
-        ttk.Label(rp, text='一条聊天一张小票；打印任务在后台队列里执行，不会卡住 MC。'
-                           '没有 XP-58 时请点「刷新」选自己的小票机，避免打到 A4 打印机。',
+        ttk.Label(rp, text='只打印玩家聊天：每行「[时:分:秒] <玩家> 内容」，不打印服务器消息、'
+                           '机器人发言、ActionBar，也没有小票标题/分隔线/切纸。'
+                           '打印任务在后台队列里执行，不会卡住 MC。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=4)
         try:
             self.root.after(300, self._on_mcprint_refresh)
@@ -1140,20 +1125,18 @@ class AiPlayerGUI:
             f'已找到 {len(names)} 台打印机' if names else '没有检测到打印机')
 
     def _on_mcprint_test(self) -> None:
-        """测试打印：用当前界面配置打一张示例聊天小票。"""
+        """测试打印：用当前界面配置打一行示例聊天。"""
         if not self._gather_config():
             return
         name = (self.var_misc_mcprint_printer.get() or '').strip()
         width = 80 if (self.var_misc_mcprint_width.get() or '58') == '80' else 58
-        body_lines = self._parse_int(self.var_misc_mcprint_body_lines.get(), 10)
         dry_run = bool(self.var_misc_mcprint_dryrun.get())
         self.var_misc_mcprint_status.set('正在测试打印…')
 
         def work() -> None:
             try:
                 result = self.controller.test_receipt_print(
-                    printer_name=name, paper_width=width,
-                    body_lines=body_lines, dry_run=dry_run)
+                    printer_name=name, paper_width=width, dry_run=dry_run)
                 if result.dry_run:
                     msg = f'已生成预览：{result.out_file}'
                 else:
@@ -2624,10 +2607,6 @@ class AiPlayerGUI:
             self.var_misc_mcprint_enabled.set(bool(getattr(misc, 'mcChatPrintEnabled', False)))
             self.var_misc_mcprint_printer.set(getattr(misc, 'mcChatPrinterName', '') or '')
             self.var_misc_mcprint_width.set('80' if int(getattr(misc, 'mcChatPaperWidth', 58) or 58) == 80 else '58')
-            self.var_misc_mcprint_body_lines.set(str(getattr(misc, 'mcChatBodyLines', 10)))
-            self.var_misc_mcprint_server.set(bool(getattr(misc, 'mcChatPrintServer', True)))
-            self.var_misc_mcprint_bot.set(bool(getattr(misc, 'mcChatPrintBot', True)))
-            self.var_misc_mcprint_actionbar.set(bool(getattr(misc, 'mcChatPrintActionBar', False)))
             self.var_misc_mcprint_ignore_cmd.set(bool(getattr(misc, 'mcChatPrintIgnoreCommands', True)))
             self.var_misc_mcprint_dryrun.set(bool(getattr(misc, 'mcChatPrintDryRun', False)))
             self.var_misc_mcprint_max.set(str(getattr(misc, 'mcChatPrintMaxPerMinute', 20)))
@@ -2978,10 +2957,6 @@ class AiPlayerGUI:
         misc.mcChatPrintEnabled = bool(self.var_misc_mcprint_enabled.get())
         misc.mcChatPrinterName = (self.var_misc_mcprint_printer.get() or '').strip()
         misc.mcChatPaperWidth = 80 if (self.var_misc_mcprint_width.get() or '58') == '80' else 58
-        misc.mcChatBodyLines = self._parse_int(self.var_misc_mcprint_body_lines.get(), 10)
-        misc.mcChatPrintServer = bool(self.var_misc_mcprint_server.get())
-        misc.mcChatPrintBot = bool(self.var_misc_mcprint_bot.get())
-        misc.mcChatPrintActionBar = bool(self.var_misc_mcprint_actionbar.get())
         misc.mcChatPrintIgnoreCommands = bool(self.var_misc_mcprint_ignore_cmd.get())
         misc.mcChatPrintDryRun = bool(self.var_misc_mcprint_dryrun.get())
         misc.mcChatPrintMaxPerMinute = self._parse_int(self.var_misc_mcprint_max.get(), 20)
