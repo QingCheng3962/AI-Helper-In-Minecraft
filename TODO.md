@@ -163,7 +163,6 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 
 ## 2026-11-06 v0.3.3
 
-- [x] QQ 群内工具命令：`[AI工具]在线玩家` / `[AI工具]视频` / `[AI工具]音乐 歌名`；`qq.toolTrigger` 可自定义，与 AI 对话提示词分开，旧 `[AI]在线玩家` 不再当工具命令；OneBot 自消息过滤，避免机器人自己的回复被再次转述
 - [x] 修复图片链接后跟 `[哭]` 等表情代码被并进 URL：链接后强制空格 + 最终 MC 文本 URL 边界处理，避免服务端 `URI.create()` 失败导致整条 system_chat 丢包
 - [x] QQ 文本颜色码/占位符防注入：`&`/`§` 中和；引擎用私有区标记真图片/真视频，群友字面量 `[图片]`/`[视频]` 不再抢链接
 - [x] 视频 Range：`photo_server.py` / `relay.py` / `webapp.py` 支持 206、`Content-Range`、`Accept-Ranges`
@@ -172,8 +171,14 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 新增 `.mp4` 视频支持：`qq_engine.js` 收集 `video` 段（`videos` 字段）；`controller.py` 新增 `_prepare_qq_videos()`，与图片共用落盘/链接逻辑
 - [x] `photo_server.py`：识别 ISO-BMFF `ftyp` 头（`.mp4`/`.m4v`/`.mov`），保留原始文件名；消息序列化增加 `videos`
 - [x] `other_qq_pic_sent/relay.py`：同步/下载/入库视频，旧 SQLite 自动补 `videos` 列；根路径 `/文件名.mp4` 可直接访问
-- [x] **Minecraft 聊天小票机**：新增 `aafm_py/receipt_printer.py`（ESC/POS + GBK + Windows winspool RAW，纯标准库），**杂项** 页可开关/选打印机/纸宽/每分钟上限/预览；只打印玩家聊天，效果相当于 `chat.log`（`[时:分:秒] <玩家> 内容`），不打印服务器消息/机器人/ActionBar，也没有标题/分隔线/切纸
 - [x] Web 后台：CSP 增加 `media-src 'self'`，图片墙用 `<video controls>` 播放视频
 - [x] GUI / 配置说明同步改为「图片/视频转链接」，新增媒体上限/清理配置项
 - [x] 回归测试：链接空格、表情代码 URL 分离、`.mp4` 落盘与访问、Range、媒体上限/清理、视频字段序列化、B 端 mp4 同步、QQ 在线玩家命令
 - [x] 版本号设为 **v0.3.3**（README / README_EN / package.json / package-lock / AGENTS）
+
+## 2026-11-07 v0.3.4
+
+- [x] QQ 群内工具命令：`[AI工具]在线玩家` / `[AI工具]视频` / `[AI工具]音乐 歌名`；`qq.toolTrigger` 可自定义，与 AI 对话提示词分开，旧 `[AI]在线玩家` 不再当工具命令；OneBot 自消息过滤，避免机器人自己的回复被再次转述
+- [x] MC → QQ 支持 `@QQ号`：转述内容里的 `@123456789` 会变成 OneBot `at` 段，真正艾特群友（`qq_engine.js` 的 `sendGroup` 支持 `segments`）
+- [x] **Minecraft 聊天小票机**：新增 `aafm_py/receipt_printer.py`（ESC/POS + GBK + Windows winspool RAW，纯标准库），**杂项** 页可开关/选打印机/纸宽/每分钟上限/预览；只打印玩家聊天，效果相当于 `chat.log`（`[时:分:秒] <玩家> 内容`），不打印服务器消息/机器人/ActionBar，也没有标题/分隔线/切纸
+- [x] 版本号设为 **v0.3.4**（README / README_EN / package.json / package-lock / AGENTS）

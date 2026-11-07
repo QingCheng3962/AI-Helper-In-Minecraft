@@ -10,7 +10,7 @@ import json
 import os
 import subprocess
 import threading
-from typing import Callable, Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional, List
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 QQ_RUNTIME_CONFIG_FILE = os.path.join(BASE_DIR, 'qq_runtime_config.json')
@@ -108,8 +108,13 @@ class QqEngine:
         except Exception:  # noqa: BLE001
             return False
 
-    def send_group(self, group_id: str, text: str) -> bool:
-        return self.send({'type': 'sendGroup', 'groupId': str(group_id), 'text': text})
+    def send_group(self, group_id: str, text: str,
+                   segments: Optional[List[Dict[str, Any]]] = None) -> bool:
+        cmd: Dict[str, Any] = {'type': 'sendGroup', 'groupId': str(group_id),
+                               'text': text}
+        if segments:
+            cmd['segments'] = segments
+        return self.send(cmd)
 
     def set_groups(self, groups) -> bool:
         return self.send({'type': 'setGroups', 'groups': [str(g) for g in (groups or [])]})

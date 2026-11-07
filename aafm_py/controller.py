@@ -100,6 +100,7 @@ def _escape_mc_codes(text: str) -> str:
 
 
 _MC_URL_ILLEGAL_RE = re.compile(r'(https?://[^\s\[\]{}"<>\\^`|]+)(?=[\[\]{}"<>\\^`|])')
+_QQ_AT_RE = re.compile(r'(?<![\w@])@(\d{5,12})(?!\w)')
 
 
 def _separate_mc_urls(text: str) -> str:
@@ -3285,7 +3286,8 @@ class Controller:
         if not out:
             self._send_mc_feedback(player, False)
             return True
-        if self._qq.send_group(group_id, out):
+        segments = self._qq_segments_from_text(out)
+        if self._qq.send_group(group_id, out, segments=segments):
             self._last_mc_to_qq_time = now
             self._post_ui({'kind': 'log', 'level': 'qq',
                            'message': f'[MC→QQ] {group_id}: {out}'})
@@ -3346,6 +3348,28 @@ class Controller:
         if trig and text.lower().startswith(trig.lower()):
             return (None, text[len(trig):].strip(' :：'))
         return None
+
+    @staticmethod
+    def _qq_segments_from_text(text: str):
+        """把 MC 消息里的 ``@QQ号`` 变成 OneBot at 段。
+
+        没有 @QQ号 时返回 None（继续用纯文本发送，保持原行为）。
+        """
+        value = str(text or '')
+        matches = list(_QQ_AT_RE.finditer(value))
+        if not matches:
+            return None
+        segments = []
+        pos = 0
+        for match in matches:
+            if match.start() > pos:
+                segments.append({'type': 'text',
+                                 'data': {'text': value[pos:match.start()]}})
+            segments.append({'type': 'at', 'data': {'qq': match.group(1)}})
+            pos = match.end()
+        if pos < len(value):
+            segments.append({'type': 'text', 'data': {'text': value[pos:]}})
+        return segments or None
 
     def _format_mc_to_qq(self, player: str, message: str) -> str:
         cfg = self.config.qq
