@@ -220,6 +220,15 @@ class Controller:
         self._mass_running: bool = False
         # 媒体自动清理（每小时最多跑一次）
         self._last_media_cleanup: float = 0.0
+        # Minecraft 聊天小票机：后台队列 + 限速（不阻塞 MC 事件线程）
+        self._receipt_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
+        self._receipt_thread: Optional[threading.Thread] = None
+        self._receipt_serial = 0
+        self._receipt_last_at = 0.0
+        self._receipt_times: List[float] = []
+        self._receipt_error_at = 0.0
+        self._receipt_full_warn_at = 0.0
+        self._receipt_rate_warn_at = 0.0
         # 最近发过的歌：key -> (时间, 队列条目快照)。同一首歌又被点时直接复用，**不再搜一遍**
         # （链接里带的 id: 还能让 Mod 自己兜底重取）。
         self._song_recent: Dict[str, Any] = {}
@@ -3001,6 +3010,133 @@ class Controller:
                            'message': f'[QQ] 已清理旧媒体 {removed} 个，'
                                       f'释放 {freed / (1024 * 1024):.1f} MB'})
 
+    # ------------------------------------------------------------------
+    # Minecraft 聊天小票机
+    # ------------------------------------------------------------------
+    def _queue_mc_receipt(self, kind: str, sender: str, text: str) -> None:
+        """把一条 MC 聊天排进小票机队列（不阻塞 MC 事件线程）。"""
+        try:
+            misc = self._misc()
+        except Exception:  # noqa: BLE001
+            return
+        if not bool(getattr(misc, 'mcChatPrintEnabled', False)):
+            return
+        text = str(text or '').strip()
+        if not text:
+            return
+        if kind == 'system' and not bool(getattr(misc, 'mcChatPrintServer', True)):
+            return
+        if kind == 'bot' and not bool(getattr(misc, 'mcChatPrintBot', True)):
+            return
+        if kind == 'actionbar' and not bool(getattr(misc, 'mcChatPrintActionBar', False)):
+            return
+        if bool(getattr(misc, 'mcChatPrintIgnoreCommands', True)) \
+                and text.lstrip().startswith('/'):
+            return
+        if not hasattr(self, '_receipt_queue'):
+            return
+        try:
+            self._receipt_queue.put_nowait({
+                'kind': kind or 'chat',
+                'sender': str(sender or '').strip(),
+                'text': text,
+                'time': time.time(),
+            })
+        except queue.Full:
+            now = time.time()
+            if now - getattr(self, '_receipt_full_warn_at', 0.0) > 60:
+                self._receipt_full_warn_at = now
+                self._post_ui({'kind': 'log', 'level': 'warn',
+                               'message': '[小票] 队列已满，跳过一些聊天（打印机跟不上）'})
+            return
+        self._ensure_receipt_worker()
+
+    def _ensure_receipt_worker(self) -> None:
+        try:
+            if self._receipt_thread is not None and self._receipt_thread.is_alive():
+                return
+            self._receipt_thread = threading.Thread(
+                target=self._receipt_worker, name='mc-receipt', daemon=True)
+            self._receipt_thread.start()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _receipt_worker(self) -> None:
+        from . import receipt_printer
+        while True:
+            item = self._receipt_queue.get()
+            try:
+                if item is None:
+                    return
+                misc = self._misc()
+                if not bool(getattr(misc, 'mcChatPrintEnabled', False)):
+                    continue
+                now = time.time()
+                min_interval = max(0.0, float(
+                    getattr(misc, 'mcChatPrintMinInterval', 0.2) or 0.0))
+                if min_interval and now - self._receipt_last_at < min_interval:
+                    time.sleep(min_interval - (now - self._receipt_last_at))
+                    now = time.time()
+                cap = int(getattr(misc, 'mcChatPrintMaxPerMinute', 20) or 0)
+                if cap > 0:
+                    self._receipt_times = [t for t in self._receipt_times
+                                           if now - t < 60]
+                    if len(self._receipt_times) >= cap:
+                        if now - getattr(self, '_receipt_rate_warn_at', 0.0) > 60:
+                            self._receipt_rate_warn_at = now
+                            self._post_ui({'kind': 'log', 'level': 'warn',
+                                           'message': f'[小票] 超过每分钟 {cap} 张，'
+                                                      '已跳过部分聊天'})
+                        continue
+                    self._receipt_times.append(now)
+                self._receipt_last_at = now
+                self._receipt_serial += 1
+                msg = receipt_printer.ChatMessage(
+                    sender=str(item.get('sender') or ''),
+                    text=str(item.get('text') or ''),
+                    kind=str(item.get('kind') or 'chat'),
+                    time=float(item.get('time') or now),
+                )
+                result = receipt_printer.print_chat_ticket(
+                    msg,
+                    paper_width=int(getattr(misc, 'mcChatPaperWidth', 58) or 58),
+                    body_lines=int(getattr(misc, 'mcChatBodyLines', 10) or 10),
+                    printer_name=str(getattr(misc, 'mcChatPrinterName', '') or ''),
+                    dry_run=bool(getattr(misc, 'mcChatPrintDryRun', False)),
+                    preview_dir=os.path.join(BASE_DIR, 'preview'),
+                    serial=self._receipt_serial,
+                )
+                if result.dry_run:
+                    self._post_ui({'kind': 'log', 'level': 'info',
+                                   'message': f'[小票] 已生成预览：{result.out_file}'})
+                else:
+                    self._post_ui({'kind': 'log', 'level': 'info',
+                                   'message': f'[小票] 已打印 {msg.sender}：'
+                                              + msg.text.replace('\n', ' ')[:30]})
+            except Exception as e:  # noqa: BLE001
+                now = time.time()
+                if now - getattr(self, '_receipt_error_at', 0.0) > 60:
+                    self._receipt_error_at = now
+                    self._post_ui({'kind': 'log', 'level': 'error',
+                                   'message': '[小票] 打印失败：' + str(e)})
+            finally:
+                try:
+                    self._receipt_queue.task_done()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def test_receipt_print(self, printer_name: str = '', paper_width: int = 58,
+                           body_lines: int = 10, dry_run: bool = False):
+        """GUI「测试打印」：打一张示例聊天小票。"""
+        from . import receipt_printer
+        return receipt_printer.test_print(
+            paper_width=paper_width,
+            body_lines=body_lines,
+            printer_name=printer_name,
+            dry_run=dry_run,
+            preview_dir=os.path.join(BASE_DIR, 'preview'),
+        )
+
     def _song_tick(self) -> None:
         """每秒调用：当前放完就播下一首；开了「立刻插播」就新歌一到马上放（打断当前这首）。"""
         with self._song_lock:
@@ -3538,6 +3674,7 @@ class Controller:
             raw = ev.get('raw') or ''
             if raw.strip():
                 self._post_ui({'kind': 'log', 'level': 'server', 'message': raw})
+                self._queue_mc_receipt('system', '服务器', raw)
                 if self.ai_player:
                     try:
                         self.ai_player.on_server_message(raw)
@@ -3554,6 +3691,8 @@ class Controller:
             raw = ev.get('raw') or ''
             self._post_ui({'kind': 'chat', 'player': player, 'content': content,
                            'private': bool(private)})
+            self._queue_mc_receipt('private' if private else 'chat',
+                                   player, content)
             if not private and self._check_reconnect_triggers(raw or content):
                 return
             if not private and self._maybe_relay_mc_to_qq(player, content):
@@ -3570,6 +3709,7 @@ class Controller:
                                    'message': 'AI 处理消息出错: ' + str(e)})
         elif event == 'actionBar':
             self._post_ui({'kind': 'actionBar', 'text': ev.get('text', '')})
+            self._queue_mc_receipt('actionbar', '', ev.get('text', ''))
             self._check_reconnect_triggers(ev.get('text', ''))
         elif event == 'health':
             self._post_ui({'kind': 'health', 'health': ev.get('health'),
@@ -3654,6 +3794,7 @@ class Controller:
         elif event == 'chatSent':
             text = ev.get('text', '')
             self._remember_sent(text)      # 自触发防线：记下自己发过的话
+            self._queue_mc_receipt('bot', '机器人', text)
             if text in self._qq_pending_relays:
                 self._qq_pending_relays.remove(text)
                 self._post_ui({'kind': 'log', 'level': 'qq', 'message': '» ' + text})

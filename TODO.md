@@ -172,6 +172,7 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 新增 `.mp4` 视频支持：`qq_engine.js` 收集 `video` 段（`videos` 字段）；`controller.py` 新增 `_prepare_qq_videos()`，与图片共用落盘/链接逻辑
 - [x] `photo_server.py`：识别 ISO-BMFF `ftyp` 头（`.mp4`/`.m4v`/`.mov`），保留原始文件名；消息序列化增加 `videos`
 - [x] `other_qq_pic_sent/relay.py`：同步/下载/入库视频，旧 SQLite 自动补 `videos` 列；根路径 `/文件名.mp4` 可直接访问
+- [x] **Minecraft 聊天小票机**：新增 `aafm_py/receipt_printer.py`（ESC/POS + GBK + Windows winspool RAW，纯标准库），**杂项** 页可开关/选打印机/纸宽/正文行数/每分钟上限/预览；后台队列打印玩家聊天、服务器消息、机器人发言与 ActionBar（均可单独关）；支持测试打印与 `preview/mcchat-preview.bin`
 - [x] Web 后台：CSP 增加 `media-src 'self'`，图片墙用 `<video controls>` 播放视频
 - [x] GUI / 配置说明同步改为「图片/视频转链接」，新增媒体上限/清理配置项
 - [x] 回归测试：链接空格、表情代码 URL 分离、`.mp4` 落盘与访问、Range、媒体上限/清理、视频字段序列化、B 端 mp4 同步、QQ 在线玩家命令

@@ -30,3 +30,5 @@ daily.db
 /relay_data/
 /other_qq_pic_sent/relay_data/
 /other_qq_pic_sent/relay.json
+# Minecraft 聊天小票机的 dry-run 字节文件
+/preview/
