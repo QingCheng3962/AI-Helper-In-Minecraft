@@ -43,7 +43,7 @@
 - 文档转书（**文档转书** 页）：上传 `.docx` / `.doc` / `.txt`，**按书页宽度自动换行、按行数自动翻页**（Java 版每页约 14 行、每本 ≤ 100 页、每页 1024 字为硬上限），由机器人在游戏内把内容写入**书与笔**；可选择**编辑为成书（署名）**，书名模板支持 `{number}`（替换为第几本，只含数字，如 `资本论 P{number}`）；**记录写入进度**（写到第几页/第几本），可**从未写入的地方继续**或**从第 X 册开始**；支持**暂停 / 停止 / 重新写入**；也可**一键清空**书与笔的全部内容。
 - 日志保存（底层自动）：日志页里的所有内容——包括服务器聊天、公告/指令输出、私聊、ActionBar 以及程序自身日志——都会在内存中缓存，**每跨过一天或关闭程序时**写入 `logs/yyyy_mm_dd_第N次.txt`（同一天多次保存依次为 第1次、第2次…）。
 - 游戏内点歌（**mc-song-mod** 客户端 Mod）：玩家在聊天里发 `[点歌]歌名`（触发词可改）→ **机器人**用会员账号解析出可播放直链、**私聊发回给点歌的人** → 该玩家的客户端 Mod 播放，**谁点谁听**（不打扰别人），而**服务端不需要装任何插件**。机器人不在线时客户端可本地兜底（自己搜网易云）。玩家发 `[点歌]help` 机器人会私聊他全部用法。详见 [`mc-song-mod/README.md`](mc-song-mod/README.md)。（另有 `mc-music-bridge/`：给**自己能装插件**的服务端用的 ZMusic 服务端插件，可选。）
-- **Minecraft 聊天小票机**（**杂项** 页）：把玩家聊天、服务器消息（可选）和机器人自己的发言（可选）打印到 Windows 热敏小票机。ESC/POS + GBK，一条聊天一张小票；后台队列打印，不阻塞 MC；支持 58/80mm、每分钟上限、`/命令` 跳过和仅生成预览。
+- **Minecraft 聊天小票机**（**杂项** 页）：只把玩家聊天打印到 Windows 热敏小票机，效果相当于把 `chat.log` 打到纸上；不打印服务器消息、机器人发言、ActionBar，也没有标题/分隔线/切纸。ESC/POS + GBK，后台队列打印，不阻塞 MC；支持 58/80mm、每分钟上限、`/命令` 跳过和仅生成预览。
 
 ## 更新日志
 
@@ -60,7 +60,7 @@
 - **媒体自动清理**：`pic_http/` 每小时最多清理一次，按保留天数（默认 7 天）和总大小上限（默认 2 GB，0=不限）删除旧图片/视频与过期 `.part`；B 端中继同步清理旧消息和媒体。
 - **`.mp4` 视频支持**：QQ 视频（`.mp4` / `.m4v` / `.mov`）像图片一样下载到 `pic_http/`，MC 公屏发 `[视频] 链接`；网站 API 新增 `videos` 字段，图片墙用 `<video>` 播放；保留原始文件名时视频名也会保留。
 - **B 端中继同步视频**：`other_qq_pic_sent/relay.py` 下载/入库/对外提供视频，SQLite 旧库自动补 `videos` 列；`/文件名.mp4` 根路径可直接访问；Web 后台 CSP 增加 `media-src 'self'`。
-- **Minecraft 聊天小票机**：**杂项** 页新增开关，把玩家聊天 / 服务器消息 / 机器人发言打印到 Windows 热敏小票机；ESC/POS + GBK，一条聊天一张小票，后台队列不阻塞 MC，支持 58/80mm、每分钟上限、跳过 `/` 命令和仅生成预览。配置项见 `misc.mcChatPrint*`。
+- **Minecraft 聊天小票机**：**杂项** 页新增开关，只把玩家聊天打印到 Windows 热敏小票机，效果相当于把 `chat.log` 打到纸上；ESC/POS + GBK，后台队列不阻塞 MC，支持 58/80mm、每分钟上限、跳过 `/` 命令和仅生成预览。配置项见 `misc.mcChatPrint*`。
 - 回归测试补充：链接后空格、表情代码 URL 分离、`.mp4` 落盘/访问、Range、媒体上限/清理、视频字段序列化、B 端 mp4 同步、QQ 在线玩家命令。
 
 ### v0.3.3-beta
@@ -212,29 +212,22 @@ npm run login:msa          # 仅执行微软账号登录
 
 ## Minecraft 聊天小票机
 
-在 **杂项** 页开启后，MC 聊天会排队打印到 Windows 热敏小票机（ESC/POS + GBK，纯标准库，不依赖 pywin32/PowerShell）。
+在 **杂项** 页开启后，**只打印玩家聊天**，效果相当于把 `chat.log` 直接打到热敏纸上（ESC/POS + GBK，纯标准库，不依赖 pywin32/PowerShell）。
 
-1. 安装小票机驱动（本机参考型号为 `XP-58`），在「杂项」页点 **刷新** 选打印机；留空会自动优先找名字含 `XP-58` 的机器，避免打到 A4 打印机。
-2. 勾选 **打印 MC 聊天到小票机**，设置纸宽（58/80mm）、正文最多行数、每分钟上限。
-3. 点 **测试打印** 打一张示例；勾选 **只看预览（不真打印）** 时会生成 `preview/mcchat-preview.bin`。
-4. 可选开关：打印服务器/系统消息、打印机器人自己说的话、打印 ActionBar、跳过 `/` 命令。
+1. 安装小票机驱动（本机参考型号为 `XP-58`），在「杂项」页点 **刷新** 选打印机；留空会自动优先找在线的 `XP-58`，避免打到 A4 打印机。
+2. 勾选 **只打印玩家聊天（相当于 chat.log）**，设置纸宽（58/80mm）、每分钟上限。
+3. 点 **测试打印** 打一行示例；勾选 **只看预览（不真打印）** 时会生成 `preview/mcchat-preview.bin`。
+4. 默认跳过 `/` 命令；服务器消息、机器人发言、ActionBar 都不打印。
 
-一条聊天一张小票：
+打印出来就是一行行聊天日志，没有标题、分隔线和切纸：
 
 ```
-        MINECRAFT
-        聊天小票
-   2026-11-07 21:20:00
-        #000001
---------------------------------
-玩家：Steve
---------------------------------
-今天挖到钻石啦！
---------------------------------
-      — Minecraft Chat —
+[21:20:00] <Steve> 今天挖到钻石啦！
+[21:20:07] <Alex> 来主城看烟花
+[21:20:15] <Steve> [私聊] 马上到
 ```
 
-配置项：`misc.mcChatPrintEnabled`、`misc.mcChatPrinterName`、`misc.mcChatPaperWidth`、`misc.mcChatBodyLines`、`misc.mcChatPrintServer`、`misc.mcChatPrintBot`、`misc.mcChatPrintActionBar`、`misc.mcChatPrintIgnoreCommands`、`misc.mcChatPrintMaxPerMinute`、`misc.mcChatPrintMinInterval`、`misc.mcChatPrintDryRun`。
+配置项：`misc.mcChatPrintEnabled`、`misc.mcChatPrinterName`、`misc.mcChatPaperWidth`、`misc.mcChatPrintIgnoreCommands`、`misc.mcChatPrintMaxPerMinute`、`misc.mcChatPrintMinInterval`、`misc.mcChatPrintDryRun`。
 
 ## 文档转书（上传文档 → 游戏内书与笔）
 

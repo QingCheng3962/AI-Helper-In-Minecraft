@@ -43,17 +43,19 @@ class ReceiptPrinterTest(unittest.TestCase):
     def test_build_chat_ticket_fields(self):
         msg = rp.ChatMessage(sender='Steve', text='来主城看烟花',
                              kind='chat', time=time.time())
-        ticket = rp.build_chat_ticket(msg, paper_width=58, body_lines=10,
-                                      serial=7)
+        ticket = rp.build_chat_ticket(msg, paper_width=58)
         texts = [c.arg for c in ticket.commands if c.op == 'TEXT']
-        self.assertIn('MINECRAFT', texts)
-        self.assertIn('聊天小票', texts)
-        self.assertIn('#000007', texts)
-        self.assertIn('玩家：Steve', texts)
-        self.assertIn('来主城看烟花', texts)
+        self.assertTrue(texts)
+        self.assertIn('<Steve>', texts[0])
+        self.assertIn('来主城看烟花', texts[0])
+        self.assertTrue(texts[0].startswith('['))
         preview = rp.render_preview(ticket.commands, 32)
         self.assertIn('Steve', preview)
         self.assertIn('来主城看烟花', preview)
+        # 不再打印小票标题 / 分隔线 / 切纸等额外内容
+        self.assertNotIn('MINECRAFT', preview)
+        self.assertNotIn('聊天小票', preview)
+        self.assertNotIn('[切纸]', preview)
 
     def test_dry_run_writes_preview(self):
         msg = rp.ChatMessage(sender='Alex', text='测试小票')
@@ -75,16 +77,14 @@ class ReceiptPrinterTest(unittest.TestCase):
         misc = SimpleNamespace(
             mcChatPrintEnabled=True, mcChatPrintMinInterval=0.0,
             mcChatPrintMaxPerMinute=0, mcChatPaperWidth=58,
-            mcChatBodyLines=10, mcChatPrinterName='', mcChatPrintDryRun=True,
-            mcChatPrintServer=True, mcChatPrintBot=True,
-            mcChatPrintActionBar=False, mcChatPrintIgnoreCommands=True,
+            mcChatPrinterName='', mcChatPrintDryRun=True,
+            mcChatPrintIgnoreCommands=True,
         )
         ctrl.config = SimpleNamespace(misc=misc)
         ctrl._misc = lambda: misc
         ctrl._post_ui = lambda _ev: None
         ctrl._receipt_queue = queue_mod.Queue(maxsize=10)
         ctrl._receipt_thread = None
-        ctrl._receipt_serial = 0
         ctrl._receipt_last_at = 0.0
         ctrl._receipt_times = []
         ctrl._receipt_error_at = 0.0

@@ -498,56 +498,28 @@ def truncate(text: str, width: int, ellipsis: str = "…") -> str:
     return "".join(out) + ellipsis
 
 
-_KIND_LABELS = {
-    "chat": "玩家",
-    "private": "私聊",
-    "system": "系统",
-    "bot": "机器人",
-    "actionbar": "ActionBar",
-}
+def build_chat_ticket(message: ChatMessage, paper_width: int = 58) -> Ticket:
+    """把一条 MC 聊天排版成「聊天日志」小票指令。
 
-
-def build_chat_ticket(message: ChatMessage, paper_width: int = 58,
-                      body_lines: int = 10, serial: int = 0) -> Ticket:
-    """把一条 MC 聊天排版成小票指令。"""
+    只打印聊天数据本身，不加标题 / 分隔线 / 切纸，效果相当于把 chat.log
+    直接打到热敏纸上：``[21:20:00] <Steve> 内容``。
+    """
     width = 48 if int(paper_width) == 80 else 32
     when = datetime.fromtimestamp(float(message.time)) if message.time else datetime.now()
-    label = _KIND_LABELS.get((message.kind or "chat").strip().lower(), "玩家")
-    sender = str(message.sender or "").strip() or "未知"
-    body = clean_chat_text(message.text)
+    sender = truncate(str(message.sender or "").strip() or "未知", 14)
+    text = clean_chat_text(message.text)
+    if (message.kind or "").strip().lower() == "private":
+        text = "[私聊] " + text
+    line = f"[{when.strftime('%H:%M:%S')}] <{sender}> {text}"
+    lines = wrap_text(line, width)
 
     commands: List[Command] = [
         Command("JOBNAME", f"MC Chat {sender}"),
         Command("INIT"),
-        Command("ALIGN", "center"),
-        Command("SIZE", "2"),
-        Command("BOLD", "1"),
-        Command("TEXT", "MINECRAFT"),
-        Command("TEXT", "聊天小票"),
-        Command("BOLD", "0"),
-        Command("SIZE", "1"),
-        Command("TEXT", when.strftime("%Y-%m-%d %H:%M:%S")),
-    ]
-    if serial > 0:
-        commands.append(Command("TEXT", f"#{serial:06d}"))
-    commands += [Command("ALIGN", "left"), Command("HR")]
-    commands.append(Command("TEXT", truncate(f"{label}：{sender}", width)))
-    commands.append(Command("HR"))
-
-    lines = wrap_text(body, width)
-    limit = max(1, int(body_lines))
-    for line in lines[:limit]:
-        commands.append(Command("TEXT", line))
-    if len(lines) > limit:
-        commands.append(Command("TEXT", f"…（还有 {len(lines) - limit} 行）"))
-    commands += [
-        Command("HR"),
-        Command("ALIGN", "center"),
-        Command("TEXT", "— Minecraft Chat —"),
         Command("ALIGN", "left"),
-        Command("FEED", "3"),
-        Command("CUT", "partial"),
     ]
+    for item in lines:
+        commands.append(Command("TEXT", item))
     return Ticket(name=f"MC Chat {sender}", commands=commands)
 
 
@@ -620,12 +592,11 @@ def print_bytes(data: bytes, printer_name: str = "", dry_run: bool = False,
 
 
 def print_chat_ticket(message: ChatMessage, paper_width: int = 58,
-                      body_lines: int = 10, printer_name: str = "",
+                      printer_name: str = "",
                       dry_run: bool = False,
-                      preview_dir: Optional[Path] = None,
-                      serial: int = 0) -> PrintResult:
-    """打印一条 MC 聊天小票。"""
-    ticket = build_chat_ticket(message, paper_width, body_lines, serial=serial)
+                      preview_dir: Optional[Path] = None) -> PrintResult:
+    """打印一条 MC 聊天（只有聊天数据本身）。"""
+    ticket = build_chat_ticket(message, paper_width)
     data = render(ticket.commands, paper_width)
     return print_bytes(data, printer_name=printer_name, dry_run=dry_run,
                        preview_dir=preview_dir)
@@ -639,12 +610,12 @@ def sample_chat() -> ChatMessage:
     )
 
 
-def test_print(paper_width: int = 58, body_lines: int = 10,
+def test_print(paper_width: int = 58,
                printer_name: str = "", dry_run: bool = False,
                preview_dir: Optional[Path] = None) -> PrintResult:
-    """打一张示例聊天小票，给 GUI「测试打印」用。"""
+    """打一行示例聊天，给 GUI「测试打印」用。"""
     return print_chat_ticket(sample_chat(), paper_width=paper_width,
-                             body_lines=body_lines, printer_name=printer_name,
+                             printer_name=printer_name,
                              dry_run=dry_run, preview_dir=preview_dir)
 
 
