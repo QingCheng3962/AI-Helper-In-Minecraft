@@ -90,6 +90,13 @@ def verify_password(password: str, stored: str) -> bool:
 # ----------------------------------------------------------------------
 # sessions / rate limit
 # ----------------------------------------------------------------------
+def _credential_equal(left: str, right: str) -> bool:
+    try:
+        return hmac.compare_digest(left.encode('utf-8'), right.encode('utf-8'))
+    except UnicodeError:
+        return False
+
+
 class SessionStore:
     def __init__(self, ttl: int):
         self.ttl = max(300, int(ttl))
@@ -363,8 +370,11 @@ class WebApp:
                         self._plain(404, 'Not Found')
                     return
                 # B 端对外图片：/文件名（不带 /pic_http/）
-                if self._is_image_path(path) and self._image(path):
-                    return
+                if self._is_image_path(path):
+                    if app.require_login and not self._require_auth():
+                        return
+                    if self._image(path):
+                        return
                 self._plain(404, 'Not Found')
 
             def do_POST(self):  # noqa: N802
@@ -382,7 +392,7 @@ class WebApp:
                     _token, session = self._session()
                     if session and session.get('auth'):
                         form = self._form()
-                        if not hmac.compare_digest(form.get('csrf', ''), session['csrf']):
+                        if not _credential_equal(form.get('csrf', ''), session['csrf']):
                             self._plain(403, 'CSRF check failed')
                             return
                         app.sessions.destroy(self._session_token())
@@ -398,7 +408,7 @@ class WebApp:
                     self._redirect('/login')
                     return
                 form = self._form()
-                if not hmac.compare_digest(form.get('csrf', ''), session['csrf']):
+                if not _credential_equal(form.get('csrf', ''), session['csrf']):
                     self._plain(403, 'CSRF check failed')
                     return
                 ip = self.client_address[0]

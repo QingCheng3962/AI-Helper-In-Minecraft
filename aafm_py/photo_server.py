@@ -219,6 +219,13 @@ def cleanup_media_dir(directory: str, keep_days: int = 7,
     return removed, freed
 
 
+def _credential_equal(left: str, right: str) -> bool:
+    try:
+        return hmac.compare_digest(left.encode('utf-8'), right.encode('utf-8'))
+    except UnicodeError:
+        return False
+
+
 class _PhotoHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -278,7 +285,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
                         or self.headers.get('X-Api-Token') or '')
         if not supplied:
             supplied = (self._query().get('token') or [''])[0]
-        return hmac.compare_digest(str(supplied), token)
+        return _credential_equal(str(supplied), token)
 
     def _int_param(self, name: str, default: int, lo: int, hi: int) -> int:
         try:
