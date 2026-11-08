@@ -91,10 +91,16 @@ class LogSaver:
 
         prefix = date.strftime('%Y_%m_%d')
         index = self._next_index(prefix)
-        path = os.path.join(self.dir, f'{prefix}_第{index}次.txt')
         try:
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(lines) + '\n')
+            while True:
+                path = os.path.join(self.dir, f'{prefix}_第{index}次.txt')
+                try:
+                    # Reserve the name atomically, including across instances.
+                    with open(path, 'x', encoding='utf-8') as f:
+                        f.write('\n'.join(lines) + '\n')
+                    break
+                except FileExistsError:
+                    index += 1
         except OSError:
             # Writing failed: put the lines back so nothing is lost.
             with self._lock:

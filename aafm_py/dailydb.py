@@ -88,7 +88,6 @@ class DailyDB:
         with self.conn:
             self.conn.execute("UPDATE checkin_rewards SET state='unknown', "
                               "last_error='interrupted', updated=? WHERE state='sending'", (time.time(),))
-        self.ensure_day()
 
     # ------------------------------------------------------------------
     # 连接 / 建表
