@@ -26,6 +26,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
 from aafm_py import bot_engine as _be  # noqa: E402
+from aafm_py.mc_text import mc_len  # noqa: E402
 
 # --- 挂钩 BotEngine，记录正在运行的实例 ---
 _ENGINES = []
@@ -49,7 +50,7 @@ def _engine():
 
 TOKEN = ""
 MAX_BODY = 64 * 1024          # 请求体上限，避免超大 JSON 占内存
-MAX_SAY_LEN = 250             # MC 单包上限（UTF-16 计，这里按保守字符数）
+MAX_SAY_LEN = 250             # 整条消息/命令的 UTF-16 码元预算
 
 
 def _valid_game_id(value) -> bool:
@@ -118,8 +119,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"ok": False, "msg": "text 必须是字符串"})
                 return
             text = text.strip()
-            if not text or len(text) > MAX_SAY_LEN:
-                self._json(400, {"ok": False, "msg": "text 为空或过长（≤250 字符）"})
+            if not text or mc_len(text) > MAX_SAY_LEN:
+                self._json(400, {"ok": False, "msg": "text 为空或过长（≤250 UTF-16 码元）"})
                 return
             ok = bool(e.say(text))
             self._json(200 if ok else 503, {"ok": ok, "msg": "" if ok else "发送失败"})
