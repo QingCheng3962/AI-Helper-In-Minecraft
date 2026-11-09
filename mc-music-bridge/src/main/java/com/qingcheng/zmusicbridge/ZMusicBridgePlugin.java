@@ -42,6 +42,11 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
     /** 已发送过 client.hello 的玩家（= 装了 ZMusic Mod 且完成握手）。 */
     private final Set<UUID> ready = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> lastRequestAt = new ConcurrentHashMap<>();
+    /** 每个玩家的请求代次：stop / quit / disable 后旧搜索结果失效。 */
+    private final Map<UUID, Long> requestGenerations = new ConcurrentHashMap<>();
+    /** 广播模式下所有玩家共用的一代；stop / disable 会整体失效。 */
+    private volatile long broadcastGeneration = 0L;
+    private volatile boolean active = true;
 
     private String trigger = "[点歌]";
     private boolean broadcast = true;
@@ -50,6 +55,8 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onEnable() {
+        active = true;
+        broadcastGeneration++;
         saveDefaultConfig();
         loadSettings();
 
@@ -63,6 +70,11 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        active = false;
+        broadcastGeneration++;
+        requestGenerations.clear();
+        ready.clear();
+        lastRequestAt.clear();
         getServer().getMessenger().unregisterIncomingPluginChannel(this, PacketCodec.CHANNEL);
         getServer().getMessenger().unregisterOutgoingPluginChannel(this, PacketCodec.CHANNEL);
     }
@@ -108,8 +120,10 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        ready.remove(event.getPlayer().getUniqueId());
-        lastRequestAt.remove(event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        requestGenerations.merge(id, 1L, Long::sum);
+        ready.remove(id);
+        lastRequestAt.remove(id);
     }
 
     @Override
@@ -145,20 +159,36 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
         }
         lastRequestAt.put(player.getUniqueId(), now);
         player.sendMessage(PREFIX + "正在搜索：" + ChatColor.WHITE + keyword + ChatColor.RESET + " ...");
+        final long generation = requestGenerations.merge(player.getUniqueId(), 1L, Long::sum);
+        final long broadcastGen = broadcastGeneration;
 
         getServer().getScheduler().runTaskAsynchronously(this, () -> {
             final SongInfo song = search.search(keyword);
             getServer().getScheduler().runTask(this, () -> {
+                if (!isCurrent(player, generation, broadcastGen)) {
+                    getLogger().info("丢弃过期的点歌结果：" + player.getName() + " / " + keyword);
+                    return;
+                }
                 if (song == null) {
                     player.sendMessage(PREFIX + ChatColor.RED + "没找到「" + keyword + "」，换个关键词试试~");
                     return;
                 }
-                playSong(player, song);
+                playSong(player, song, generation, broadcastGen);
             });
         });
     }
 
-    private void playSong(Player requester, SongInfo song) {
+    private boolean isCurrent(Player player, long generation, long broadcastGen) {
+        return active && isEnabled() && player.isOnline()
+                && broadcastGeneration == broadcastGen
+                && requestGenerations.getOrDefault(player.getUniqueId(), 0L) == generation;
+    }
+
+    private void playSong(Player requester, SongInfo song,
+                          long generation, long broadcastGen) {
+        if (!isCurrent(requester, generation, broadcastGen)) {
+            return;
+        }
         List<Player> targets = new ArrayList<>();
         if (broadcast) {
             for (Player online : getServer().getOnlinePlayers()) {
@@ -240,6 +270,12 @@ public final class ZMusicBridgePlugin extends JavaPlugin implements Listener {
     }
 
     private void stopFor(CommandSender sender) {
+        // 先让在途搜索失效，再发停止，避免迟到的结果重新广播。
+        if (broadcast || !(sender instanceof Player)) {
+            broadcastGeneration++;
+        } else {
+            requestGenerations.merge(((Player) sender).getUniqueId(), 1L, Long::sum);
+        }
         JsonObject data = new JsonObject();
         data.addProperty("requestId", UUID.randomUUID().toString());
         data.addProperty("reason", "command");

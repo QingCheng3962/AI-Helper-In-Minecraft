@@ -51,25 +51,41 @@ public class SongModClient implements ClientModInitializer {
     public void onInitializeClient() {
         config = SongConfig.load();
         System.out.println("[songmod] 版本 v1.0.0+obflink5-20261017（26.x 无界面版；谁点谁听）");
-        ClientSendMessageEvents.CHAT.register(text -> onChat(text, true));   // 我自己发的
+        ClientSendMessageEvents.CHAT.register(text -> onChat(text, true, ""));   // 我自己发的
         // 服务器发来的聊天一律 mine=false（我自己的点歌只看本地发送事件）
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
-                onChat(message == null ? "" : message.getString(), false));
+                onChat(message == null ? "" : message.getString(), false,
+                       senderName(sender)));
         // 服务器把玩家聊天当「系统消息」重播时只走 GAME、不走 CHAT —— 两个通道都得收
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
-                onChat(message == null ? "" : message.getString(), false));
+                onChat(message == null ? "" : message.getString(), false, ""));
     }
 
-    private static void onChat(String message, boolean mine) {
+    /** 聊天事件里的发送者名字；GAME 重播没有 sender 时返回空。 */
+    private static String senderName(Object sender) {
+        try {
+            if (sender == null) {
+                return "";
+            }
+            Object profile = sender.getClass().getMethod("getProfile").invoke(sender);
+            Object name = profile == null ? null
+                    : profile.getClass().getMethod("getName").invoke(profile);
+            return name == null ? "" : String.valueOf(name);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static void onChat(String message, boolean mine, String sender) {
         // 兜一层：异常不能漏到 Fabric 事件回调里。
         try {
-            handleChat(message, mine);
+            handleChat(message, mine, sender);
         } catch (Throwable t) {
             System.out.println("[songmod] 处理聊天出错（已忽略）：" + t);
         }
     }
 
-    private static synchronized void handleChat(String message, boolean mine) {
+    private static synchronized void handleChat(String message, boolean mine, String sender) {
         if (message == null || config == null) {
             return;
         }
@@ -105,7 +121,7 @@ public class SongModClient implements ClientModInitializer {
                 stoppedByUser = false;
                 lastMyRequestAt = System.currentTimeMillis();
             }
-            if (config.onlyMySong && !isForMe(payload)) {
+            if (config.onlyMySong && !isForMe(payload, sender)) {
                 System.out.println("[songmod] 这条点歌不是给我的，跳过：" + shorten(payload, 100));
                 return;
             }
@@ -132,7 +148,7 @@ public class SongModClient implements ClientModInitializer {
                 stoppedByUser = false;
                 lastMyRequestAt = System.currentTimeMillis();
             }
-            if (config.onlyMySong && !isForMe(payload)) {
+            if (config.onlyMySong && !isForMe(payload, sender)) {
                 System.out.println("[songmod] 这条 id 取链不是给我的，跳过：" + shorten(payload, 100));
                 return;
             }
@@ -325,25 +341,23 @@ public class SongModClient implements ClientModInitializer {
         return a != null && b != null && !b.isEmpty() && a.equalsIgnoreCase(b);
     }
 
-    /** 这条播放数据是不是放给我的（谁点谁听）。 */
-    private static boolean isForMe(String payload) {
-        String p = payload == null ? "" : payload.toLowerCase();
-        String me = myName();
-        if (!me.isEmpty() && p.contains(me.toLowerCase())) {
-            return true;   // 文案里有我的名字 → 肯定是给我的
+    /** 这条播放数据是不是放给我的（谁点谁听 / 只信机器人）。 */
+    private static boolean isForMe(String payload, String sender) {
+        // 配了机器人游戏名：只接受这个发送者的播放数据（#53）。
+        String bot = config.botName == null ? "" : config.botName.trim();
+        if (!bot.isEmpty() && sender != null && !sender.isEmpty()) {
+            return sender.equalsIgnoreCase(bot);
         }
-        // 只有「我最近点的歌」才对得上；不能因为 5 分钟内点过歌，
-        // 就把别人点的歌也放出来（#15）。
+        // GAME 重播拿不到发送者时，退回「我最近点的歌」匹配；
+        // 不再因为正文里出现我的名字就接受（防止别人伪造 [点歌]我的名字 | 恶意URL）。
         if (System.currentTimeMillis() - lastMyRequestAt < 300000L) {
+            String p = payload == null ? "" : payload.toLowerCase();
             String q = lastMyQuery;
             String np = normalizeForMatch(p);
             String nq = normalizeForMatch(q);
             if (!nq.isEmpty() && (np.contains(nq) || nq.contains(np))) {
                 return true;
             }
-        }
-        if (me.isEmpty()) {
-            return true;   // 认不出自己是谁就别拦
         }
         return false;
     }

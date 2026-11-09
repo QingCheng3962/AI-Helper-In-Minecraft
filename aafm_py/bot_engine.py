@@ -34,7 +34,12 @@ class BotEngine:
         self.proc: Optional[subprocess.Popen] = None
         self._write_lock = threading.Lock()
         self._running = False
+        self._generation = 0
 
+    @property
+    def generation(self) -> int:
+        """每次 start/stop 递增，用来丢弃旧进程迟到的事件。"""
+        return self._generation
     @property
     def running(self) -> bool:
         return self._running and self.proc is not None and self.proc.poll() is None
@@ -62,16 +67,34 @@ class BotEngine:
             **kwargs,
         )
         self._running = True
-        threading.Thread(target=self._read_stdout, daemon=True).start()
-        threading.Thread(target=self._read_stderr, daemon=True).start()
+        self._generation += 1
+        generation = self._generation
+        threading.Thread(target=self._read_stdout, args=(generation,),
+                         daemon=True).start()
+        threading.Thread(target=self._read_stderr, args=(generation,),
+                         daemon=True).start()
 
-    def _read_stdout(self) -> None:
-        # 固定住本线程对应的进程：之后 self.proc 可能已被新进程替换（#17）。
+    def _emit(self, ev: Dict[str, Any], generation: int) -> None:
+        if generation != self._generation:
+            return
+        ev['__engine_generation'] = generation
+        if self.on_event:
+            try:
+                self.on_event(ev)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _read_stdout(self, generation: Optional[int] = None) -> None:
+        # 固定住本线程对应的进程与代次：之后 self.proc 可能已被新进程替换（#17/#52）。
+        if generation is None:
+            generation = self._generation
         proc = self.proc
         if proc is None or proc.stdout is None:
             return
         try:
             for line in proc.stdout:
+                if generation != self._generation:
+                    break
                 if not line:
                     continue
                 line = line.strip()
@@ -81,35 +104,31 @@ class BotEngine:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
                     ev = {'event': 'log', 'level': 'info', 'message': line}
-                if self.on_event:
-                    try:
-                        self.on_event(ev)
-                    except Exception:  # noqa: BLE001
-                        pass
+                self._emit(ev, generation)
         except Exception:  # noqa: BLE001
             pass
         finally:
             # 旧进程的读取线程结束时，不能覆盖新进程的运行状态。
-            if self.proc is proc:
+            if self.proc is proc and generation == self._generation:
                 self._running = False
 
-    def _read_stderr(self) -> None:
+    def _read_stderr(self, generation: Optional[int] = None) -> None:
+        if generation is None:
+            generation = self._generation
         proc = self.proc
         if proc is None or proc.stderr is None:
             return
         try:
             for line in proc.stderr:
+                if generation != self._generation:
+                    break
                 if not line:
                     continue
                 line = line.strip()
                 if not line:
                     continue
-                if self.on_event:
-                    try:
-                        self.on_event({'event': 'log', 'level': 'error',
-                                       'message': '[engine] ' + line})
-                    except Exception:  # noqa: BLE001
-                        pass
+                self._emit({'event': 'log', 'level': 'error',
+                            'message': '[engine] ' + line}, generation)
         except Exception:  # noqa: BLE001
             pass
 
@@ -178,6 +197,7 @@ class BotEngine:
         return self.send({'type': 'ping'})
 
     def stop(self) -> None:
+        self._generation += 1
         try:
             self.send({'type': 'quit'})
         except Exception:  # noqa: BLE001

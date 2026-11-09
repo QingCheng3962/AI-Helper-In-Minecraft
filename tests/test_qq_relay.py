@@ -35,6 +35,7 @@ class _Upstream:
         self.token = 'up-token'
         self.messages = []
         self.last_id = 0
+        self.instance = 'inst-1'
         self.port = _free_port()
         upstream = self
 
@@ -57,6 +58,7 @@ class _Upstream:
                     since = int((q.get('since') or [0])[0])
                     rows = [m for m in upstream.messages if m['id'] > since]
                     self._json(200, {'ok': True, 'last_id': upstream.last_id,
+                                     'instance': upstream.instance,
                                      'messages': rows})
                     return
                 if path.startswith('/pic_http/'):
@@ -99,6 +101,12 @@ class _Upstream:
     def stop(self):
         self.httpd.shutdown()
         self.httpd.server_close()
+
+    def restart(self, instance='inst-2'):
+        """模拟 A 重启：清空消息、id 归零、实例 ID 变化。"""
+        self.messages = []
+        self.last_id = 0
+        self.instance = instance
 
 
 class RelayTest(unittest.TestCase):
@@ -214,6 +222,19 @@ class RelayTest(unittest.TestCase):
         self.assertFalse(os.path.exists(old_path))
         msgs = self.relay.messages_since(0, 50)
         self.assertFalse(any(m['text'] == '[图片] old' for m in msgs))
+
+    def test_upstream_restart_resets_cursor(self):
+        self.up.add('one')
+        self.up.add('two')
+        self.assertEqual(self.relay.sync_once(), 2)
+        self.assertEqual(self.relay._upstream_since, 2)
+
+        self.up.restart(instance='inst-2')
+        self.up.add('new-after-restart')
+        self.assertEqual(self.relay.sync_once(), 1)
+        texts = [m['text'] for m in self.relay.messages_since(0, 50)]
+        self.assertIn('new-after-restart', texts)
+        self.assertEqual(self.relay._upstream_since, 1)
 
     def test_duplicate_and_upstream_id_reset(self):
         msg = self.up.add('hello')

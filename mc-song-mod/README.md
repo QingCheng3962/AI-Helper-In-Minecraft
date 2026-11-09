@@ -75,6 +75,7 @@
   "neteaseCookie": "",
   "localFallback": true,
   "onlyMySong": true,
+  "botName": "",
   "modUrl": "",
   "hintText": "提示：没装点歌 Mod 的人听不到，请前往 {url} 下载",
   "maxKeywordLength": 60
@@ -89,7 +90,8 @@
 | `provider` | 音源，目前只有 `163`（网易云）。 |
 | `neteaseCookie` | **自己的**网易云 Cookie（含 `MUSIC_U`）；本地兜底要用。可在游戏内「点歌台」界面里填。 |
 | `localFallback` | 机器人不在线时是否**本地兜底**自己搜歌（默认 **true**）。有机器人在线时**优先用机器人**。 |
-| `onlyMySong` | **只播给自己的歌**（默认 **true**）：文案里有自己的游戏名、或自己 5 分钟内点过歌才播。改 `false` = 谁发的都跟着听（全服一起听）。 |
+| `onlyMySong` | **只播给自己的歌**（默认 **true**）：播放数据必须来自机器人，或匹配自己 5 分钟内点过的歌；不再因为正文里出现自己的名字就接受。 |
+| `botName` | 机器人游戏名（推荐填写）：设置后只接受该发送者的点歌数据，防止别人伪造 `[点歌]你的名字 + 恶意链接`。留空时退回「最近点歌关键词」匹配。 |
 | `modUrl` / `hintText` | 播放成功后要不要在聊天里提示别人装 Mod（`{url}` 替换成 `modUrl`）；留空不提示。 |
 | `maxKeywordLength` | 歌名最大长度。 |
 

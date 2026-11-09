@@ -90,6 +90,16 @@ class PhotoApiTest(unittest.TestCase):
         self.assertEqual(msg['videos'][0]['url'],
                          '/pic_http/20261025_120100_000_ef01.mp4')
 
+    def test_messages_api_reports_instance_and_high_water(self):
+        self.server.record_qq_message(
+            {'groupId': '999', 'groupName': '群', 'sender': 'Alice',
+             'content': 'hello'})
+        status, _headers, body = self._get('/api/qq/messages?since=0&limit=1')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertTrue(data['instance'])
+        self.assertGreaterEqual(data['last_id'], data['messages'][-1]['id'])
+
     def test_cors_preflight_and_health(self):
         status, headers, _body = self._get('/api/qq/messages', token=None,
                                           method='OPTIONS')

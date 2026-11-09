@@ -2,7 +2,8 @@
     static final Config config = new Config();
     static class Config {
         String trigger = "[点歌]", stopWord = "停止", guiWord = "台", loginWord = "登录",
-                logoutWord = "登出", neteaseCookie = "", modUrl = "", hintText = "";
+                logoutWord = "登出", neteaseCookie = "", modUrl = "", hintText = "",
+                botName = "";
         boolean onlyMySong = false, localFallback = true;
         float volume = 1;
     }
@@ -71,12 +72,16 @@
     static String myName() { return "Alice"; }
     static void openScreen() { }
     static void require(boolean ok, String message) { if (!ok) throw new AssertionError(message); }
-    static void chat(String payload, boolean mine) { handleChat("[点歌]" + payload, mine); }
+    static void chat(String payload, boolean mine) { chat(payload, mine, mine ? "Alice" : ""); }
+    static void chat(String payload, boolean mine, String sender) {
+        handleChat("[点歌]" + payload, mine, sender);
+    }
     static void reset() {
         stopPlayback(); SCHED.tasks.clear(); POOL.tasks.clear();
         SongPlayer.plays.clear(); Chat.messages.clear(); Minecraft.instance.ui.clear();
         MusicSearch.calls = 0; MusicSearch.entered = MusicSearch.release = null; MusicSearch.fail = false;
         lastMyRequestAt = 0; lastMyQuery = "";
+        config.onlyMySong = false; config.botName = "";
     }
     static void gate() {
         MusicSearch.entered = new java.util.concurrent.CountDownLatch(1);
@@ -134,5 +139,22 @@
 
         reset(); chat("id:123456", true); POOL.runAll();
         require(MusicSearch.calls == 1 && SongPlayer.plays.size() == 1, "fresh own ID was blocked");
-        System.out.println("PASS: 12 client cancellation scenarios");
+
+        // #53：别人在公屏发「[点歌]我的名字 | 恶意URL」不能让我播放。
+        reset(); config.onlyMySong = true; chat("Mine", true);
+        chat("Alice | https://invalid.test/evil.mp3", false);
+        require(SongPlayer.plays.isEmpty(), "name-only forged receipt was played");
+
+        // 配了 botName：只信任这个发送者。
+        reset(); config.onlyMySong = true; config.botName = "BotName";
+        chat("Mine", true); chat("Other | https://invalid.test/robot.mp3", false, "BotName");
+        require(SongPlayer.plays.equals(java.util.List.of("https://invalid.test/robot.mp3")),
+                "trusted bot sender was blocked");
+
+        reset(); config.onlyMySong = true; config.botName = "BotName";
+        chat("Mine", true); chat("Mine | https://invalid.test/evil.mp3", false, "Mallory");
+        require(SongPlayer.plays.isEmpty(), "untrusted sender forged receipt");
+        config.onlyMySong = false; config.botName = "";
+
+        System.out.println("PASS: 15 client cancellation scenarios");
     }

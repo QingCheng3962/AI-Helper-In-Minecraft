@@ -212,6 +212,7 @@ class Relay:
         self.last_sync = 0.0
         self.last_error = ''
         self._upstream_since = self._meta_int('upstream_since', 0)
+        self._upstream_instance = self._meta_str('upstream_instance', '')
 
     # ------------------------------------------------------------------
     # storage
@@ -251,6 +252,11 @@ class Relay:
             return int(row[0]) if row else default
         except (TypeError, ValueError):
             return default
+
+    def _meta_str(self, key: str, default: str = '') -> str:
+        with self._lock:
+            row = self._conn.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()
+        return str(row[0]) if row else default
 
     def _set_meta(self, key: str, value: Any) -> None:
         with self._lock:
@@ -314,23 +320,42 @@ class Relay:
 
     def sync_once(self) -> int:
         """拉取一次；返回本轮新增消息数。"""
-        data = self._fetch_messages(self._upstream_since)
+        since = self._upstream_since
+        data = self._fetch_messages(since)
         if not data.get('ok'):
             raise RuntimeError('上游返回失败: ' + str(data)[:200])
-        messages = data.get('messages') or []
+        instance = str(data.get('instance') or '')
         last_id = int(data.get('last_id') or 0)
 
-        # A 重启后 id 会从 1 重新开始：检测到回绕就下一轮从 0 重拉，
+        # A 重启后 id 会从 1 重新开始：优先用上游实例 ID 识别；旧版上游没有
+        # instance 时退回「last_id 比游标小」的判断。重开后从 0 重拉，
         # 已入库的消息靠 fingerprint 去重。
-        if last_id < self._upstream_since:
-            log(f'上游消息 id 回绕（{self._upstream_since} -> {last_id}），'
-                f'下一轮从 0 重新同步（自动去重）。')
-            self._upstream_since = 0
-            self._set_meta('upstream_since', 0)
-            return 0
+        reset = False
+        if instance:
+            if self._upstream_instance and instance != self._upstream_instance:
+                log(f'上游实例变化（{self._upstream_instance[:8]} -> {instance[:8]}），'
+                    '从 0 重新同步（自动去重）。')
+                reset = True
+            self._upstream_instance = instance
+            self._set_meta('upstream_instance', instance)
+        if last_id < since:
+            log(f'上游消息 id 回绕（{since} -> {last_id}），从 0 重新同步（自动去重）。')
+            reset = True
+        if reset:
+            since = 0
+            data = self._fetch_messages(0)
+            if not data.get('ok'):
+                raise RuntimeError('上游返回失败: ' + str(data)[:200])
+            last_id = int(data.get('last_id') or 0)
+            instance = str(data.get('instance') or instance)
+            if instance:
+                self._upstream_instance = instance
+                self._set_meta('upstream_instance', instance)
+
+        messages = data.get('messages') or []
 
         inserted = 0
-        max_seen = self._upstream_since
+        max_seen = since
         for msg in messages:
             images_json: List[Dict[str, str]] = []
             for img in msg.get('images') or []:
@@ -371,7 +396,12 @@ class Relay:
         self._retry_missing_images(100)
         self.cleanup_media()
 
-        self._upstream_since = max(max_seen, last_id)
+        # 分页续传：只推进到本轮真正处理过的最后一条，不能用上游高水位
+        # last_id 直接跳过还没读到的分页。
+        if messages:
+            self._upstream_since = max_seen
+        else:
+            self._upstream_since = since
         self._set_meta('upstream_since', self._upstream_since)
         self.upstream_ok = True
         self.last_error = ''
@@ -596,6 +626,7 @@ class Relay:
             'upstream_base': self.upstream_base,
             'last_sync': self.last_sync,
             'last_error': self.last_error,
+            'upstream_instance': self._upstream_instance,
             'base_url': self.public_base,
             'token_required': bool(self.token),
         }
