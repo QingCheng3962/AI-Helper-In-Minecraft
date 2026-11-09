@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.4** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.5** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -32,7 +32,16 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ## Changelog
 
 > All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.2 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
-> Current version: **`v0.3.4`**; the client mod stays at `0.1.0` (jar names unchanged).
+> Current version: **`v0.3.5`**; the client mod stays at `0.1.0` (jar names unchanged).
+
+### v0.3.5
+
+- **Session/concurrency safety**: the relay resyncs by upstream instance + true high-water mark (#39); Bot/QQ engine events carry a generation so late events from an old process cannot pollute a new session (#52); ZMusic requests/broadcasts use generations, so `stop` / quit / disable invalidates in-flight searches (#41); the OAuth callback now has `state`, timeout, single-shot handling and error cleanup (#48).
+- **Song request safety**: the mod no longer plays a receipt just because the text contains your name; `botName` can restrict playback data to the trusted bot sender, otherwise it falls back to matching your latest request keyword (#53).
+- **Data reliability**: book progress stores a document SHA-256 + pagination fingerprint and refuses to continue with stale page numbers (#40); affinity rolls back in-memory changes when saving fails (#45); bad config types are skipped safely and corrupt JSON is backed up before falling back to defaults (#43/#44).
+- **Spreadsheet safety**: XLSX column insertion rewrites formula references (#42); player names/descriptions/aliases are prefixed with `'` to block formula injection (#54).
+- **Process/credentials**: shutdown stops the receipt worker and drops queued tickets (#46); AutoEat uses generations so old timers cannot touch a new session (#47); browser launch uses `execFile` and only allows `http/https` (#55); the relay only sends its token to the upstream origin and strips it on cross-origin redirects (#56).
+- Regression tests: Python 156, Node 58, and Java song-mod 15+15+8 scenarios pass; the ZMusic plugin builds successfully.
 
 ### v0.3.4
 
