@@ -546,7 +546,7 @@ function handleCommand(cmd) {
             break;
         case 'setQuiz':
             runtime.quiz.enabled = !!cmd.enabled;
-            if (quiz && quiz.config) quiz.config.enabled = runtime.quiz.enabled;
+            if (quiz) quiz.setEnabled(runtime.quiz.enabled);
             log('info', 'Quiz ' + (runtime.quiz.enabled ? 'enabled' : 'disabled'));
             break;
         case 'writeBook':

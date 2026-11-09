@@ -93,6 +93,11 @@ class QuizHandler {
         this._detectQuestion(text);
     }
 
+    setEnabled(enabled) {
+        this.config.enabled = !!enabled;
+        if (!this.config.enabled) this._endSession();
+    }
+
     async _startSession(question) {
         // End previous session if exists
         if (this.session) {
@@ -116,7 +121,7 @@ class QuizHandler {
         }
 
         // Call LLM API
-        this._queryLLM(question);
+        this._queryLLM(question, this.session);
     }
 
     // --- Answer extraction (always strip the model's thinking) ---
@@ -154,7 +159,7 @@ class QuizHandler {
     }
 
     // --- LLM API ---
-    async _queryLLM(question) {
+    async _queryLLM(question, session = this.session) {
         if (!this.llmConfig.endpoint || !this.llmConfig.apiKey) {
             this.Log.warn("LLM API not configured, skipping answer");
             return;
@@ -207,6 +212,7 @@ class QuizHandler {
             }
 
             const data = await response.json();
+            if (!this.config.enabled || this.session !== session || !session || session.answered) return;
             this.Log.info(`LLM raw response: ${JSON.stringify(data).substring(0, 500)}`);
             // Use the final answer (content); reasoning_content is only a
             // fallback and the thinking is always stripped.
@@ -223,18 +229,17 @@ class QuizHandler {
             this._saveQuestion(question, answer);
 
             // Send answer after minimum delay
-            this._sendAnswer(answer);
+            this._sendAnswer(answer, session);
         } catch (e) {
             this.Log.error(`LLM query failed: ${e.message}`);
         }
     }
 
     // --- Send Answer ---
-    _sendAnswer(answer) {
+    _sendAnswer(answer, session = this.session) {
         // Capture the session this answer belongs to: a delayed callback must
         // never leak into a newer question (#26).
-        const session = this.session;
-        if (!session || session.answered) return;
+        if (!this.config.enabled || !session || this.session !== session || session.answered) return;
 
         const elapsed = Date.now() - session.startTime;
         const minDelay = this.config.minDelay || 3500;
@@ -243,7 +248,7 @@ class QuizHandler {
         this.Log.info(`Sending answer in ${remaining}ms: "${answer}"`);
 
         setTimeout(() => {
-            if (this.session !== session || session.answered) return;
+            if (!this.config.enabled || this.session !== session || session.answered) return;
             session.answered = true;
             this.bot.chat(answer);
             this.Log.info(`Answer sent: "${answer}"`);
