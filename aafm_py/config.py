@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
@@ -245,10 +247,21 @@ class AiPlayerConfig:
                 if isinstance(data, dict):
                     for k, v in data.items():
                         if hasattr(cfg, k):
-                            setattr(cfg, k, v)
+                            coerced = _coerce_config_value(getattr(cfg, k), v)
+                            if coerced is not _SKIP:
+                                setattr(cfg, k, coerced)
             except Exception as e:
-                print(f'[mcai] Failed to read {path}, using defaults: {e}')
-        cfg.validate()
+                backup = _backup_corrupt_config(path)
+                extra = f'（已备份到 {backup}）' if backup else ''
+                print(f'[mcai] Failed to read {path}, using defaults: {e}{extra}')
+        try:
+            cfg.validate()
+        except Exception as e:  # noqa: BLE001
+            backup = _backup_corrupt_config(path)
+            extra = f'（已备份到 {backup}）' if backup else ''
+            print(f'[mcai] 配置校验失败，回退默认值: {e}{extra}')
+            cfg = cls()
+            cfg.validate()
         return cfg
 
     def save(self, path: Optional[str] = None) -> bool:
@@ -1061,7 +1074,9 @@ class AppConfig:
                             cur = getattr(cfg, section)
                             for k, v in sub.items():
                                 if hasattr(cur, k):
-                                    setattr(cur, k, v)
+                                    coerced = _coerce_config_value(getattr(cur, k), v)
+                                    if coerced is not _SKIP:
+                                        setattr(cur, k, coerced)
                     # Migrate the old flat QQ keys (pre per-framework split) into
                     # the sub-config of the framework that was selected.
                     qq_data = data.get('qq')
@@ -1077,10 +1092,22 @@ class AppConfig:
                                 if target is not None and not isinstance(target, dict):
                                     for k, v in flat.items():
                                         if hasattr(target, k):
-                                            setattr(target, k, v)
+                                            coerced = _coerce_config_value(
+                                                getattr(target, k), v)
+                                            if coerced is not _SKIP:
+                                                setattr(target, k, coerced)
             except Exception as e:
-                print(f'[mcai] Failed to read {path}, using defaults: {e}')
-        cfg.validate()
+                backup = _backup_corrupt_config(path)
+                extra = f'（已备份到 {backup}）' if backup else ''
+                print(f'[mcai] Failed to read {path}, using defaults: {e}{extra}')
+        try:
+            cfg.validate()
+        except Exception as e:  # noqa: BLE001
+            backup = _backup_corrupt_config(path)
+            extra = f'（已备份到 {backup}）' if backup else ''
+            print(f'[mcai] 配置校验失败，回退默认值: {e}{extra}')
+            cfg = cls()
+            cfg.validate()
         return cfg
 
     def save(self, path: Optional[str] = None) -> bool:
@@ -1160,3 +1187,57 @@ def _clamp_float(v: Any, lo: float, hi: float) -> float:
         return max(lo, min(hi, float(v)))
     except (TypeError, ValueError):
         return lo
+
+
+_SKIP = object()
+
+
+def _coerce_config_value(current: Any, value: Any) -> Any:
+    """按现有字段类型做安全转换；类型明显不对就返回 _SKIP（保留默认值）。"""
+    if isinstance(current, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            low = value.strip().lower()
+            if low in ('1', 'true', 'yes', 'on', 'y'):
+                return True
+            if low in ('0', 'false', 'no', 'off', 'n'):
+                return False
+        return _SKIP
+    if isinstance(current, int):
+        if isinstance(value, bool):
+            return _SKIP
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return _SKIP
+    if isinstance(current, float):
+        if isinstance(value, bool):
+            return _SKIP
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return _SKIP
+    if isinstance(current, str):
+        return value if isinstance(value, str) else _SKIP
+    if isinstance(current, list):
+        return value if isinstance(value, list) else _SKIP
+    if isinstance(current, dict):
+        return value if isinstance(value, dict) else _SKIP
+    if current is None:
+        return value
+    return _SKIP
+
+
+def _backup_corrupt_config(path: str) -> str:
+    """JSON 损坏/读取失败时先留一份原始字节，保存时不至于直接覆盖掉（#44）。"""
+    try:
+        if not path or not os.path.isfile(path):
+            return ''
+        dest = f'{path}.corrupt-{time.strftime("%Y%m%d_%H%M%S")}.bak'
+        shutil.copy2(path, dest)
+        return dest
+    except OSError:
+        return ''

@@ -14,8 +14,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 
-from other_qq_pic_sent.relay import Relay, _fingerprint
+from other_qq_pic_sent.relay import (Relay, _SafeRedirectHandler, _fingerprint)
 
 
 def _free_port() -> int:
@@ -253,6 +254,28 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(self.relay.sync_once(), 0)
         self.up.add('new message')                    # 新内容
         self.assertEqual(self.relay.sync_once(), 1)
+
+    def test_media_token_is_origin_scoped(self):
+        self.relay.media_min_free_mb = 0
+        with patch('other_qq_pic_sent.relay._bytes_request',
+                   return_value=b'x') as call:
+            self.relay._download_image('cross.png',
+                                       'https://cdn.invalid/cross.png')
+        self.assertEqual(call.call_args.args[1], '')
+        with patch('other_qq_pic_sent.relay._bytes_request',
+                   return_value=b'x') as call:
+            self.relay._download_image(
+                'same.png', self.relay.upstream_base + '/pic_http/same.png')
+        self.assertEqual(call.call_args.args[1], self.relay.upstream_token)
+
+        req = urllib.request.Request('https://origin.invalid/a',
+                                     headers={'X-Token': 'secret'})
+        cross = _SafeRedirectHandler().redirect_request(
+            req, None, 302, 'Found', {}, 'https://cdn.invalid/b')
+        self.assertNotIn('x-token', {k.lower() for k in cross.headers})
+        same = _SafeRedirectHandler().redirect_request(
+            req, None, 302, 'Found', {}, 'https://origin.invalid/b')
+        self.assertIn('x-token', {k.lower() for k in same.headers})
 
     def test_fingerprint_stable(self):
         msg = {'group_id': '1', 'sender': 'A', 'time': 1.5, 'text': 'x'}

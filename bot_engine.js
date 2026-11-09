@@ -508,6 +508,7 @@ bot.on('error', (e) => {
 
 bot.on('end', (reason) => {
     endEmitted = true;
+    if (autoEat) autoEat.stop();
     if (unlockTimer) { clearTimeout(unlockTimer); unlockTimer = null; }
     emitEvent({ event: 'end', reason: reason == null ? '' : String(reason) });
 });
@@ -541,7 +542,7 @@ function handleCommand(cmd) {
         }
         case 'setAutoeat':
             runtime.autoeat.enabled = !!cmd.enabled;
-            if (autoEat) autoEat.enabled = runtime.autoeat.enabled;
+            if (autoEat) autoEat.setEnabled(runtime.autoeat.enabled);
             log('info', 'AutoEat ' + (runtime.autoeat.enabled ? 'enabled' : 'disabled'));
             break;
         case 'setQuiz':

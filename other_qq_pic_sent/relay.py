@@ -69,12 +69,45 @@ class MediaTooLarge(Exception):
     """Downloaded media exceeds the configured per-file limit."""
 
 
+def _origin(value: str):
+    parts = urllib.parse.urlsplit(str(value or ''))
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or '').lower()
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is None:
+        port = {'http': 80, 'https': 443}.get(scheme)
+    return scheme, host, port
+
+
+def _same_origin(left: str, right: str) -> bool:
+    a, b = _origin(left), _origin(right)
+    return bool(a[1]) and a == b
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """跨来源跳转时丢掉上游 Token，避免把凭据交给第三方 CDN（#56）。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and not _same_origin(req.full_url, new.full_url):
+            for key in list(new.headers):
+                if key.lower() in ('x-token', 'x-api-token', 'authorization'):
+                    del new.headers[key]
+        return new
+
+
+_OPENER = urllib.request.build_opener(_SafeRedirectHandler())
+
+
 def _json_request(url: str, token: str = '', timeout: float = 15.0) -> Dict[str, Any]:
     headers = {'Accept': 'application/json'}
     if token:
         headers['X-Token'] = token
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _OPENER.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode('utf-8'))
 
 
@@ -84,7 +117,7 @@ def _bytes_request(url: str, token: str = '', timeout: float = 30.0,
     if token:
         headers['X-Token'] = token
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _OPENER.open(req, timeout=timeout) as resp:
         if max_bytes:
             length = resp.headers.get('Content-Length')
             if length:
@@ -290,8 +323,11 @@ class Relay:
         is_video = name.lower().endswith(('.mp4', '.m4v', '.mov'))
         timeout = self.request_timeout * (6 if is_video else 2)
         max_bytes = self.media_max_mb * 1024 * 1024 if self.media_max_mb else 0
+        # 凭据只发给配置的上游来源；第三方 CDN / 跨来源跳转不带 Token（#56）。
+        media_token = (self.upstream_token
+                       if _same_origin(src, self.upstream_base) else '')
         try:
-            data = _bytes_request(src, self.upstream_token, timeout, max_bytes)
+            data = _bytes_request(src, media_token, timeout, max_bytes)
         except MediaTooLarge:
             log(f'媒体超过单文件上限 {self.media_max_mb} MB，跳过 {name}')
             return False

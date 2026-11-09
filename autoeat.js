@@ -15,6 +15,9 @@ class AutoEat {
         this.enabled = Config.autoeat?.enabled ?? true;
         this.eating = false;
         this.originalSlot = null;
+        // 每次进食一个代次；stop/disable/断开后旧定时器不能再操作新会话（#47）。
+        this._runId = 0;
+        this._interval = null;
 
         // Register the health listener exactly once; the callback itself checks
         // `enabled`, so runtime toggles (engine command or toggle()) never leak
@@ -35,7 +38,7 @@ class AutoEat {
     }
 
     async _check() {
-        if (this.eating || !this.enabled) return;
+        if (this.eating || !this.enabled || this._interval) return;
         if ((this.bot.food || 0) > FOOD_THRESHOLD) return;
 
         const food = this._findFood();
@@ -44,36 +47,46 @@ class AutoEat {
             return;
         }
 
+        const bot = this.bot;
+        const runId = ++this._runId;
         this.eating = true;
-        this.originalSlot = this.bot.quickBarSlot;
+        this.originalSlot = bot.quickBarSlot;
 
         try {
-            await this.bot.moveSlotItem(food.slot, this.bot.quickBarSlot + 36);
+            await bot.moveSlotItem(food.slot, bot.quickBarSlot + 36);
             await new Promise(r => setTimeout(r, 100));
-            this.bot.activateItem();
+            if (!this.enabled || runId !== this._runId || this.bot !== bot) {
+                return;
+            }
+            bot.activateItem();
             this.Log.info(`AutoEat: eating ${food.item.name}`);
 
-            const interval = setInterval(() => {
-                if (this.bot.food >= 20 || !this.bot.heldItem) {
-                    clearInterval(interval);
-                    this._finish(food.slot);
+            this._interval = setInterval(() => {
+                if (!this.enabled || runId !== this._runId || this.bot !== bot) {
+                    this.stop();
+                    return;
+                }
+                if (bot.food >= 20 || !bot.heldItem) {
+                    const originalSlot = this.originalSlot;
+                    this.stop();
+                    this._finish(food.slot, bot, originalSlot);
                 } else {
-                    this.bot.activateItem();
+                    bot.activateItem();
                 }
             }, 500);
         } catch (err) {
             this.Log.error(`AutoEat error: ${err.message}`);
-            this.eating = false;
+            this.stop();
         }
     }
 
-    async _finish(foodSlot) {
+    async _finish(foodSlot, bot = this.bot, originalSlot = this.originalSlot) {
         try {
-            if (this.bot.heldItem && foodSlot !== null) {
-                await this.bot.moveSlotItem(this.bot.quickBarSlot + 36, foodSlot);
+            if (bot.heldItem && foodSlot !== null) {
+                await bot.moveSlotItem(bot.quickBarSlot + 36, foodSlot);
             }
-            if (this.originalSlot !== null) {
-                this.bot.setQuickBarSlot(this.originalSlot);
+            if (originalSlot !== null) {
+                bot.setQuickBarSlot(originalSlot);
             }
         } catch (err) {
             this.Log.error(`AutoEat finish error: ${err.message}`);
@@ -83,10 +96,30 @@ class AutoEat {
         this.Log.info("AutoEat: done");
     }
 
-    toggle() {
-        this.enabled = !this.enabled;
+    /** 取消当前进食和定时器；断开/关闭时调用，旧回调不能再碰 bot（#47）。 */
+    stop() {
+        this._runId++;
+        if (this._interval) {
+            clearInterval(this._interval);
+            this._interval = null;
+        }
+        this.eating = false;
+        this.originalSlot = null;
+    }
+
+    setEnabled(enabled) {
+        this.enabled = !!enabled;
+        if (!this.enabled) {
+            this.stop();
+        } else {
+            this._check();
+        }
         this.Log.info("AutoEat " + (this.enabled ? "enabled" : "disabled"));
         return this.enabled;
+    }
+
+    toggle() {
+        return this.setEnabled(!this.enabled);
     }
 }
 
