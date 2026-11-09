@@ -628,6 +628,8 @@ def _write_csv(path: str, name: str, note: str = '', ai: bool = False,
             row.append('')
         row[main_i] = main
     if ai and ai_base is not None:
+        while len(grid[found]) < ai_base + _AI_COUNT:
+            grid[found].append('')
         old = [grid[found][ai_base + k]
                for k in range(_AI_COUNT)
                if ai_base + k < len(grid[found])]
