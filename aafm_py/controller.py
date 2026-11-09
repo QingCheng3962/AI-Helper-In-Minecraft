@@ -23,6 +23,7 @@ from .bot_engine import BotEngine, BASE_DIR, SendResult
 from .config import (AiPlayerConfig, AppConfig, BOOK_PROGRESS_FILE,
                      DEFAULT_BASE_URLS, load_auth_profile, save_json)
 from .log_saver import LogSaver
+from .mc_text import mc_len as _mc_len, mc_clip as _mc_clip
 from .photo_server import (PHOTO_DIR, PhotoServer, cleanup_media_dir,
                            save_image_bytes)
 from .qq_engine import QqEngine
@@ -131,37 +132,6 @@ def _sanitize_text(value) -> str:
             out.append('?')
         else:
             out.append(ch)
-    return ''.join(out)
-
-
-def _mc_len(text) -> int:
-    """MC 聊天命令的 256 上限按 Java 字符串（UTF-16 码元）计。
-
-    Python 的 ``len()`` 只数码点：一个 emoji 在 Java 里占 2 个码元、在 Python 里
-    只算 1 个 → 含 emoji 的文案会被算少，最后超长被服务器踢（#19）。
-    """
-    s = '' if text is None else str(text)
-    try:
-        return len(s.encode('utf-16-le')) // 2
-    except Exception:  # noqa: BLE001
-        return len(s)
-
-
-def _mc_clip(text, limit: int) -> str:
-    """按 UTF-16 码元截断（不拆开代理对），用于 /msg 等有硬上限的发送。"""
-    s = '' if text is None else str(text)
-    if limit <= 0:
-        return ''
-    if _mc_len(s) <= limit:
-        return s
-    out = []
-    used = 0
-    for ch in s:
-        w = 2 if ord(ch) > 0xFFFF else 1
-        if used + w > limit:
-            break
-        out.append(ch)
-        used += w
     return ''.join(out)
 
 
@@ -1568,8 +1538,8 @@ class Controller:
             return
         # Save media once: they are needed by both the website API and the
         # in-game link relay (and must still be saved when MC is offline).
-        saved_images: List[Dict[str, str]] = []
-        saved_videos: List[Dict[str, str]] = []
+        saved_images: List[Dict[str, Any]] = []
+        saved_videos: List[Dict[str, Any]] = []
         if (qq.imageAsLink or qq.webApiEnabled) and (ev.get('images') or ev.get('videos')):
             try:
                 saved_images = self._prepare_qq_images(ev)
@@ -1812,11 +1782,12 @@ class Controller:
         except (KeyError, IndexError, ValueError):
             text = group + name + message
         text = _sanitize_text(text.replace('\n', ' ').strip())
-        limit = max(20, int(cfg.maxLength or 220))
-        if len(text) > limit:
-            text = text[:limit - 1] + '…'
         # 防止 URL 把后面的 [哭] 之类表情代码吞进 clickEvent.open_url。
-        return _separate_mc_urls(text)
+        text = _separate_mc_urls(text)
+        limit = min(250, max(20, int(cfg.maxLength or 220)))
+        if _mc_len(text) > limit:
+            text = _mc_clip(text, limit - 1) + '…'
+        return text
 
     # ------------------------------------------------------------------
     # QQ image -> local HTTP links
@@ -1885,13 +1856,13 @@ class Controller:
             pass
 
     def _prepare_qq_media(self, candidates_list,
-                          timeout: float = 8.0) -> List[Dict[str, str]]:
+                          timeout: float = 8.0) -> List[Dict[str, Any]]:
         """把一组 QQ 图片/视频候选下载到 ``pic_http/``。
 
-        返回 ``[{'name': 文件名, 'url': '/pic_http/文件名'}, ...]``；下载失败的
+        返回含 name、url 與內部位置 index 的紀錄；下載失敗的
         项目会被跳过。网站 API 与 MC 公屏链接共用这一份结果，避免重复下载。
         """
-        saved: List[Dict[str, str]] = []
+        saved: List[Dict[str, Any]] = []
         preserve = bool(getattr(self.config.qq, 'imagePreserveName', False))
         max_bytes, min_free_mb = self._media_limits()
         if min_free_mb:
@@ -1907,7 +1878,7 @@ class Controller:
                                     f'[QQ] 磁盘剩余 {free_mb:.0f} MB，低于 {min_free_mb} MB，'
                                     '已暂停保存图片/视频')
                 return saved
-        for candidates in (candidates_list or []):
+        for index, candidates in enumerate(candidates_list or []):
             data = None
             hint = self._image_hint(candidates)
             try:
@@ -1926,14 +1897,14 @@ class Controller:
             if not data:
                 continue
             name = save_image_bytes(data, hint, preserve_name=preserve)
-            saved.append({'name': name, 'url': '/pic_http/' + name})
+            saved.append({'name': name, 'url': '/pic_http/' + name, 'index': index})
         return saved
 
-    def _prepare_qq_images(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _prepare_qq_images(self, ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         """保存一条 QQ 消息里的图片（``ev['images']``）。"""
         return self._prepare_qq_media(ev.get('images') or [])
 
-    def _prepare_qq_videos(self, ev: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _prepare_qq_videos(self, ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         """保存一条 QQ 消息里的视频（``ev['videos']``，如 .mp4）。
 
         视频比图片大，给更长的下载超时。
@@ -1951,33 +1922,38 @@ class Controller:
             return content or ''
         base = self._image_base_url()
         out = content or ''
-        pending: List[str] = []
-        for item in saved:
+        pending = {}
+        for index, item in enumerate(saved):
             name = str(item.get('name') if isinstance(item, dict) else item or '')
             if name:
-                pending.append(base + '/pic_http/' + name)
+                slot = item.get('index', index) if isinstance(item, dict) else index
+                pending[slot] = base + '/pic_http/' + name
         # 新引擎用私有区标记真图片/真视频；老内容仍兼容 ``[图片]`` 占位符。
         use_token = bool(token and token in out)
         marker = token if use_token else placeholder
-        for link in list(pending):
-            idx = out.find(marker)
-            if idx < 0:
-                break
-            end = idx + len(marker)
-            # 链接后已有空白就不重复加；否则补一个空格，防止正文被并入 URL。
+        ordinal = 0
+
+        def replace(match):
+            nonlocal ordinal
+            link = pending.pop(ordinal, None)
+            ordinal += 1
+            if link is None:
+                return match.group()
+            end = match.end()
             tail = '' if end >= len(out) or out[end].isspace() else ' '
-            out = out[:end] + ' ' + link + tail + out[end:]
-            pending.remove(link)
+            return match.group() + ' ' + link + tail
+
+        out = re.sub(re.escape(marker), replace, out)
         if use_token:
             out = out.replace(token, placeholder)
         # 没有对应占位符（如纯视频消息被网关省略了 [视频]）时补到末尾。
-        for link in pending:
+        for link in pending.values():
             out = out.rstrip() + ' ' + placeholder + ' ' + link
         return out
 
     def _attach_image_links(self, ev: Dict[str, Any], content: str,
-                            saved: Optional[List[Dict[str, str]]] = None,
-                            videos: Optional[List[Dict[str, str]]] = None) -> str:
+                            saved: Optional[List[Dict[str, Any]]] = None,
+                            videos: Optional[List[Dict[str, Any]]] = None) -> str:
         """把 ``[图片]`` / ``[视频]`` 依次替换成公屏可点的链接。"""
         if saved is None and videos is None:
             saved = self._prepare_qq_images(ev)

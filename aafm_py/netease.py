@@ -319,7 +319,7 @@ def check_login(cookie: str = '') -> Dict[str, Any]:
 
     # ② 实测一首会员歌
     probe = player_url(VIP_PROBE_SONG, ck)
-    if probe and probe[0]:
+    if probe and probe[0] and probe[1] == 0:
         res['can_play_vip'] = True
         res['ok'] = True
 
