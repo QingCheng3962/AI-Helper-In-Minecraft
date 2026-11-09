@@ -195,6 +195,7 @@ class Controller:
         # Minecraft 聊天小票机：后台队列 + 限速（不阻塞 MC 事件线程）
         self._receipt_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
         self._receipt_thread: Optional[threading.Thread] = None
+        self._receipt_stop = threading.Event()
         self._receipt_last_at = 0.0
         self._receipt_times: List[float] = []
         self._receipt_error_at = 0.0
@@ -513,6 +514,7 @@ class Controller:
 
     def shutdown(self) -> None:
         """Full stop used on app close: MC connection plus the QQ relay."""
+        self._stop_receipt_worker()
         self.disconnect()
         if self.ai_player:
             self.ai_player.close()
@@ -2638,6 +2640,9 @@ class Controller:
         if after is not None and after != before:
             self._post_ui({'kind': 'log', 'level': 'info',
                            'message': f'[好感度] {player} +{after - before} → {after}'})
+        elif self.affinity.last_error:
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': f'[好感度] {player} 保存失败：{self.affinity.last_error}'})
 
     def _send_song_help(self, who: str) -> None:
         """私聊（``/msg``）玩家：点歌触发词的全部用法。跑在后台线程里，一条一条慢慢发。"""
@@ -2923,6 +2928,9 @@ class Controller:
                 if after is not None:
                     self._post_ui({'kind': 'log', 'level': 'info',
                                    'message': f'[好感度] {who} 点歌 +{cfg.songGain} → {after}'})
+                elif self.affinity.last_error:
+                    self._post_ui({'kind': 'log', 'level': 'warn',
+                                   'message': f'[好感度] {who} 保存失败：{self.affinity.last_error}'})
         except Exception:  # noqa: BLE001
             pass
 
@@ -3048,6 +3056,9 @@ class Controller:
             return
         if not hasattr(self, '_receipt_queue'):
             return
+        if getattr(self, '_receipt_stop', None) is not None \
+                and self._receipt_stop.is_set():
+            return
         try:
             self._receipt_queue.put_nowait({
                 'kind': kind or 'chat',
@@ -3066,6 +3077,8 @@ class Controller:
 
     def _ensure_receipt_worker(self) -> None:
         try:
+            if self._receipt_stop.is_set():
+                return
             if self._receipt_thread is not None and self._receipt_thread.is_alive():
                 return
             self._receipt_thread = threading.Thread(
@@ -3074,12 +3087,29 @@ class Controller:
         except Exception:  # noqa: BLE001
             pass
 
+    def _stop_receipt_worker(self) -> None:
+        """关闭时停止打印线程，丢弃尚未开始的排队小票（#46）。"""
+        self._receipt_stop.set()
+        try:
+            while True:
+                self._receipt_queue.get_nowait()
+                self._receipt_queue.task_done()
+        except queue.Empty:
+            pass
+        try:
+            self._receipt_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        thread = self._receipt_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+
     def _receipt_worker(self) -> None:
         from . import receipt_printer
         while True:
             item = self._receipt_queue.get()
             try:
-                if item is None:
+                if item is None or self._receipt_stop.is_set():
                     return
                 misc = self._misc()
                 if not bool(getattr(misc, 'mcChatPrintEnabled', False)):
@@ -3088,8 +3118,12 @@ class Controller:
                 min_interval = max(0.0, float(
                     getattr(misc, 'mcChatPrintMinInterval', 0.2) or 0.0))
                 if min_interval and now - self._receipt_last_at < min_interval:
-                    time.sleep(min_interval - (now - self._receipt_last_at))
+                    self._receipt_stop.wait(min_interval - (now - self._receipt_last_at))
+                    if self._receipt_stop.is_set():
+                        return
                     now = time.time()
+                if self._receipt_stop.is_set():
+                    return
                 cap = int(getattr(misc, 'mcChatPrintMaxPerMinute', 20) or 0)
                 if cap > 0:
                     self._receipt_times = [t for t in self._receipt_times

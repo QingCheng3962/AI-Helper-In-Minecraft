@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import os
 import threading
 import time
@@ -40,6 +41,7 @@ class AffinityStore:
         self.path = path
         self._lock = threading.Lock()
         self.data: Dict[str, Any] = {'version': 1, 'players': {}}
+        self.last_error: str = ''
         self.load()
 
     # ------------------------------------------------------------------
@@ -57,7 +59,7 @@ class AffinityStore:
             # 坏了就当空的，别让好感度把机器人拖崩
             self.data = {'version': 1, 'players': {}}
 
-    def save(self) -> None:
+    def save(self) -> bool:
         try:
             folder = os.path.dirname(self.path)
             if folder:
@@ -66,8 +68,15 @@ class AffinityStore:
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
             os.replace(tmp, self.path)
-        except Exception:  # noqa: BLE001
-            pass
+            self.last_error = ''
+            return True
+        except Exception as e:  # noqa: BLE001
+            self.last_error = str(e)
+            try:
+                os.unlink(self.path + '.tmp')
+            except OSError:
+                pass
+            return False
 
     def _entry(self, name: str) -> Dict[str, Any]:
         key = str(name or '').strip()
@@ -155,6 +164,7 @@ class AffinityStore:
         today = time.strftime('%Y-%m-%d', time.localtime(now))
         with self._lock:
             entry = self._entry(key)
+            snapshot = copy.deepcopy(entry)
             if cooldown > 0:
                 field = 'lastChatAt' if reason == 'chat' else ('lastSongAt' if reason == 'song' else '')
                 if field:
@@ -172,5 +182,9 @@ class AffinityStore:
                 entry['songs'] = int(entry.get('songs') or 0) + 1
             entry['updated'] = now
             score = int(entry['score'])
-        self.save()
+            if not self.save():
+                # 落盘失败：回滚内存，避免界面显示一个重启后不存在的分数。
+                players = self.data.setdefault('players', {})
+                players[key] = snapshot
+                return None
         return score

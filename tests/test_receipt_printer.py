@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -85,6 +86,7 @@ class ReceiptPrinterTest(unittest.TestCase):
         ctrl._post_ui = lambda _ev: None
         ctrl._receipt_queue = queue_mod.Queue(maxsize=10)
         ctrl._receipt_thread = None
+        ctrl._receipt_stop = threading.Event()
         ctrl._receipt_last_at = 0.0
         ctrl._receipt_times = []
         ctrl._receipt_error_at = 0.0
@@ -98,6 +100,51 @@ class ReceiptPrinterTest(unittest.TestCase):
         msg = fake.call_args.args[0]
         self.assertEqual(msg.sender, 'Steve')
         self.assertEqual(msg.text, 'hello')
+
+    def test_stop_receipt_worker_discards_queued_items(self):
+        from aafm_py.controller import Controller
+        import queue as queue_mod
+        ctrl = object.__new__(Controller)
+        misc = SimpleNamespace(
+            mcChatPrintEnabled=True, mcChatPrintMinInterval=0.0,
+            mcChatPrintMaxPerMinute=0, mcChatPaperWidth=58,
+            mcChatPrinterName='', mcChatPrintDryRun=True,
+            mcChatPrintIgnoreCommands=True,
+        )
+        ctrl.config = SimpleNamespace(misc=misc)
+        ctrl._misc = lambda: misc
+        ctrl._post_ui = lambda _ev: None
+        ctrl._receipt_queue = queue_mod.Queue(maxsize=10)
+        ctrl._receipt_thread = None
+        ctrl._receipt_stop = threading.Event()
+        ctrl._receipt_last_at = 0.0
+        ctrl._receipt_times = []
+        ctrl._receipt_error_at = 0.0
+        ctrl._receipt_full_warn_at = 0.0
+        ctrl._receipt_rate_warn_at = 0.0
+
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def fake_print(message, **kwargs):
+            calls.append(message.text)
+            started.set()
+            release.wait(3)
+            return SimpleNamespace(dry_run=True, out_file='x')
+
+        with patch('aafm_py.receipt_printer.print_chat_ticket', fake_print):
+            ctrl._queue_mc_receipt('chat', 'Steve', 'first')
+            self.assertTrue(started.wait(2))
+            ctrl._receipt_queue.put({'kind': 'chat', 'sender': 'Steve',
+                                     'text': 'second', 'time': time.time()})
+            stopper = threading.Thread(target=ctrl._stop_receipt_worker)
+            stopper.start()
+            time.sleep(0.1)
+            release.set()
+            stopper.join(3)
+        self.assertEqual(calls, ['first'])
+        self.assertTrue(ctrl._receipt_queue.empty())
 
 
 if __name__ == '__main__':

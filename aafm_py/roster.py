@@ -284,6 +284,88 @@ def _find_main_col_xlsx(ws, header_row_no: int) -> Optional[int]:
     return None
 
 
+_CELL_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![A-Za-z0-9_\[])"
+)
+_COL_RANGE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3}):(\$?)([A-Za-z]{1,3})(?![A-Za-z0-9_])"
+)
+
+
+def _shift_formula_columns(formula: str, insert_col: int,
+                           amount: int = 1) -> str:
+    """Adjust A1 references after inserting ``amount`` columns at ``insert_col``.
+
+    openpyxl's ``insert_cols`` moves cells but leaves formulas untouched; Excel
+    would rewrite both relative and absolute references. Only OPERAND/RANGE
+    tokens are touched, so strings and function names stay intact (#42).
+    """
+    if not isinstance(formula, str) or not formula.startswith('='):
+        return formula
+    try:
+        from openpyxl.formula import Tokenizer
+        tokens = Tokenizer(formula).items
+    except Exception:  # noqa: BLE001
+        tokens = None
+
+    def shift_part(text: str) -> str:
+        from openpyxl.utils import column_index_from_string, get_column_letter
+
+        def cell(match):
+            col = column_index_from_string(match.group(2).upper())
+            if col < insert_col:
+                return match.group(0)
+            return (match.group(1) + get_column_letter(col + amount)
+                    + match.group(3) + match.group(4))
+
+        def col_range(match):
+            first = column_index_from_string(match.group(2).upper())
+            last = column_index_from_string(match.group(4).upper())
+            if first >= insert_col:
+                first += amount
+            if last >= insert_col:
+                last += amount
+            return (match.group(1) + get_column_letter(first) + ':'
+                    + match.group(3) + get_column_letter(last))
+
+        text = _COL_RANGE_RE.sub(col_range, text)
+        return _CELL_REF_RE.sub(cell, text)
+
+    def shift_token(value: str) -> str:
+        if '!' in value:
+            prefix, ref = value.rsplit('!', 1)
+            return prefix + '!' + shift_part(ref)
+        return shift_part(value)
+
+    if tokens is not None:
+        for token in tokens:
+            if token.type == 'OPERAND' and token.subtype == 'RANGE':
+                token.value = shift_token(token.value)
+        result = ''.join(token.value for token in tokens)
+        if formula.startswith('=') and not result.startswith('='):
+            result = '=' + result
+        return result
+    return shift_part(formula)
+
+
+def _insert_cols_with_formulas(ws, idx: int, amount: int = 1) -> None:
+    """Insert columns and rewrite formulas that reference shifted columns."""
+    for row in ws.iter_rows():
+        for cell in row:
+            value = cell.value
+            if isinstance(value, str) and value.startswith('='):
+                cell.value = _shift_formula_columns(value, idx, amount)
+    ws.insert_cols(idx, amount=amount)
+
+
+def _safe_cell_text(value: Any) -> str:
+    """Prevent spreadsheet formula injection from player-controlled text (#54)."""
+    text = '' if value is None else str(value)
+    if text and text[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + text
+    return text
+
+
 def _write_xlsx(path: str, name: str, note: str, ai: bool = True,
                 main: Optional[str] = None) -> None:
     """Shared writer: set the authoritative main text and/or roll an AI note."""
@@ -310,24 +392,24 @@ def _write_xlsx(path: str, name: str, note: str, ai: bool = True,
                 break
         if found is None:
             found = ws.max_row + 1
-            ws.cell(row=found, column=1, value=name)
+            ws.cell(row=found, column=1, value=_safe_cell_text(name))
 
         if main is not None:
             main_col = _find_main_col_xlsx(ws, header_row_no)
             if main_col is None:
                 # No authoritative column: insert one as column 2 (B) so the
                 # existing 描述1..N columns shift right but are never deleted.
-                ws.insert_cols(2)
+                _insert_cols_with_formulas(ws, 2)
                 main_col = 2
                 ws.cell(row=header_row_no, column=main_col,
                         value=_MAIN_HEADER_NAME)
-            ws.cell(row=found, column=main_col, value=main)
+            ws.cell(row=found, column=main_col, value=_safe_cell_text(main))
 
         if ai:
             ai_start = _find_ai_start_xlsx(ws, header_row_no)
             old = [str(ws.cell(row=found, column=ai_start + k).value or '')
                    for k in range(_AI_COUNT)]
-            new = ([note] + [o for o in old if o.strip()])[:_AI_COUNT]
+            new = ([_safe_cell_text(note)] + [o for o in old if o.strip()])[:_AI_COUNT]
             new += [''] * (_AI_COUNT - len(new))
             for k in range(_AI_COUNT):
                 ws.cell(row=found, column=ai_start + k, value=new[k])
@@ -422,7 +504,7 @@ def _ensure_alias_cols_xlsx(ws, header_row_no: int) -> List[int]:
         return cols
     # Insert three empty alias columns right after the 玩家描述 column.
     main_col = _find_main_col_xlsx(ws, header_row_no) or 2
-    ws.insert_cols(main_col + 1, amount=_ALIAS_SLOTS)
+    _insert_cols_with_formulas(ws, main_col + 1, amount=_ALIAS_SLOTS)
     for k in range(_ALIAS_SLOTS):
         ws.cell(row=header_row_no, column=main_col + 1 + k,
                 value=f'别名{k + 1}')
@@ -455,7 +537,7 @@ def _write_xlsx_aliases(path: str, name: str, tokens: List[str]) -> List[str]:
                 break
         if found is None:
             found = ws.max_row + 1
-            ws.cell(row=found, column=1, value=name)
+            ws.cell(row=found, column=1, value=_safe_cell_text(name))
 
         cells = [str(ws.cell(row=found, column=c).value or '')
                  for c in alias_cols]
@@ -464,7 +546,7 @@ def _write_xlsx_aliases(path: str, name: str, tokens: List[str]) -> List[str]:
                 continue
             for i in range(len(cells)):
                 if not cells[i].strip():
-                    cells[i] = token
+                    cells[i] = _safe_cell_text(token)
                     break
         for k, col in enumerate(alias_cols):
             ws.cell(row=found, column=col, value=cells[k])
@@ -523,7 +605,7 @@ def _write_csv_aliases(path: str, name: str, tokens: List[str]) -> List[str]:
     if found is None:
         grid.append([''] * len(header_low))
         found = len(grid) - 1
-        grid[found][0] = name
+        grid[found][0] = _safe_cell_text(name)
 
     cells = []
     for i in alias_cols:
@@ -534,7 +616,7 @@ def _write_csv_aliases(path: str, name: str, tokens: List[str]) -> List[str]:
             continue
         for i in range(len(cells)):
             if not cells[i].strip():
-                cells[i] = token
+                cells[i] = _safe_cell_text(token)
                 break
     for k, i in enumerate(alias_cols):
         while len(grid[found]) <= i:
@@ -618,7 +700,7 @@ def _write_csv(path: str, name: str, note: str = '', ai: bool = False,
     if found is None:
         row = [''] * max(len(grid[0]) if grid else 0,
                          (ai_base + _AI_COUNT if ai_base is not None else 2))
-        row[0] = name
+        row[0] = _safe_cell_text(name)
         grid.append(row)
         found = len(grid) - 1
 
@@ -626,7 +708,7 @@ def _write_csv(path: str, name: str, note: str = '', ai: bool = False,
         row = grid[found]
         while len(row) <= main_i:
             row.append('')
-        row[main_i] = main
+        row[main_i] = _safe_cell_text(main)
     if ai and ai_base is not None:
         while len(grid[found]) < ai_base + _AI_COUNT:
             grid[found].append('')
@@ -635,7 +717,7 @@ def _write_csv(path: str, name: str, note: str = '', ai: bool = False,
                if ai_base + k < len(grid[found])]
         while len(old) < _AI_COUNT:
             old.append('')
-        new = ([note] + [o for o in old if o.strip()])[:_AI_COUNT]
+        new = ([_safe_cell_text(note)] + [o for o in old if o.strip()])[:_AI_COUNT]
         new += [''] * (_AI_COUNT - len(new))
         for k in range(_AI_COUNT):
             grid[found][ai_base + k] = new[k]
