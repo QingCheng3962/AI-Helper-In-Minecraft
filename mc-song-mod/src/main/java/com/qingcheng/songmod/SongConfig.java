@@ -42,6 +42,11 @@ public final class SongConfig {
      * 关掉 = 老行为：公屏上任何人的播放数据我都跟着听（全服广播式）。
      */
     public boolean onlyMySong = true;
+    /**
+     * 机器人游戏名。设置后只接受这个发送者发来的播放数据；留空时退回
+     * 「我最近一次点歌的关键词」匹配（不再只看正文里的名字）。
+     */
+    public String botName = "";
     /** 点歌 Mod 下载链接（播放成功后提示用）；留空则不提示。 */
     public String modUrl = "";
     /** 播放成功后的提示文案，{url} 会替换成 modUrl。 */
@@ -84,6 +89,9 @@ public final class SongConfig {
         }
         if (cfg.neteaseCookie == null) {
             cfg.neteaseCookie = "";
+        }
+        if (cfg.botName == null) {
+            cfg.botName = "";
         }
         if (cfg.modUrl == null) {
             cfg.modUrl = "";

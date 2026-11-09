@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import queue
@@ -792,6 +793,25 @@ class Controller:
         except OSError:
             pass
 
+    def _book_source_signature(self, path: str,
+                               settings: Dict[str, Any]) -> Dict[str, Any]:
+        """文档内容 + 分页设置的指纹；用于续写前确认来源没变。"""
+        if not path or not os.path.isfile(path):
+            return {}
+        try:
+            digest = hashlib.sha256()
+            with open(path, 'rb') as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            return {
+                'sha256': digest.hexdigest(),
+                'pageLines': int(settings.get('pageLines', 14)),
+                'pageChars': int(settings.get('pageChars', docbook.MAX_PAGE_CHARS)),
+                'pagesPerBook': int(settings.get('pagesPerBook', 100)),
+            }
+        except (OSError, TypeError, ValueError):
+            return {}
+
     def _send_book_write(self, pages, settings, doc_file, start_page, book_start) -> bool:
         pages = [str(p) for p in (pages or [])]
         if not pages:
@@ -805,6 +825,7 @@ class Controller:
         self.save_book_progress(
             file=doc_file, settings=settings, pagesPerBook=int(settings.get('pagesPerBook', 100)),
             nextPage=int(start_page), nextBook=int(book_start), totalPages=len(pages),
+            sourceSignature=self._book_source_signature(doc_file, settings),
             updated=time.strftime('%Y-%m-%d %H:%M:%S'))
         ok = self._engine.write_book(
             pages,
@@ -853,6 +874,20 @@ class Controller:
         path, pages, settings = self._pages_from_progress(prog)
         if pages is None:
             return False
+        stored_sig = prog.get('sourceSignature')
+        current_sig = self._book_source_signature(path, settings)
+        if stored_sig and current_sig and stored_sig != current_sig:
+            self._post_ui({
+                'kind': 'log', 'level': 'error',
+                'message': '[书与笔] 文档内容或分页设置已变化，不能按旧页码继续写入；'
+                           '请用「重新写入」或从指定册数重新开始。'})
+            return False
+        if not stored_sig and current_sig:
+            # 旧进度没有指纹：补记当前来源，避免下次仍然无法判断。
+            self.save_book_progress(sourceSignature=current_sig)
+            self._post_ui({'kind': 'log', 'level': 'warn',
+                           'message': '[书与笔] 旧进度没有来源指纹，本次按当前文档续写；'
+                                      '下次修改文档后会提示重新开始。'})
         start_page = max(0, int(prog.get('nextPage', 0)))
         book_start = max(1, int(prog.get('nextBook', 1)))
         if start_page >= len(pages):
@@ -1479,9 +1514,15 @@ class Controller:
                        'message': 'QQ 转述已' + ('启用' if enabled else '禁用') + '。'})
 
     def _on_qq_event(self, ev: Dict[str, Any]) -> None:
+        gen = ev.get('__engine_generation')
+        if gen is not None and gen != getattr(self._qq, 'generation', gen):
+            return
         self._qq_events.put(ev)
 
     def _process_qq_event(self, ev: Dict[str, Any]) -> None:
+        gen = ev.pop('__engine_generation', None)
+        if gen is not None and gen != getattr(self._qq, 'generation', gen):
+            return
         event = ev.get('event')
         if event == 'log':
             self._post_ui({'kind': 'log', 'level': ev.get('level', 'info'),
@@ -3558,6 +3599,9 @@ class Controller:
     # Bot event handling
     # ------------------------------------------------------------------
     def _on_bot_event(self, ev: Dict[str, Any]) -> None:
+        gen = ev.get('__engine_generation')
+        if gen is not None and gen != getattr(self._engine, 'generation', gen):
+            return
         self._bot_events.put(ev)
 
     def _on_ai_send_chat(self, text: str) -> None:
@@ -3653,6 +3697,9 @@ class Controller:
                 last_tick = now
 
     def _process_bot_event(self, ev: Dict[str, Any]) -> None:
+        gen = ev.pop('__engine_generation', None)
+        if gen is not None and gen != getattr(self._engine, 'generation', gen):
+            return
         event = ev.get('event')
 
         if event == 'log':

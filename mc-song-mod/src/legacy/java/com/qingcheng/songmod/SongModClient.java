@@ -79,17 +79,18 @@ public class SongModClient implements ClientModInitializer {
         System.out.println("[songmod] 版本 v1.0.0+obflink5-20261017"
                 + "（修复：①[链接]替换→混淆直链；②CHAT+GAME 双通道；③id 标记不用 #/&；"
                 + "④谁点谁听：只播给我的歌、别人的点歌不触发本地兜底；⑤停止只停自己的）");
-        ClientSendMessageEvents.CHAT.register(text -> onChat(text, true));   // 我自己发的
+        ClientSendMessageEvents.CHAT.register(text -> onChat(text, true, ""));   // 我自己发的
         // 用 lambda 推断参数类型，避免依赖具体版本里 ChatType/MessageType 的类型名。
         // 服务器发来的聊天（包括别人转发的、以及我自己那条被服务器广播回来的）一律 mine=false：
         // 我自己的点歌只看上面那个本地发送事件，绝不靠「聊天里出现我的名字」来判断。
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
-                onChat(message == null ? "" : message.getString(), false));
+                onChat(message == null ? "" : message.getString(), false,
+                       senderName(sender)));
         // ⚠ 很多服务器（聊天插件改格式后重播的那种，形如「[称号]名字 » 消息」）是把玩家聊天
         // 当**系统消息**发出来的，这种只走 GAME 不走 CHAT —— 机器人发的直链以前就是这么丢的
         // （表现：机器人明明发了，Mod 却干等 30 秒走本地兜底）。所以两个通道都要收。
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
-                onChat(message == null ? "" : message.getString(), false));
+                onChat(message == null ? "" : message.getString(), false, ""));
 
         openKey = createKeyMapping();
         if (openKey != null) {
@@ -229,16 +230,31 @@ public class SongModClient implements ClientModInitializer {
         }
     }
 
-    private static void onChat(String message, boolean mine) {
+    /** 聊天事件里的发送者名字；GAME 重播没有 sender 时返回空。 */
+    private static String senderName(Object sender) {
+        try {
+            if (sender == null) {
+                return "";
+            }
+            Object profile = sender.getClass().getMethod("getProfile").invoke(sender);
+            Object name = profile == null ? null
+                    : profile.getClass().getMethod("getName").invoke(profile);
+            return name == null ? "" : String.valueOf(name);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static void onChat(String message, boolean mine, String sender) {
         // 兜一层：任何异常都不能漏到 Fabric 事件回调里（否则可能把客户端连接搞崩）。
         try {
-            handleChat(message, mine);
+            handleChat(message, mine, sender);
         } catch (Throwable t) {
             System.out.println("[songmod] 处理聊天出错（已忽略）：" + t);
         }
     }
 
-    private static synchronized void handleChat(String message, boolean mine) {
+    private static synchronized void handleChat(String message, boolean mine, String sender) {
         if (message == null || config == null) {
             return;
         }
@@ -275,7 +291,7 @@ public class SongModClient implements ClientModInitializer {
                 stoppedByUser = false;
                 lastMyRequestAt = System.currentTimeMillis();
             }
-            if (config.onlyMySong && !isForMe(payload)) {
+            if (config.onlyMySong && !isForMe(payload, sender)) {
                 // 谁点谁听：这条不是给我的（别人的点歌 / 广播残留）→ 不播
                 System.out.println("[songmod] 这条点歌不是给我的，跳过：" + shorten(payload, 100));
                 return;
@@ -303,7 +319,7 @@ public class SongModClient implements ClientModInitializer {
                 stoppedByUser = false;
                 lastMyRequestAt = System.currentTimeMillis();
             }
-            if (config.onlyMySong && !isForMe(payload)) {
+            if (config.onlyMySong && !isForMe(payload, sender)) {
                 System.out.println("[songmod] 这条 id 取链不是给我的，跳过：" + shorten(payload, 100));
                 return;
             }
@@ -508,25 +524,23 @@ public class SongModClient implements ClientModInitializer {
         return a != null && b != null && !b.isEmpty() && a.equalsIgnoreCase(b);
     }
 
-    /** 这条播放数据是不是放给我的（谁点谁听）。 */
-    private static boolean isForMe(String payload) {
-        String p = payload == null ? "" : payload.toLowerCase();
-        String me = myName();
-        if (!me.isEmpty() && p.contains(me.toLowerCase())) {
-            return true;   // 文案里有我的名字 → 肯定是给我的
+    /** 这条播放数据是不是放给我的（谁点谁听 / 只信机器人）。 */
+    private static boolean isForMe(String payload, String sender) {
+        // 配了机器人游戏名：只接受这个发送者的播放数据（#53）。
+        String bot = config.botName == null ? "" : config.botName.trim();
+        if (!bot.isEmpty() && sender != null && !sender.isEmpty()) {
+            return sender.equalsIgnoreCase(bot);
         }
-        // 只有「我最近点的歌」才对得上；不能因为 5 分钟内点过歌，
-        // 就把别人点的歌也放出来（#15）。
+        // GAME 重播拿不到发送者时，退回「我最近点的歌」匹配；
+        // 不再因为正文里出现我的名字就接受（防止别人伪造 [点歌]我的名字 | 恶意URL）。
         if (System.currentTimeMillis() - lastMyRequestAt < 300000L) {
+            String p = payload == null ? "" : payload.toLowerCase();
             String q = lastMyQuery;
             String np = normalizeForMatch(p);
             String nq = normalizeForMatch(q);
             if (!nq.isEmpty() && (np.contains(nq) || nq.contains(np))) {
                 return true;
             }
-        }
-        if (me.isEmpty()) {
-            return true;   // 认不出自己是谁就别拦（宁可多放，也别放不出来）
         }
         return false;
     }

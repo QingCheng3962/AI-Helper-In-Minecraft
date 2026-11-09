@@ -22,6 +22,7 @@ import re
 import threading
 import time
 import urllib.parse
+import uuid
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Deque, Dict, List, Optional
@@ -401,7 +402,8 @@ class _PhotoHandler(BaseHTTPRequestHandler):
             messages = self.photo.messages_since(since, limit)
             self._json(200, {
                 'ok': True,
-                'last_id': messages[-1]['id'] if messages else since,
+                'last_id': self.photo.last_id,
+                'instance': self.photo.instance,
                 'messages': messages,
             })
             return
@@ -458,6 +460,8 @@ class PhotoServer:
         self._events: Deque[Dict[str, Any]] = deque(maxlen=MAX_EVENTS)
         self._images: Deque[Dict[str, Any]] = deque(maxlen=MAX_IMAGES)
         self._seq = 0
+        # 每次启动都换一个实例 ID：中继靠它识别「上游重启、ID 从 1 重新计数」。
+        self.instance = uuid.uuid4().hex
 
     @property
     def running(self) -> bool:
@@ -579,6 +583,12 @@ class PhotoServer:
                 'events': len(self._events),
                 'images': len(self._images),
                 'last_id': self._seq,
+                'instance': self.instance,
                 'base_url': self.public_base or '',
                 'token_required': bool(self.token),
             }
+
+    @property
+    def last_id(self) -> int:
+        with self._lock:
+            return int(self._seq)
