@@ -184,3 +184,19 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] MC → QQ 支持 `@QQ号`：转述内容里的 `@123456789` 会变成 OneBot `at` 段，真正艾特群友（`qq_engine.js` 的 `sendGroup` 支持 `segments`）
 - [x] **Minecraft 聊天小票机**：新增 `aafm_py/receipt_printer.py`（ESC/POS + GBK + Windows winspool RAW，纯标准库），**杂项** 页可开关/选打印机/纸宽/每分钟上限/预览；只打印玩家聊天，效果相当于 `chat.log`（`[时:分:秒] <玩家> 内容`），不打印服务器消息/机器人/ActionBar，也没有标题/分隔线/切纸
 - [x] 版本号设为 **v0.3.4**（README / README_EN / package.json / package-lock / AGENTS）
+
+## 2026-11-14 v0.3.6
+
+- [x] 主界面迁移到 CustomTkinter（`aafm_py/gui_ctk.py`：设置/点歌/工具/日志/关于；`main.py` 默认新界面，`--legacy` 回旧界面）
+- [x] 点歌 Mod 播放引擎重写：整首下载 + MP3 帧索引（拖动进度 / 倍速重采样 / 暂停 / 精确进度；非 MP3 回流式）
+- [x] 点歌 Mod 新界面：点歌 / 一起听 / 我的 三页（进度条、倍速档位、播放控制、歌词模式、音量、Cookie）
+- [x] 26.x 版同款界面（`GuiGraphicsExtractor` 提取式渲染 + `setScreenAndShow` + `Hud` 聊天/动作条/标题）
+- [x] 一起听：机器人 `_song_listeners` 记账「谁在听什么/已播秒数」，`[点歌]一起听` 名单、`[点歌]一起听 玩家` 按估算进度跟播（`at:` 标记）
+- [x] 歌词：按歌曲 id 抓网易云 LRC（`SongLyrics`），动作条/标题/聊天三种显示 + `[点歌]歌词` 切换
+- [x] 倍速语法：`[点歌]歌名 1.5`（机器人搜索前剥离）、`[点歌]倍速 1.5`
+- [x] 端口扫描：`aafm_py/portscan.py`（常见端口/自定义范围/全端口 + Minecraft status 识别版本/MOTD/人数），新界面「工具」页一键填端口
+- [x] 支持与工单 / 开发者博客链接：`aafm_py/links.py` + 新界面「关于」页 + README
+- [x] 回归：`tests/run_song_core_java.py`（51 项断言）；两代 Mod 源码 javac 类型检查通过
+- [ ] GitHub Issues 拉取与修复：当前环境无法访问 api.github.com（DNS 解析到非公网地址），需用户提供 issue 列表或手动关闭
+- [ ] 点歌 Mod 真实 jar 构建：沙箱内 Java zipfs 把工作区判只读导致 Gradle/Loom 失败，需在普通终端跑 `mc-song-mod/build_all.ps1`
+- [ ]（非必要）游戏画面渲染 / 群组服菜单选择 / 容器物品左右键交互

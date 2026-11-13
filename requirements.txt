@@ -5,5 +5,7 @@ certifi>=2026.10.19
 openpyxl>=3.0
 pillow>=9.0
 qrcode>=7.0
+# 新版主界面（CustomTkinter）；不装也能用 python main.py --legacy 跑旧界面
+customtkinter>=5.2
 # 可选：只有走 eapi 兜底接口时才需要（机器人主路径用旧接口，不装也能正常工作）
 cryptography>=41.0

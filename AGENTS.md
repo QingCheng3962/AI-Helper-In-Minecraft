@@ -20,7 +20,7 @@
 | --- | --- |
 | `aafm_py/` | Python 端：`gui.py`（tkinter 多标签页）、`controller.py`（事件分发 / 点歌 / 好感度 / 命令 / 群发）、`ai_player.py`（LLM 对话）、`netease.py`（网易云）、`bilibili.py`（视频推荐抓取）、`affinity.py`（好感度存取）、`dailydb.py`（每日数据 SQLite：当天幸运值 / 签到 + 跨天备份重建）、`docbook.py` + `log_saver.py` |
 | `bot_engine.js` / `qq_engine.js` | Node 端：mineflayer 无头引擎 / OneBot 11 QQ 转述 |
-| `mc-song-mod/` | 客户端点歌 Mod（Fabric **1.21.1 ~ 26.2**）：`src/main`（共用）+ `src/legacy`（1.21.x，mojmap + 重映射 Loom，含界面）+ `src/modern`（26.x，无界面，Java 25） |
+| `mc-song-mod/` | 客户端点歌 Mod（Fabric **1.21.1 ~ 26.2**）：`src/main`（共用）+ `src/legacy`（1.21.x，mojmap + 重映射 Loom，含界面）+ `src/modern`（26.x，Java 25，v0.3.6 起同样有新界面） |
 | `mc-music-bridge/` | 服务端插件（可选，ZMusic v5 协议） |
 | `HELP.md` | 玩家版游戏内帮助（`[触发词]帮助` 私聊内容的完整版） |
 | `README.md` / `README_EN.md` | 总说明 + 更新日志（新增功能记得补 vX.Y.Z 条目，中英各一份） |
@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File build_all.ps1
 - Python 改动至少过一遍 `python -m py_compile aafm_py/*.py`。
 - **只改 `aafm_py/` 的 bug 修复不需要重打 jar**；改了 `mc-song-mod/src/**` 或 `fabric.mod.json` 才需要。
 - jar 名格式：`Song_<项目版本>_<游戏版本>.jar`；`fabric.mod.json` 的 `minecraft` 依赖必须是 `~${minecraft_version}`（按版本注入，别写死）。
-- **版本号用语义化（SemVer）**：项目当前 `v0.3.4`、Mod 当前 `0.1.0`（都在 `README*.md` / `mc-song-mod/gradle.properties` / `package.json` 里改）；**README 只写最新版本，历史版本写 `更新日志.md`**。旧 tag（`v1.0`/`v2.0`/`v3.0`/`v3.1`/`v3.2.0`）和已发的 Release **保留不动**，别再按旧编号发版。
+- **版本号用语义化（SemVer）**：项目当前 `v0.3.6`、Mod 当前 `0.1.0`（都在 `README*.md` / `mc-song-mod/gradle.properties` / `package.json` 里改）；**README 只写最新版本，历史版本写 `更新日志.md`**。旧 tag（`v1.0`/`v2.0`/`v3.0`/`v3.1`/`v3.2.0`）和已发的 Release **保留不动**，别再按旧编号发版。
 
 ## 四、几个人肉踩过的坑（别重犯）
 
@@ -67,3 +67,11 @@ powershell -ExecutionPolicy Bypass -File build_all.ps1
 - 「每日数据」一律走 `aafm_py/dailydb.py`（SQLite `daily.db`）：当天幸运值**第一次查询时随机定下来就落库**（别再用「日期+名字」现算，重启会变），签到记录也在这里。跨天由 `ensure_day()` 做「备份 → 删除 → 重建」，旧库进 `db_backup/db_backup_<时间>.db`，`player_stats`（连签/累计）要带到新库，不然连签会断。`tick` 里每秒调一次 `_maybe_daily_rotate()`。
 - 每日签到（`[提示词]签到`）默认：金币在 `[最少, 最多]` 随机 + 连签加成，物品默认不给；发奖励靠配置里那**两行命令**（`{player} {value} {item} {count}`），命令不写 `/` 会自动补，长度按整条命令算（≤250）。
 - 「今日幸运值 / 视频推荐 / 签到 / 帮助 / 好感度」都认**提示词**（`ai_config.triggerRegex`），不是 `[点歌]`。
+
+## 六、界面与工具（v0.3.6 起）
+
+- 主界面默认是 **CustomTkinter**（`aafm_py/gui_ctk.py`，`python main.py`）；原 tkinter 全功能界面用 `python main.py --legacy`。
+  改界面时**两个入口都要能跑**：新界面缺的功能可以在旧界面里找，但不要删掉旧界面。
+- 端口扫描在 `aafm_py/portscan.py`（纯标准库）；改扫描逻辑后至少手动跑一次 `python -m aafm_py.portscan <host>`。
+- 对外链接统一走 `aafm_py/links.py`（支持与工单 support.qingchengsep.top / 开发者博客 qingchengsep.top），别把 URL 散落在界面代码里。
+- 点歌 Mod 的聊天协议（倍速 / 一起听 / 歌词）在 `SongProtocol` + `SongSpeed`（纯 Java，无 MC 依赖），改协议要同步 1.21.x 与 26.x 两套客户端 + 机器人 `controller.py`。
