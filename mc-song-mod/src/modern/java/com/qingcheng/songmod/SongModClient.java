@@ -1,11 +1,16 @@
 package com.qingcheng.songmod;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -13,15 +18,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 26.x 版点歌 Mod（Minecraft 26.x 的渲染 API 大改，这一版**不含游戏内界面**）。
+ * 点歌 Mod（客户端，Minecraft 26.x）。
  *
- * <p>逻辑和 1.21.x 版一致：优先播放机器人发来的直链；机器人不在线时本地兜底
- * （用 config 里的 {@code neteaseCookie}）；再不行就提示失败。
- * 提示用 26.x 的 {@code ChatComponent.addClientSystemMessage}。
+ * <p>逻辑与 1.21.x 版一致：听聊天里的 {@code [点歌]…}（点歌 / 一起听 / 台 / 停止 / 歌词 / 倍速），
+ * 播放交给 {@link SongPlayer}（可拖动、可倍速、可暂停），歌词按配置显示到动作条 / 标题 / 聊天栏。
+ * 26.x 的渲染 API 换成了「提取渲染状态」（{@code GuiGraphicsExtractor}），界面见 {@link SongScreen}。
  */
 public class SongModClient implements ClientModInitializer {
 
-    private static SongConfig config;
+    /** 按键注册名（对应 lang 里的 key.songmod.open）。 */
+    private static final String KEY_NAME = "key.songmod.open";
+
+    /** 等机器人响应的超时；等不到才本地兜底。 */
+    private static final long WAIT_MS = 30000L;
+
+    /** 等机器人回直链 / 一段时间内接受「给我的」播放数据。 */
+    private static final long PENDING_WINDOW_MS = 60000L;
 
     private static final ScheduledExecutorService SCHED = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "songmod-wait");
@@ -30,38 +42,294 @@ public class SongModClient implements ClientModInitializer {
     });
 
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "songmod-search");
+        Thread t = new Thread(r, "songmod-net");
         t.setDaemon(true);
         return t;
     });
 
     private static final AtomicInteger PENDING = new AtomicInteger(0);
-    private static final long WAIT_MS = 30000L;
 
-    private static volatile String lastKey = "";
+    static volatile SongConfig config;
+
+    private static volatile KeyMapping openKey;
     private static volatile long lastKeyAt = 0L;
-    /** 我最近一次点歌的时间（「谁点谁听」用）。 */
+    private static volatile String lastKeyText = "";
+    /** 我最近一次点歌的时间 / 关键词（「谁点谁听」用）。 */
     private static volatile long lastMyRequestAt = 0L;
-    /** 我最近一次点歌的关键词/链接/id —— 只有和它匹配的播放数据才算我的（#15）。 */
     private static volatile String lastMyQuery = "";
     private static volatile boolean stoppedByUser = false;
-    private static volatile String currentLabel = "";
+    /** 正在等「一起听」的回复（此时机器人回的任何播放数据都算给我的）。 */
+    private static volatile boolean expectingListenReply = false;
+    private static volatile long expectingListenAt = 0L;
+    /** 正在等一起听名单。 */
+    private static volatile boolean expectingListReply = false;
+    /** 上一次刷一起听名单的时间。 */
+    private static volatile long lastListenRefreshAt = 0L;
+
+    /** 歌词显示节流。 */
+    private static volatile String lastShownLyric = "";
+    private static volatile long lastLyricShownAt = 0L;
+    private static volatile String lastTitleLyric = "";
 
     @Override
     public void onInitializeClient() {
         config = SongConfig.load();
-        System.out.println("[songmod] 版本 v1.0.0+obflink5-20261017（26.x 无界面版；谁点谁听）");
-        ClientSendMessageEvents.CHAT.register(text -> onChat(text, true, ""));   // 我自己发的
-        // 服务器发来的聊天一律 mine=false（我自己的点歌只看本地发送事件）
+        SongPlayer.setVolume(config.volume);
+        SongPlayer.setSpeed(config.speed);
+        System.out.println("[songmod] 版本 v0.2.0+gui2-20261114（26.x 新界面：进度条/倍速/一起听/歌词）");
+
+        ClientSendMessageEvents.CHAT.register(text -> onChat(text, true, ""));
+        // 服务器发来的聊天一律 mine=false（我自己的指令只看上面那个本地发送事件）
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
-                onChat(message == null ? "" : message.getString(), false,
-                       senderName(sender)));
-        // 服务器把玩家聊天当「系统消息」重播时只走 GAME、不走 CHAT —— 两个通道都得收
+                onChat(message == null ? "" : message.getString(), false, senderName(sender)));
+        // 很多服务器把玩家聊天改格式后当「系统消息」重播：只走 GAME、不走 CHAT
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
                 onChat(message == null ? "" : message.getString(), false, ""));
+
+        openKey = createKeyMapping();
+        if (openKey != null) {
+            KeyBindingHelper.registerKeyBinding(openKey);
+            System.out.println("[songmod] 已注册按键 key.songmod.open（默认 K），可在「按键设置」里改");
+        } else {
+            System.out.println("[songmod] 按键注册失败：可在聊天里发 " + config.trigger + config.guiWord + " 打开界面");
+        }
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            try {
+                if (openKey != null) {
+                    while (openKey.consumeClick()) {
+                        openScreen();
+                    }
+                }
+                tickLyrics(client);
+            } catch (Throwable t) {
+                // 任何异常都不能漏进事件回调
+                System.out.println("[songmod] tick 出错（已忽略）：" + t);
+            }
+        });
     }
 
-    /** 聊天事件里的发送者名字；GAME 重播没有 sender 时返回空。 */
+    // ------------------------------------------------------------------
+    // 按键（版本兼容靠反射：1.21.9+ 的 KeyMapping 构造器第 4 参换成了 Category）
+    // ------------------------------------------------------------------
+
+    private static KeyMapping createKeyMapping() {
+        try {
+            for (java.lang.reflect.Constructor<?> c : KeyMapping.class.getDeclaredConstructors()) {
+                Class<?>[] p = c.getParameterTypes();
+                if (p.length != 4 || p[0] != String.class || p[1] != InputConstants.Type.class
+                        || p[2] != int.class) {
+                    continue;
+                }
+                Object fourth;
+                if (p[3] == String.class) {
+                    fourth = "key.categories.songmod";
+                } else {
+                    fourth = firstStaticInstance(p[3]);
+                }
+                if (fourth == null) {
+                    continue;
+                }
+                c.setAccessible(true);
+                // 75 = GLFW_KEY_K；不直接引 org.lwjgl.glfw.GLFW，少一个编译期依赖。
+                return (KeyMapping) c.newInstance(KEY_NAME,
+                        InputConstants.Type.KEYSYM, 75, fourth);
+            }
+        } catch (Throwable t) {
+            System.out.println("[songmod] 注册按键失败：" + t);
+        }
+        return null;
+    }
+
+    private static Object firstStaticInstance(Class<?> type) {
+        try {
+            for (java.lang.reflect.Field f : type.getFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) && f.getType() == type) {
+                    Object v = f.get(null);
+                    if (v != null) {
+                        return v;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // ignore
+        }
+        return null;
+    }
+
+    public static void openScreen() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null) {
+            return;
+        }
+        mc.execute(() -> {
+            try {
+                mc.setScreenAndShow(new SongScreen());
+            } catch (Throwable ignored) {
+                // ignore
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // 给界面用的接口
+    // ------------------------------------------------------------------
+
+    public static SongConfig settings() {
+        return config;
+    }
+
+    public static String trigger() {
+        return config == null || config.trigger == null || config.trigger.isEmpty()
+                ? "[点歌]" : config.trigger;
+    }
+
+    public static String stopWord() {
+        return config == null ? "停止" : config.stopWord;
+    }
+
+    public static String openKeyName() {
+        try {
+            return openKey == null ? "K" : openKey.getTranslatedKeyMessage().getString();
+        } catch (Throwable t) {
+            return "K";
+        }
+    }
+
+    public static String neteaseCookie() {
+        return (config == null || config.neteaseCookie == null) ? "" : config.neteaseCookie;
+    }
+
+    public static void setNeteaseCookie(String cookie) {
+        if (config != null) {
+            config.neteaseCookie = cookie == null ? "" : cookie.trim();
+            config.save();
+        }
+    }
+
+    /** 以玩家身份发一条聊天。 */
+    public static void sendChat(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.player != null) {
+            mc.player.connection.sendChat(text);
+        }
+    }
+
+    /** 界面点歌：带上当前倍速（1.0 不带）。 */
+    public static void requestSong(String query) {
+        String q = query == null ? "" : query.trim();
+        if (q.isEmpty()) {
+            return;
+        }
+        float speed = config == null ? 1f : config.speed;
+        String suffix = Math.abs(speed - 1f) < 0.001f ? "" : " " + SongSpeed.key(speed);
+        sendChat(trigger() + q + suffix);
+        SongState.addMyRequest(q + (suffix.isEmpty() ? "" : "  [" + SongSpeed.label(speed) + "]"));
+        markMyRequest(q);
+    }
+
+    /** 界面停止。 */
+    public static void requestStop() {
+        sendChat(trigger() + stopWord());
+    }
+
+    /** 界面刷新一起听名单。 */
+    public static void requestListenList() {
+        if (config == null || !config.listenTogetherEnabled) {
+            return;
+        }
+        expectingListReply = true;
+        SongState.listenersStatus = "正在刷新…";
+        lastListenRefreshAt = System.currentTimeMillis();
+        sendChat(trigger() + SongProtocol.LISTEN_WORD);
+    }
+
+    /** 界面加入一起听。 */
+    public static void requestJoin(String player, float speed) {
+        String name = player == null ? "" : player.trim();
+        if (name.isEmpty()) {
+            return;
+        }
+        String suffix = speed > 0 && Math.abs(speed - 1f) >= 0.001f
+                ? " " + SongSpeed.key(speed) : "";
+        expectingListenReply = true;
+        expectingListenAt = System.currentTimeMillis();
+        markMyRequest(SongProtocol.LISTEN_WORD + " " + name);
+        sendChat(trigger() + SongProtocol.LISTEN_WORD + " " + name + suffix);
+    }
+
+    /** 播放/暂停。 */
+    public static void togglePause() {
+        SongPlayer.togglePause();
+    }
+
+    public static void stopPlayback() {
+        PENDING.incrementAndGet();
+        stoppedByUser = true;
+        lastMyRequestAt = 0L;
+        lastMyQuery = "";
+        SongState.setLyrics(null);
+        SongState.title = "";
+        SongState.songId = "";
+        SongPlayer.stop();
+    }
+
+    /** 设置倍速并写进配置（下次点歌继续用）。 */
+    public static void setSpeed(float speed) {
+        float value = SongSpeed.normalize(speed);
+        if (config != null) {
+            config.speed = value;
+            config.save();
+        }
+        SongPlayer.setSpeed(value);
+    }
+
+    public static void setVolume(float volume) {
+        if (config != null) {
+            config.volume = Math.max(0f, Math.min(1f, volume));
+            config.save();
+        }
+        SongPlayer.setVolume(volume);
+    }
+
+    /** 循环切换歌词显示方式：action → title → chat → off → action。 */
+    public static String cycleLyricMode() {
+        if (config == null) {
+            return "action";
+        }
+        String mode = config.lyricMode == null ? "action" : config.lyricMode;
+        switch (mode) {
+            case "action": mode = "title"; break;
+            case "title": mode = "chat"; break;
+            case "chat": mode = "off"; break;
+            default: mode = "action"; break;
+        }
+        config.lyricMode = mode;
+        config.showLyrics = !"off".equals(mode);
+        config.save();
+        lastShownLyric = "";
+        lastTitleLyric = "";
+        return mode;
+    }
+
+    public static String lyricModeLabel() {
+        if (config == null || !config.showLyrics) {
+            return "歌词：关";
+        }
+        switch (config.lyricMode == null ? "action" : config.lyricMode) {
+            case "title": return "歌词：标题";
+            case "chat": return "歌词：聊天";
+            default: return "歌词：动作条";
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 聊天处理
+    // ------------------------------------------------------------------
+
     private static String senderName(Object sender) {
         try {
             if (sender == null) {
@@ -77,7 +345,6 @@ public class SongModClient implements ClientModInitializer {
     }
 
     private static void onChat(String message, boolean mine, String sender) {
-        // 兜一层：异常不能漏到 Fabric 事件回调里。
         try {
             handleChat(message, mine, sender);
         } catch (Throwable t) {
@@ -108,67 +375,30 @@ public class SongModClient implements ClientModInitializer {
         System.out.println("[songmod] 收到点歌消息" + (mine ? "（我发的）: " : "（别人的）: ")
                 + shorten(payload, 200));
 
-        // 机器人发来的播放数据：[点歌]… | ¤<混淆直链>（公屏会把 http 链接换成 [链接]，所以机器人做了混淆）
-        String audioUrl = extractObfuscatedUrl(payload);
-        if (audioUrl == null) {
-            audioUrl = firstAudioUrl(payload);
-        }
-        if (audioUrl != null) {
-            if (stoppedByUser && !mine) {
-                return;
-            }
-            if (mine) {
-                stoppedByUser = false;
-                lastMyRequestAt = System.currentTimeMillis();
-            }
-            if (config.onlyMySong && !isForMe(payload, sender)) {
-                System.out.println("[songmod] 这条点歌不是给我的，跳过：" + shorten(payload, 100));
-                return;
-            }
-            final int seq = PENDING.incrementAndGet();
-            consumeMyRequest();          // 这条请求有结果了（#15）
-            String label = songLabel(payload, audioUrl);
-            currentLabel = label;
-            System.out.println("[songmod] 用机器人直链播放: " + shorten(label, 80)
-                    + " <- " + shorten(audioUrl, 90));
-            feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + label);
-            hintIfConfigured(seq);
-            SongPlayer.play(audioUrl, config.volume,
-                    err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
+        // ① 机器人发来的一起听名单
+        List<SongProtocol.ListenEntry> entries = SongProtocol.parseListenList(payload);
+        if (!entries.isEmpty() || payload.startsWith(SongProtocol.LISTEN_LIST_MARK)) {
+            expectingListReply = false;
+            SongState.setListeners(entries);
+            SongState.listenersStatus = entries.isEmpty() ? "现在没有人在听歌" : "";
             return;
         }
 
-        // 机器人直链被服务器改坏时的第二道保险：… | ¤直链 id:1901371647 → 用歌曲 id 自己取直链
-        String songId = extractSongId(payload);
-        if (songId != null) {
-            if (stoppedByUser && !mine) {
-                return;
-            }
-            if (mine) {
-                stoppedByUser = false;
-                lastMyRequestAt = System.currentTimeMillis();
-            }
-            if (config.onlyMySong && !isForMe(payload, sender)) {
-                System.out.println("[songmod] 这条 id 取链不是给我的，跳过：" + shorten(payload, 100));
-                return;
-            }
-            final int seq = PENDING.incrementAndGet();
-            consumeMyRequest();          // 这条请求有结果了（#15）
-            feedback("§b[点歌] §7机器人直链不可用，改用歌曲 id 取链…");
-            playById(songId, seq);
+        // ② 机器人发来的播放数据
+        SongProtocol.Playback playback = SongProtocol.parsePlayback(payload);
+        if (playback != null) {
+            handlePlayback(playback, payload, mine, sender);
             return;
         }
 
-        // 既不是播放数据、又不是我自己发的 → 别人的点歌/指令，一律忽略
-        // （关键：以前这里会往下走 → 30 秒后本地兜底搜索 → 别人点的歌在我这儿响）
+        // ③ 别人的（不是播放数据的）消息：一律忽略，绝不本地兜底
         if (!mine) {
-            System.out.println("[songmod] 别人的消息，忽略（不触发兜底）：" + shorten(payload, 100));
             return;
         }
 
-        // 我自己的指令：[点歌]台（这一版没界面）/ [点歌]停止 / [点歌]登录
+        // ④ 我自己的指令
         if (config.guiWord != null && !config.guiWord.isEmpty() && eq(payload, config.guiWord)) {
-            feedback("§b[点歌] §e这一版（26.x）没有游戏内界面，直接在聊天发 [点歌]歌名 就行。");
+            openScreen();
             return;
         }
         if (eq(payload, config.stopWord)) {
@@ -177,24 +407,94 @@ public class SongModClient implements ClientModInitializer {
             return;
         }
         if (eq(payload, config.loginWord) || eq(payload, config.logoutWord)) {
-            feedback("§b[点歌] §e网易云登录在【机器人的「点歌」页】里做；本 Mod 的 Cookie 请写在 config/songmod.json。");
+            feedback("§b[点歌] §e网易云登录在【机器人的「点歌」页】里做（扫码），本 Mod 不需要登录。");
+            return;
+        }
+        // 歌词模式： [点歌]歌词 / [点歌]歌词 title / [点歌]歌词 off
+        SongSpeed.Split lyricSplit = SongSpeed.splitTrailing(payload);
+        String lyricCmd = lyricSplit.text;
+        if (lyricCmd.startsWith("歌词") || lyricCmd.startsWith("歌詞")) {
+            String arg = lyricCmd.length() > 2 ? lyricCmd.substring(2).trim().toLowerCase() : "";
+            if (arg.isEmpty()) {
+                feedback("§b[点歌] §a歌词显示方式已切换为：" + lyricModeLabel());
+                cycleLyricMode();
+            } else {
+                if (config != null) {
+                    if (arg.equals("关") || arg.equals("off") || arg.equals("关掉")) {
+                        config.showLyrics = false;
+                        config.lyricMode = "off";
+                    } else if (arg.equals("标题") || arg.equals("title")) {
+                        config.showLyrics = true;
+                        config.lyricMode = "title";
+                    } else if (arg.equals("聊天") || arg.equals("chat") || arg.equals("msg")) {
+                        config.showLyrics = true;
+                        config.lyricMode = "chat";
+                    } else {
+                        config.showLyrics = true;
+                        config.lyricMode = "action";
+                    }
+                    config.save();
+                }
+                feedback("§b[点歌] §a歌词显示方式：" + lyricModeLabel());
+            }
+            return;
+        }
+        // 倍速： [点歌]倍速 1.5
+        if (lyricCmd.startsWith("倍速")) {
+            String arg = lyricCmd.length() > 2 ? lyricCmd.substring(2).trim() : "";
+            float value = SongSpeed.parseToken(arg);
+            if (value > 0) {
+                setSpeed(value);
+                feedback("§b[点歌] §a倍速已设为 §f" + SongSpeed.label(value));
+            } else {
+                feedback("§b[点歌] §e倍速可选：0.5 / 0.75 / 1.0 / 1.5 / 2.0");
+            }
+            return;
+        }
+        // 一起听： [点歌]一起听 [玩家] [倍速]
+        SongProtocol.ListenJoin join = SongProtocol.parseListenJoin(payload);
+        if (join != null) {
+            if (config.listenTogetherEnabled == false) {
+                feedback("§b[点歌] §e一起听已关闭");
+                return;
+            }
+            if (join.listOnly) {
+                requestListenList();
+                if (join.speed > 0) {
+                    setSpeed(join.speed);
+                }
+                feedback("§b[点歌] §7正在获取一起听名单…");
+            } else {
+                requestJoin(join.player, join.speed > 0 ? join.speed : config.speed);
+                if (join.speed > 0) {
+                    setSpeed(join.speed);
+                }
+                feedback("§b[点歌] §7正在加入 §f" + join.player + " §7的一起听…");
+            }
             return;
         }
 
+        // ⑤ 我自己的点歌请求：等机器人回直链，等不到才本地兜底
         long now = System.currentTimeMillis();
         String key = payload.toLowerCase();
-        if (key.equals(lastKey) && now - lastKeyAt < 1500) {
+        if (key.equals(lastKeyText) && now - lastKeyAt < 1500) {
             return;
         }
-        lastKey = key;
+        lastKeyText = key;
         lastKeyAt = now;
         stoppedByUser = false;
-        // 记下「我点过歌」的时刻和关键词：机器人私聊回来的播放数据用它判断「这是给我的」
-        lastMyRequestAt = now;
-        lastMyQuery = payload;
-
-        feedback("§b[点歌] §7正在点歌：§f" + payload);
-        final String query = payload;
+        SongSpeed.Split split = SongSpeed.splitTrailing(payload);
+        String query = split.text;
+        if (query.isEmpty()) {
+            return;
+        }
+        if (split.speed > 0) {
+            setSpeed(split.speed);
+        }
+        markMyRequest(query);
+        feedback("§b[点歌] §7正在点歌：§f" + query
+                + (split.speed > 0 ? "  §b" + SongSpeed.label(split.speed) : ""));
+        final String searchQuery = query;
         final int seq = PENDING.incrementAndGet();
         SCHED.schedule(() -> {
             synchronized (SongModClient.class) {
@@ -203,7 +503,7 @@ public class SongModClient implements ClientModInitializer {
                 }
                 if (config.localFallback) {
                     feedbackIfCurrent(seq, "§b[点歌] §7机器人没响应，本地兜底搜索…");
-                    searchAndPlay(query, seq);
+                    searchAndPlay(searchQuery, seq);
                 } else {
                     feedbackIfCurrent(seq, "§b[点歌] §c机器人不在线（或没登录网易云），点歌失败。");
                 }
@@ -211,8 +511,41 @@ public class SongModClient implements ClientModInitializer {
         }, WAIT_MS, TimeUnit.MILLISECONDS);
     }
 
-    /** 用歌曲 id 自己取直链播放（机器人直链被服务器改坏时的保险）。 */
-    private static void playById(String id, int seq) {
+    /** 处理机器人发来的播放数据（含「一起听」的起播位置）。 */
+    private static void handlePlayback(SongProtocol.Playback playback, String payload,
+                                       boolean mine, String sender) {
+        if (stoppedByUser && !mine) {
+            return;
+        }
+        if (mine) {
+            stoppedByUser = false;
+            lastMyRequestAt = System.currentTimeMillis();
+        }
+        if (config.onlyMySong && !isForMe(payload, sender, playback)) {
+            System.out.println("[songmod] 这条播放数据不是给我的，跳过：" + shorten(payload, 100));
+            return;
+        }
+        final int seq = PENDING.incrementAndGet();
+        consumeMyRequest();
+        long startMs = playback.atSeconds > 0 ? playback.atSeconds * 1000L : 0L;
+        SongState.beginPlayback(playback.label, playback.songId == null ? "" : playback.songId,
+                playback.atSeconds >= 0 ? "一起听" : "");
+        SongPlayer.setSpeed(config.speed);
+        if (playback.hasUrl()) {
+            feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + playback.label
+                    + (playback.atSeconds > 0 ? " §7（一起听 " + formatTime(startMs) + " 处加入）" : ""));
+            SongPlayer.play(playback.url, config.volume, startMs,
+                    err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
+            loadLyrics(playback.songId);
+            hintIfConfigured(seq);
+            return;
+        }
+        // 直链被服务器改坏的保险：用歌曲 id 自己取链
+        feedback("§b[点歌] §7机器人直链不可用，改用歌曲 id 取链…");
+        playById(playback.songId, startMs, seq);
+    }
+
+    private static void playById(String id, long startMs, int seq) {
         POOL.submit(() -> {
             if (!isCurrent(seq)) {
                 return;
@@ -227,15 +560,15 @@ public class SongModClient implements ClientModInitializer {
                         feedbackIfCurrent(seq, "§b[点歌] §c用歌曲 id " + id + " 取不到直链");
                         return;
                     }
-                    String trialNote = song.isTrial() ? " §7（试听片段）" : "";
+                    String trialNote = song.isTrial()
+                            ? " §7（试听片段，可在「点歌台」填自己的 Cookie）" : "";
                     String label = song.title + " - " + song.artistText();
-                    currentLabel = label;
-                    System.out.println("[songmod] 用歌曲 id 取链播放: #" + id + " -> "
-                            + shorten(song.audioUrl, 90));
+                    SongState.beginPlayback(label, song.id, "");
                     feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + label + trialNote);
-                    hintIfConfigured(seq);
-                    SongPlayer.play(song.audioUrl, config.volume,
+                    SongPlayer.play(song.audioUrl, config.volume, startMs,
                             err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
+                    loadLyrics(song.id);
+                    hintIfConfigured(seq);
                 }
             } catch (Throwable t) {
                 feedbackIfCurrent(seq, "§b[点歌] §c出错：" + t);
@@ -243,38 +576,7 @@ public class SongModClient implements ClientModInitializer {
         });
     }
 
-    /**
-     * 从机器人文案里找歌曲 id：机器人格式是 {@code … | ¤混淆直链 id:3399839173}。
-     * ⚠ 不能用 {@code #}（会被服务器当十六进制颜色码吃掉）、也不能用 {@code &}（MC 颜色符）。
-     */
-    private static String extractSongId(String payload) {
-        if (payload == null) {
-            return null;
-        }
-        String low = payload.toLowerCase();
-        for (int i = low.indexOf("id:"); i >= 0; i = low.indexOf("id:", i + 3)) {
-            int end = i + 3;
-            while (end < payload.length() && Character.isDigit(payload.charAt(end))) {
-                end++;
-            }
-            if (end - (i + 3) >= 5) {
-                return payload.substring(i + 3, end);
-            }
-        }
-        int hash = payload.lastIndexOf('#');
-        if (hash >= 0) {
-            int end = hash + 1;
-            while (end < payload.length() && Character.isDigit(payload.charAt(end))) {
-                end++;
-            }
-            String digits = payload.substring(hash + 1, end);
-            if (digits.length() >= 5) {
-                return digits;
-            }
-        }
-        return null;
-    }
-
+    /** 本地兜底：自己搜歌播放（机器人不在线时用）。 */
     private static void searchAndPlay(String query, int seq) {
         POOL.submit(() -> {
             if (!isCurrent(seq)) {
@@ -291,17 +593,18 @@ public class SongModClient implements ClientModInitializer {
                         return;
                     }
                     if (song.audioUrl == null || song.audioUrl.isEmpty()) {
-                        feedbackIfCurrent(seq, "§b[点歌] §e" + song.title + " §7- " + song.artistText()
-                                + "：" + (song.note == null ? "暂时无法播放" : song.note));
+                        feedbackIfCurrent(seq, "§b[点歌] §e" + song.title + " §7- "
+                                + song.artistText() + "：" + (song.note == null ? "暂时无法播放" : song.note));
                         return;
                     }
-                    String trialNote = song.isTrial() ? " §7（试听片段）" : "";
+                    String trialNote = song.isTrial() ? " §7（试听片段，可在「点歌台」填自己的 Cookie）" : "";
                     String label = song.title + " - " + song.artistText();
-                    currentLabel = label;
+                    SongState.beginPlayback(label, song.id, "");
                     feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + label + trialNote);
-                    hintIfConfigured(seq);
-                    SongPlayer.play(song.audioUrl, config.volume,
+                    SongPlayer.play(song.audioUrl, config.volume, 0L,
                             err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
+                    loadLyrics(song.id);
+                    hintIfConfigured(seq);
                 }
             } catch (Throwable t) {
                 feedbackIfCurrent(seq, "§b[点歌] §c出错：" + t);
@@ -309,60 +612,128 @@ public class SongModClient implements ClientModInitializer {
         });
     }
 
-    private static void hintIfConfigured(int seq) {
-        if (config.modUrl == null || config.modUrl.trim().isEmpty()) {
+    /** 后台抓这首歌的歌词（按网易云 id）。 */
+    private static void loadLyrics(String songId) {
+        SongState.setLyrics(null);
+        SongState.lyricsStatus = "";
+        if (songId == null || songId.isEmpty()) {
+            SongState.lyricsStatus = "没有歌曲 id，无法加载歌词";
             return;
         }
-        String hint = (config.hintText == null ? "" : config.hintText).replace("{url}", config.modUrl.trim());
-        if (!hint.trim().isEmpty()) {
-            feedbackIfCurrent(seq, "§b[点歌] §e" + hint);
+        if (config == null || !config.showLyrics || "off".equals(config.lyricMode)) {
+            return;
+        }
+        SongState.lyricsStatus = "歌词加载中…";
+        POOL.submit(() -> {
+            try {
+                SongLyrics.Lyrics lyrics = SongLyrics.get(songId, config == null ? "" : config.neteaseCookie);
+                if (lyrics == null || lyrics.isEmpty()) {
+                    SongState.setLyrics(null);
+                    SongState.lyricsStatus = "这首歌没有可用歌词";
+                } else {
+                    SongState.setLyrics(lyrics);
+                    SongState.lyricsStatus = "";
+                }
+            } catch (Throwable t) {
+                SongState.lyricsStatus = "歌词加载失败：" + t;
+            }
+        });
+    }
+
+    private static void markMyRequest(String query) {
+        long now = System.currentTimeMillis();
+        lastMyRequestAt = now;
+        lastMyQuery = query == null ? "" : query;
+        stoppedByUser = false;
+    }
+
+    // ------------------------------------------------------------------
+    // 歌词显示（tick 里按播放进度刷新）
+    // ------------------------------------------------------------------
+
+    private static void tickLyrics(Minecraft mc) {
+        if (mc == null || config == null) {
+            return;
+        }
+        if (!config.showLyrics || "off".equals(config.lyricMode)) {
+            return;
+        }
+        long position = SongPlayer.positionMs();
+        SongState.syncLyrics(position);
+        String line = SongState.lyricLine;
+        if (line == null || line.isEmpty()) {
+            return;
+        }
+        String prefix = config.lyricPrefix == null ? "" : config.lyricPrefix;
+        String text = prefix + line;
+        long now = System.currentTimeMillis();
+        String mode = config.lyricMode == null ? "action" : config.lyricMode;
+
+        if ("title".equals(mode)) {
+            if (text.equals(lastTitleLyric)) {
+                return;
+            }
+            lastTitleLyric = text;
+            try {
+                mc.gui.hud.setTimes(config.lyricTitleFadeIn, config.lyricTitleStay, config.lyricTitleFadeOut);
+                mc.gui.hud.setTitle(Component.literal(text));
+            } catch (Throwable ignored) {
+                // ignore
+            }
+            return;
+        }
+        if ("chat".equals(mode)) {
+            if (text.equals(lastShownLyric)) {
+                return;
+            }
+            lastShownLyric = text;
+            feedback("§b♪ §f" + text);
+            return;
+        }
+        // action：动作条会自己淡出，需要每隔一会儿重发一次
+        if (text.equals(lastShownLyric) && now - lastLyricShownAt < 1200L) {
+            return;
+        }
+        lastShownLyric = text;
+        lastLyricShownAt = now;
+        try {
+            mc.gui.hud.setOverlayMessage(Component.literal("§b♪ §f" + text), false);
+        } catch (Throwable ignored) {
+            // ignore
         }
     }
 
-    private static boolean isCurrent(int seq) {
-        return !stoppedByUser && PENDING.get() == seq;
-    }
+    // ------------------------------------------------------------------
+    // 小工具
+    // ------------------------------------------------------------------
 
-    private static synchronized void stopPlayback() {
-        PENDING.incrementAndGet();
-        stoppedByUser = true;
-        lastMyRequestAt = 0L;
-        lastKey = "";
-        lastKeyAt = 0L;
-        currentLabel = "";
-        SongPlayer.stop();
-    }
-
-    private static void feedbackIfCurrent(int seq, String message) {
-        feedback(seq, message);
-    }
-
-    private static boolean eq(String a, String b) {
-        return a != null && b != null && !b.isEmpty() && a.equalsIgnoreCase(b);
-    }
-
-    /** 这条播放数据是不是放给我的（谁点谁听 / 只信机器人）。 */
-    private static boolean isForMe(String payload, String sender) {
-        // 配了机器人游戏名：只接受这个发送者的播放数据（#53）。
+    private static boolean isForMe(String payload, String sender, SongProtocol.Playback playback) {
+        // ① 配了机器人名：只认这个发送者
         String bot = config.botName == null ? "" : config.botName.trim();
         if (!bot.isEmpty() && sender != null && !sender.isEmpty()) {
             return sender.equalsIgnoreCase(bot);
         }
-        // GAME 重播拿不到发送者时，退回「我最近点的歌」匹配；
-        // 不再因为正文里出现我的名字就接受（防止别人伪造 [点歌]我的名字 | 恶意URL）。
+        // ② 正在等「一起听」的回复：这段时间内机器人回的任何播放数据都算我的
+        if (expectingListenReply && System.currentTimeMillis() - expectingListenAt < PENDING_WINDOW_MS) {
+            expectingListenReply = false;
+            return true;
+        }
+        // ③ 退回「我最近点的歌」关键词匹配
         if (System.currentTimeMillis() - lastMyRequestAt < 300000L) {
-            String p = payload == null ? "" : payload.toLowerCase();
-            String q = lastMyQuery;
-            String np = normalizeForMatch(p);
-            String nq = normalizeForMatch(q);
-            if (!nq.isEmpty() && (np.contains(nq) || nq.contains(np))) {
+            String p = normalizeForMatch(payload);
+            String q = normalizeForMatch(lastMyQuery);
+            if (!q.isEmpty() && (p.contains(q) || q.contains(p))) {
+                return true;
+            }
+            String label = normalizeForMatch(playback == null ? "" : playback.label);
+            String q2 = normalizeForMatch(lastMyQuery);
+            if (!label.isEmpty() && !q2.isEmpty() && (label.contains(q2) || q2.contains(label))) {
                 return true;
             }
         }
         return false;
     }
 
-    /** 匹配用：小写、只留字母/数字/汉字（去掉空格、标点、颜色符）。 */
     private static String normalizeForMatch(String s) {
         if (s == null) {
             return "";
@@ -376,102 +747,32 @@ public class SongModClient implements ClientModInitializer {
         return b.toString();
     }
 
-    /** 收到属于自己的播放数据后清掉「最近点歌」，避免 5 分钟内继续接受别人的歌。 */
     private static void consumeMyRequest() {
         lastMyRequestAt = 0L;
         lastMyQuery = "";
+        expectingListenReply = false;
     }
 
-    /** 自己的游戏名（先取登录账号名，取不到再取玩家名）。 */
-    private static String myName() {
-        try {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc == null) {
-                return "";
-            }
-            if (mc.getUser() != null && mc.getUser().getName() != null) {
-                return mc.getUser().getName();
-            }
-            if (mc.player != null && mc.player.getName() != null) {
-                return mc.player.getName().getString();
-            }
-        } catch (Throwable ignored) {
-            // 任何 API 差异都不该影响播放
-        }
-        return "";
+    private static boolean isCurrent(int seq) {
+        return !stoppedByUser && PENDING.get() == seq;
     }
 
-    /** 日志用：太长就截断。 */
-    private static String shorten(String text, int max) {
-        if (text == null) {
-            return "";
+    private static void hintIfConfigured(int seq) {
+        if (config.modUrl == null || config.modUrl.trim().isEmpty()) {
+            return;
         }
-        return text.length() <= max ? text : text.substring(0, max) + "…";
+        String hint = (config.hintText == null ? "" : config.hintText).replace("{url}", config.modUrl.trim());
+        if (!hint.trim().isEmpty()) {
+            feedbackIfCurrent(seq, "§b[点歌] §e" + hint);
+        }
     }
 
-    /**
-     * 还原机器人发来的混淆直链（{@code ¤}=http、{@code ¥}=https，{@code . / :} → {@code · ¦ ∶}，
-     * 见机器人侧 {@code Controller._encode_url}）。公屏的链接过滤会把 {@code http(s)://…}
-     * 整条替换成「[链接]」，所以机器人发的是去协议头、去 query 的混淆形式。没有标记时返回 null。
-     */
-    private static String extractObfuscatedUrl(String payload) {
-        if (payload == null) {
-            return null;
-        }
-        int a = payload.indexOf('¤');
-        int b = payload.indexOf('¥');
-        int pos = a < 0 ? b : (b < 0 ? a : Math.min(a, b));
-        if (pos < 0) {
-            return null;
-        }
-        String scheme = payload.charAt(pos) == '¥' ? "https://" : "http://";
-        String rest = payload.substring(pos + 1).trim();
-        int end = 0;
-        while (end < rest.length() && !Character.isWhitespace(rest.charAt(end))) {
-            end++;
-        }
-        String body = rest.substring(0, end)
-                .replace('·', '.').replace('¦', '/').replace('∶', ':');
-        return body.isEmpty() ? null : scheme + body;
+    private static boolean eq(String a, String b) {
+        return a != null && b != null && !b.isEmpty() && a.equalsIgnoreCase(b);
     }
 
-    /** 播放标签：取直链前面那段（机器人格式是「文案 | 直链」）。 */
-    private static String songLabel(String payload, String audioUrl) {
-        String label = payload;
-        int bar = label.lastIndexOf('|');
-        if (bar > 0) {
-            label = label.substring(0, bar);
-        } else {
-            int idx = payload.indexOf(audioUrl);
-            if (idx > 0) {
-                label = payload.substring(0, idx);
-            }
-        }
-        label = label.replace('¤', ' ').replace('¥', ' ')
-                .replaceAll("[|\\-]+\\s*$", "").trim();
-        return label.isEmpty() ? "歌曲" : label;
-    }
-
-    /** 从文本里找第一个看起来是音频直链的 URL（机器人没混淆时的兜底）。 */
-    private static String firstAudioUrl(String text) {
-        if (text == null) {
-            return null;
-        }
-        int i = text.indexOf("http");
-        while (i >= 0) {
-            int end = i;
-            while (end < text.length() && !Character.isWhitespace(text.charAt(end))) {
-                end++;
-            }
-            String candidate = text.substring(i, end);
-            String low = candidate.toLowerCase();
-            if (low.contains(".mp3") || low.contains("music.126.net") || low.contains(".m4a")
-                    || low.contains(".flac") || low.contains("song/media/outer/url")) {
-                return candidate;
-            }
-            i = text.indexOf("http", end);
-        }
-        return null;
+    private static void feedbackIfCurrent(int seq, String message) {
+        feedback(seq, message);
     }
 
     private static void feedback(String msg) {
@@ -485,66 +786,29 @@ public class SongModClient implements ClientModInitializer {
         }
         mc.execute(() -> {
             synchronized (SongModClient.class) {
-                if (seq < 0 || isCurrent(seq)) {
-                    addChatLine(msg);
+                if (seq >= 0 && !isCurrent(seq)) {
+                    return;
+                }
+                try {
+                    if (mc.gui != null) {
+                        mc.gui.hud.getChat().addClientSystemMessage(Component.literal(msg));
+                    }
+                } catch (Throwable ignored) {
+                    // ignore
                 }
             }
         });
     }
 
-    /**
-     * 往聊天栏打一行客户端提示。
-     *
-     * <p>26.x 里这个入口挪过窝：<b>26.1.x</b> 是 {@code mc.gui.getChat()}，
-     * <b>26.2</b> 变成了 {@code mc.gui.hud.getChat()}（Gui 里只剩 {@code hud}）。所以用反射两条路都试，
-     * 失败就退化成写日志 —— 任何版本差异都不该影响播放本身。
-     */
-    private static void addChatLine(String msg) {
-        Minecraft mc = Minecraft.getInstance();
-        try {
-            if (mc == null || mc.gui == null) {
-                return;
-            }
-            Object chat = callNoArg(mc.gui, "getChat");
-            if (chat == null) {
-                Object hud = getField(mc.gui, "hud");
-                if (hud != null) {
-                    chat = callNoArg(hud, "getChat");
-                }
-            }
-            if (chat == null) {
-                System.out.println("[songmod] " + msg);
-                return;
-            }
-            chat.getClass().getMethod("addClientSystemMessage", Component.class)
-                    .invoke(chat, Component.literal(msg));
-        } catch (Throwable t) {
-            // 最后兜底：至少日志里有
-            System.out.println("[songmod] " + msg);
-        }
+    private static String formatTime(long ms) {
+        long total = Math.max(0L, ms) / 1000L;
+        return String.format("%d:%02d", total / 60, total % 60);
     }
 
-    /** 反射调用无参方法（拿不到返回 null）。 */
-    private static Object callNoArg(Object target, String name) {
-        try {
-            return target.getClass().getMethod(name).invoke(target);
-        } catch (Throwable t) {
-            return null;
+    private static String shorten(String text, int max) {
+        if (text == null) {
+            return "";
         }
-    }
-
-    /** 反射取字段（沿父类往上找，拿不到返回 null）。 */
-    private static Object getField(Object target, String name) {
-        Class<?> c = target.getClass();
-        while (c != null) {
-            try {
-                java.lang.reflect.Field f = c.getDeclaredField(name);
-                f.setAccessible(true);
-                return f.get(target);
-            } catch (Throwable t) {
-                c = c.getSuperclass();
-            }
-        }
-        return null;
+        return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 }
