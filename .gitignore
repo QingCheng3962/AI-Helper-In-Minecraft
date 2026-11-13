@@ -32,3 +32,16 @@ daily.db
 /other_qq_pic_sent/relay.json
 # Minecraft 聊天小票机的 dry-run 字节文件
 /preview/
+
+# Gradle 离线构建缓存（本地验证用，别提交）
+/mc-song-mod/.gradle-home/
+# 构建日志 / 临时验证产物
+mc-song-mod/build_*.log
+/mc-song-mod/build_diag.log
+/mc-song-mod/build_debug.log
+/mc-song-mod/build_gui2_*.log
+/mc-song-mod/build/javac-cp*/
+/mc-song-mod/build/javac-stubs/
+/mc-song-mod/build/javac-out*/
+/mc-song-mod/build/javac-args*.txt
+/mc-song-mod/build/javac-err*.log

@@ -212,6 +212,8 @@ class Controller:
         self._song_lock = threading.RLock()
         self._song_epoch = 0
         self._song_player_epochs: Dict[str, int] = {}
+        # 「一起听」：谁正在听哪首歌（机器人发出播放数据时记账；键 = 玩家名 casefold）
+        self._song_listeners: Dict[str, Dict[str, Any]] = {}
         self._qq_nicknames: Dict[str, str] = {}
         self._load_qq_accounts()
         self._photo = PhotoServer()
@@ -2658,8 +2660,11 @@ class Controller:
         lines = [
             f'点歌用法：聊天里发 {t} 后面跟下面这些词（半角中括号写法也一样）',
             f'{t}歌名 → 点歌，例：{t}起风了（装了 Mod 的人全都能听到）',
+            f'{t}歌名 1.5 → 指定倍速（0.5 / 0.75 / 1.0 / 1.5 / 2.0，只影响你自己）',
+            f'{t}一起听 → 看服务器上谁在听歌；{t}一起听 玩家 → 跟 TA 一起听（按对方进度跟上）',
             f'{t}{stop_word} → 停止播放并清空播放队列',
-            f'{t}台 → 打开点歌台界面（Mod 里按 K 也能开）',
+            f'{t}台 → 打开点歌台界面（Mod 里按 K 也能开；界面里能拖进度条、调倍速、看歌词）',
+            f'{t}歌词 [动作条/标题/聊天/关] → 切换游戏内歌词显示方式',
             f'{t}help → 看这条帮助；{t}登录/{t}登出 → 提示去哪登录网易云；'
             f'也可以直接发网易云链接或数字 id，例：{t}1901371647',
             '没装 Mod 听不到：在聊天里发一次点歌，机器人会回你 Mod 下载链接',
@@ -2693,6 +2698,152 @@ class Controller:
         elif u.startswith('http://'):
             mark, u = URL_MARK_HTTP, u[len('http://'):]
         return mark + u.replace('.', '·').replace('/', '¦').replace(':', '∶')
+
+    # ------------------------------------------------------------------
+    # 「一起听」+「倍速」语法
+    # ------------------------------------------------------------------
+
+    #: 客户端 Mod 支持的倍速档位（写在歌名后面：[点歌]起风了 1.5）
+    _SONG_SPEEDS = ('0.5', '0.75', '1.0', '1.5', '2.0')
+
+    @classmethod
+    def strip_speed_token(cls, text: str):
+        """剥掉末尾的倍速 token：'起风了 1.5' → ('起风了', '1.5')。
+
+        只有「前面还有别的内容」且 token 正好是 0.5/0.75/1.0/1.5/2.0（可带 x/倍）时才剥，
+        免得把纯数字歌名吃掉。返回 (内容, 倍速或空串)。
+        """
+        s = (text or '').strip()
+        if not s:
+            return '', ''
+        parts = s.rsplit(None, 1)
+        if len(parts) != 2 or not parts[0].strip():
+            return s, ''
+        token = parts[1].lstrip('xX×').rstrip('xX×倍').strip()
+        if token not in cls._SONG_SPEEDS:
+            return s, ''
+        return parts[0].strip(), token
+
+    def _remember_listener(self, entry, now: float, duration_ms: int) -> None:
+        """记下「某个玩家现在在听哪首歌」，供别人一起听。"""
+        who = str(entry.get('who') or '').strip()
+        name = self._msg_name(who)
+        if not name:
+            return
+        self._song_listeners[name.casefold()] = {
+            'who': name,
+            'title': str(entry.get('title') or ''),
+            'artist': str(entry.get('artist') or ''),
+            'url': str(entry.get('url') or ''),
+            'id': str(entry.get('id') or ''),
+            'duration': int(duration_ms or 0),
+            'posted_at': float(now),
+        }
+        self._prune_listeners(now)
+
+    def _prune_listeners(self, now=None) -> None:
+        """清掉已经肯定放完/太旧的记录（至少 10 分钟）。"""
+        now = time.time() if now is None else now
+        for key in list(self._song_listeners):
+            item = self._song_listeners.get(key) or {}
+            limit = max(600.0, (int(item.get('duration') or 0) / 1000.0) + 60.0)
+            if now - float(item.get('posted_at') or 0.0) > limit:
+                self._song_listeners.pop(key, None)
+
+    def _listener_for(self, player: str):
+        self._prune_listeners()
+        name = (player or '').strip().casefold()
+        if not name:
+            return None
+        return self._song_listeners.get(name)
+
+    def _send_listen_list(self, who: str) -> None:
+        """把「谁在听什么」私聊给请求者（格式与客户端 Mod 约定）。"""
+        self._prune_listeners()
+        now = time.time()
+        rows = []
+        for item in self._song_listeners.values():
+            elapsed = int(max(0.0, now - float(item.get('posted_at') or now)))
+            label = str(item.get('title') or '')
+            if item.get('artist'):
+                label = label + '-' + str(item.get('artist'))
+            # 分隔符规定：条目用 ';'，字段用 '~'（Mod 侧 SongProtocol.parseListenList 解析）
+            safe_label = label.replace(';', ' ').replace('~', ' ').replace('|', ' ')[:16]
+            rows.append(str(item.get('who')) + '~' + safe_label + '~' + str(elapsed))
+            if len(rows) >= 6:
+                break
+        body = '[点歌]一起听名单|' + ';'.join(rows)
+        name = self._msg_name(who)
+        if not name:
+            self.send_chat(body)
+            return
+        cmd = '/msg ' + name + ' '
+        budget = max(40, 250 - _mc_len(cmd))
+        line = _mc_clip(body, budget)
+        self._remember_sent(cmd + line)
+        try:
+            if not self._engine.say(cmd + line):
+                raise RuntimeError('engine offline')
+            self._post_ui({'kind': 'log', 'level': 'song',
+                           'message': '[点歌] 已私聊 ' + name + ' 一起听名单（' + str(len(rows)) + ' 人）'})
+        except Exception:  # noqa: BLE001
+            self.send_chat(line)
+
+    def _join_listen(self, who: str, target: str) -> bool:
+        """把 target 正在听的歌按估算进度私聊给 who（客户端从那里开始播）。"""
+        item = self._listener_for(target)
+        if not item or not item.get('url'):
+            self._send_song_line(who, '[点歌]一起听：没找到 ' + str(target) + ' 正在听的歌（可能已经放完了）')
+            return False
+        now = time.time()
+        elapsed = max(0.0, now - float(item.get('posted_at') or now))
+        duration = int(item.get('duration') or 0)
+        if duration > 0:
+            elapsed = min(elapsed, max(0.0, duration / 1000.0 - 5.0))
+        title = str(item.get('title') or '')
+        artist = str(item.get('artist') or '')
+        label = (title + ' - ' + artist) if artist else title
+        enc = self._encode_url(item['url'])
+        sid = str(item.get('id') or '')
+        idtag = (' id:' + sid) if sid else ''
+        at = int(elapsed)
+        trigger = (self.config.song.trigger or '[点歌]').strip() or '[点歌]'
+        name = self._msg_name(who)
+        target_cmd = ('/msg ' + name + ' ') if name else ''
+        limit = max(90, 250 - _mc_len(target_cmd))
+        line = trigger + label + ' | ' + enc + idtag + ' at:' + str(at)
+        if _mc_len(line) > limit:
+            line = trigger + title + ' | ' + enc + ' at:' + str(at)
+        if _mc_len(line) > limit:
+            line = trigger + title + ' | ' + enc
+        sent_private = self._send_song_line(who, line, is_play_data=True)
+        # 记成「who 也在听这首歌」：别人再对 who 点一起听时，进度按同一首歌估算
+        self._remember_listener({'who': who, 'title': item.get('title'),
+                                 'artist': item.get('artist'), 'url': item.get('url'),
+                                 'id': item.get('id')},
+                                now - elapsed, duration or 180000)
+        self._post_ui({'kind': 'log', 'level': 'song',
+                       'message': '[点歌] ' + str(who) + ' 一起听 ' + str(target) + ' 的《'
+                                  + title + '》（从 ' + str(at) + 's 处加入'
+                                  + ('，公屏' if not sent_private else '') + '）'})
+        return True
+
+    @staticmethod
+    def _parse_listen_command(after: str):
+        """解析「一起听」指令：返回 (player, speed)；player 为空表示只要名单；不是该指令返回 None。"""
+        text = (after or '').strip()
+        if not text.startswith('一起听'):
+            return None
+        rest = text[len('一起听'):].strip()
+        core, speed = Controller.strip_speed_token(rest)
+        if not core:
+            return '', speed
+        player = core.split()[0].strip()
+        if not player or len(player) > 16:
+            return '', speed
+        if not all(ch.isalnum() or ch == '_' for ch in player):
+            return '', speed
+        return player, speed
 
     def _maybe_song_reply(self, player: str, content: str, raw: str = '') -> bool:
         """看到聊天里的「点歌」触发词：
@@ -2766,6 +2917,19 @@ class Controller:
         if after.lower() in ('台', '界面', 'gui', '菜单', '点歌台'):
             self._post_ui({'kind': 'log', 'level': 'song',
                            'message': f'[点歌] {who} 打开了点歌台界面'})
+            return True
+        # 倍速语法：剥掉末尾的 0.5 / 0.75 / 1.0 / 1.5 / 2.0（客户端自己按倍速播，机器人搜索时要忽略它）
+        after, speed_token = self.strip_speed_token(after)
+        if not after:
+            return False
+        # 一起听：[点歌]一起听（要名单）/ [点歌]一起听 <玩家>（按对方进度加入）
+        listen = self._parse_listen_command(after)
+        if listen is not None:
+            target_player, _listen_speed = listen
+            if target_player:
+                self._join_listen(who, target_player)
+            else:
+                self._send_listen_list(who)
             return True
         # ① 机器人自己发的播放数据：带音频直链、或带混淆直链标记的，一律不再解析（防自触发死循环）
         if (' | ' in after or URL_MARK_HTTP in after or URL_MARK_HTTPS in after
@@ -3293,6 +3457,11 @@ class Controller:
         if duration <= 0:
             duration = 180000
         self._song_next_at = now + duration / 1000.0 + 2.0
+        # 「一起听」记账：这个玩家现在在听这首歌（别人点「一起听 他」时按这里的 posted_at 估算进度）
+        try:
+            self._remember_listener(entry, now, duration)
+        except Exception:  # noqa: BLE001
+            pass
         self._post_ui({'kind': 'log', 'level': 'song',
                        'message': f"[点歌] {'已私聊 ' + who if private else '已发公屏'}："
                                   f"{entry['title']} - {entry['artist']}"
