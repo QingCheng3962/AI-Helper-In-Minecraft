@@ -208,4 +208,9 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
   - 表：affinity / kv / prompt_templates / qq_accounts / meta；WAL + 单库一把锁；连接弱引用缓存（没人用自动关，Windows 下临时目录才能删干净）
   - 迁移失败可重试（不会把 `_migrated` 提前置真导致丢数据）
   - 设置文件（config.json / mcai_chat.json）仍保持 JSON：要人手改、带 API Key，放 DB 反而不好维护
+- [x] 一键安装包：`installer/`（C# 安装向导 + 启动器 + Python 构建脚本）
+  - 自带 Python 3.9 运行时 + requirements 全部依赖 + node.exe + 生产 node_modules；目标机无需另装环境
+  - 选安装目录 / 可选 NapCat / 建桌面与开始菜单快捷方式 / 静默安装 `/S /D=\path /NAPCAT=1`
+  - 内置 15 个点歌 Mod jar（Mod/）与服务端插件，安装不覆盖 data.db / config.json 等用户数据
+  - 自检：静默安装 + 内置 Python 导入全部 aafm_py 模块与第三方依赖通过
 - [x] 测试：156 项全部通过（test_affinity_save / test_config_persistence 改成 SQLite 契约）

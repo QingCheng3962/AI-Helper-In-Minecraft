@@ -54,3 +54,7 @@ data.db-wal
 data.db-shm
 *.json.bak*
 *.json.migrated
+# 安装包构建产物（体积大，走 Release）
+/dist/installer/
+/build/installer/
+/installer/build_*.log
