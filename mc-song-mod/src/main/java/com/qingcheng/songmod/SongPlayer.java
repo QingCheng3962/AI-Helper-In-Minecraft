@@ -241,6 +241,7 @@ public final class SongPlayer {
     /** 主解码循环：从当前帧开始，逐帧解码 → 重采样 → 写音频设备。 */
     private static void decodeLoop(Session s, Mp3Track track, Consumer<String> onError) {
         int frame = 0;
+        int resync = 0;
         Decoder decoder = new Decoder();
         ByteArrayInputStream in = new ByteArrayInputStream(track.data,
                 track.offsetOf(frame), track.data.length - track.offsetOf(frame));
@@ -274,9 +275,36 @@ public final class SongPlayer {
                 if (header == null) {
                     break;                     // 放完了
                 }
-                Obuffer decoded;
+                Obuffer decoded = null;
                 try {
                     decoded = decoder.decodeFrame(header, bitstream);
+                    resync = 0;
+                } catch (Throwable decodeError) {
+                    // 拖动进度条后偶尔会落在坏帧/半帧上：丢掉这一帧、从下一帧重新同步。
+                    resync++;
+                    try {
+                        bitstream.closeFrame();
+                    } catch (Throwable ignored) {
+                        // ignore
+                    }
+                    if (resync > 5) {
+                        throw decodeError;
+                    }
+                    frame++;
+                    if (frame >= track.offsets.length) {
+                        break;
+                    }
+                    try {
+                        bitstream.close();
+                    } catch (Throwable ignored) {
+                        // ignore
+                    }
+                    int offset = track.offsetOf(frame);
+                    in = new ByteArrayInputStream(track.data, Math.min(offset, track.data.length),
+                            Math.max(0, track.data.length - offset));
+                    bitstream = new Bitstream(in);
+                    s.positionMs = track.startOf(frame);
+                    continue;
                 } finally {
                     try {
                         bitstream.closeFrame();
@@ -289,11 +317,14 @@ public final class SongPlayer {
                 }
                 SampleBuffer buffer = (SampleBuffer) decoded;
                 short[] samples = buffer.getBuffer();
-                int len = buffer.getBufferLength();
+                int len = Math.min(buffer.getBufferLength(), samples == null ? 0 : samples.length);
                 int channels = Math.max(1, buffer.getChannelCount());
                 int frequency = buffer.getSampleFrequency();
                 if (frequency <= 0) {
                     frequency = track.sampleRate;
+                }
+                if (samples == null || len <= 0) {
+                    continue;
                 }
                 ensureLine(s, frequency, channels);
                 short[] pcm = resample(samples, len, channels, speed);
@@ -399,7 +430,12 @@ public final class SongPlayer {
     }
 
     private static short[] resample(short[] samples, int len, int channels, float rate) {
-        if (rate <= 0f || Math.abs(rate - 1f) < 0.001f || len <= 0) {
+        if (samples == null || len <= 0) {
+            return new short[0];
+        }
+        len = Math.min(len, samples.length);
+        channels = Math.max(1, channels);
+        if (rate <= 0f || Math.abs(rate - 1f) < 0.001f) {
             short[] copy = new short[len];
             System.arraycopy(samples, 0, copy, 0, len);
             return copy;
@@ -413,6 +449,9 @@ public final class SongPlayer {
         for (int f = 0; f < outFrames; f++) {
             float src = f / rate;
             int i0 = (int) src;
+            if (i0 < 0) {
+                i0 = 0;
+            }
             if (i0 >= frames) {
                 i0 = frames - 1;
             }
@@ -422,9 +461,21 @@ public final class SongPlayer {
                 frac = 0f;
             }
             for (int c = 0; c < channels; c++) {
-                short a = samples[i0 * channels + c];
-                short b = samples[i1 * channels + c];
-                out[f * channels + c] = (short) (a + (b - a) * frac);
+                int idx0 = i0 * channels + c;
+                int idx1 = i1 * channels + c;
+                if (idx0 >= samples.length) {
+                    idx0 = samples.length - 1;
+                }
+                if (idx1 >= samples.length) {
+                    idx1 = samples.length - 1;
+                }
+                short a = samples[idx0];
+                short b = samples[idx1];
+                int idx = f * channels + c;
+                if (idx >= out.length) {
+                    break;
+                }
+                out[idx] = (short) (a + (b - a) * frac);
             }
         }
         return out;

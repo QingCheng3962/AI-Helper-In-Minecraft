@@ -11,11 +11,8 @@ import java.util.List;
 /**
  * 新版游戏内「点歌台」（Minecraft 26.x）。
  *
- * <p>三个页签：点歌（可拖动进度条 / 播放控制 / 倍速 / 歌词模式）、一起听（加入别人的正在播放）、
- * 我的（我点过的歌 / 音量 / 自己的网易云 Cookie）。
- *
- * <p>26.x 的绘制换成「提取渲染状态」：{@code extractBackground} 画面板（在控件下面），
- * {@code extractRenderState} 叠加文字（在控件上面），与 1.21.x 版的层次一致。
+ * <p>布局按「宽松、不拥挤」重做（每个区块独占一行）。26.x 绘制走 extractRenderState 提取式渲染：
+ * extractBackground 画面板（控件下面），extractRenderState 叠加文字（控件上面）。
  */
 public class SongScreen extends Screen {
 
@@ -35,8 +32,7 @@ public class SongScreen extends Screen {
     private static final int TAB_SONG = 0;
     private static final int TAB_LISTEN = 1;
     private static final int TAB_MINE = 2;
-
-    private static final int MAX_LISTEN_ROWS = 6;
+    private static final int MAX_LISTEN_ROWS = 5;
 
     private int tab = TAB_SONG;
     private long lastProgressTouch = 0L;
@@ -44,6 +40,8 @@ public class SongScreen extends Screen {
     private EditBox queryBox;
     private Button sendBtn;
     private Button[] speedBtns;
+    /** 倍速按钮从大到小显示（2.0 在最左），和常见播放器一致。 */
+    private final float[] speedValues = new float[SongSpeed.SPEEDS.length];
     private SongSlider progress;
     private Button playPauseBtn;
     private Button stopBtn;
@@ -63,18 +61,21 @@ public class SongScreen extends Screen {
 
     public SongScreen() {
         super(Component.literal("点歌台"));
+        float[] speeds = SongSpeed.SPEEDS;
+        for (int i = 0; i < speeds.length; i++) {
+            speedValues[i] = speeds[speeds.length - 1 - i];   // 2.0 → 0.5
+        }
     }
 
     // ------------------------------------------------------------------
     // 布局
     // ------------------------------------------------------------------
-
     private int panelW() {
-        return Math.min(360, Math.max(280, this.width - 20));
+        return Math.min(400, Math.max(320, this.width - 24));
     }
 
     private int panelH() {
-        return Math.min(268, Math.max(220, this.height - 20));
+        return Math.min(300, Math.max(250, this.height - 24));
     }
 
     private int panelX() {
@@ -85,6 +86,10 @@ public class SongScreen extends Screen {
         return (this.height - panelH()) / 2;
     }
 
+    private int contentW() {
+        return panelW() - 32;
+    }
+
     @Override
     protected void init() {
         super.init();
@@ -92,44 +97,44 @@ public class SongScreen extends Screen {
         int py = panelY();
         int pw = panelW();
         int ph = panelH();
-        int contentW = pw - 32;
+        int cw = contentW();
 
-        // 页签
-        int tabY = py + 6;
-        int tabW = (pw - 60) / 3;
+        // ---- 顶部：页签 ----
+        int tabY = py + 28;
+        int tabW = (pw - 70) / 3;
         tabSongBtn = addRenderableWidget(Button.builder(Component.literal("点歌"), b -> setTab(TAB_SONG))
-                .bounds(px + 8, tabY, tabW, 18).build());
+                .bounds(px + 12, tabY, tabW, 18).build());
         tabListenBtn = addRenderableWidget(Button.builder(Component.literal("一起听"), b -> {
             setTab(TAB_LISTEN);
             SongModClient.requestListenList();
-        }).bounds(px + 10 + tabW, tabY, tabW, 18).build());
+        }).bounds(px + 18 + tabW, tabY, tabW, 18).build());
         tabMineBtn = addRenderableWidget(Button.builder(Component.literal("我的"), b -> setTab(TAB_MINE))
-                .bounds(px + 12 + tabW * 2, tabY, tabW, 18).build());
+                .bounds(px + 24 + tabW * 2, tabY, tabW, 18).build());
         closeBtn = addRenderableWidget(Button.builder(Component.literal("×"), b -> this.onClose())
-                .bounds(px + pw - 22, tabY, 16, 18).build());
+                .bounds(px + pw - 26, py + 6, 18, 18).build());
 
         // ---- 点歌页 ----
-        queryBox = new EditBox(this.font, px + 16, py + 62, contentW - 74, 18,
+        queryBox = new EditBox(this.font, px + 56, py + 56, cw - 140, 18,
                 Component.literal("歌名 / 网易云链接 / 歌曲ID"));
         queryBox.setMaxLength(120);
         addRenderableWidget(queryBox);
         sendBtn = addRenderableWidget(Button.builder(Component.literal("点歌"), b -> sendRequest())
-                .bounds(px + pw - 90, py + 62, 74, 18).build());
+                .bounds(px + pw - 92, py + 56, 76, 18).build());
 
-        speedBtns = new Button[SongSpeed.SPEEDS.length];
-        int speedW = Math.min(52, (contentW - 40 - 4 * 6) / 5);
-        for (int i = 0; i < SongSpeed.SPEEDS.length; i++) {
-            final float value = SongSpeed.SPEEDS[i];
+        speedBtns = new Button[speedValues.length];
+        int speedW = Math.min(46, (cw - 40 - 4 * 6) / 5);
+        for (int i = 0; i < speedValues.length; i++) {
+            final float value = speedValues[i];
             speedBtns[i] = addRenderableWidget(Button.builder(
                             Component.literal(SongSpeed.label(value)),
                             b -> {
                                 SongModClient.setSpeed(value);
                                 SongPlayer.setSpeed(value);
                             })
-                    .bounds(px + 40 + i * (speedW + 6), py + 86, speedW, 16).build());
+                    .bounds(px + 56 + i * (speedW + 6), py + 80, speedW, 16).build());
         }
 
-        progress = new SongSlider(px + 16, py + 112, contentW, 18, 0.0,
+        progress = new SongSlider(px + 16, py + 108, cw, 18, 0.0,
                 (slider, value) -> {
                     if (!SongPlayer.isSeekable()) {
                         return;
@@ -139,38 +144,38 @@ public class SongScreen extends Screen {
                 });
         addRenderableWidget(progress);
 
-        playPauseBtn = addRenderableWidget(Button.builder(Component.literal("播放/暂停"),
-                b -> SongModClient.togglePause()).bounds(px + 16, py + 142, 84, 18).build());
+        playPauseBtn = addRenderableWidget(Button.builder(Component.literal("暂停"),
+                b -> SongModClient.togglePause()).bounds(px + 16, py + 136, 80, 18).build());
         stopBtn = addRenderableWidget(Button.builder(Component.literal("停止"),
-                b -> SongModClient.requestStop()).bounds(px + 106, py + 142, 60, 18).build());
+                b -> SongModClient.requestStop()).bounds(px + 102, py + 136, 60, 18).build());
         lyricBtn = addRenderableWidget(Button.builder(Component.literal("歌词模式"), b -> {
             SongModClient.cycleLyricMode();
-        }).bounds(px + 172, py + 142, 96, 18).build());
+        }).bounds(px + 168, py + 136, 104, 18).build());
 
-        // ---- 一起听 ----
+        // ---- 一起听页 ----
         refreshListenBtn = addRenderableWidget(Button.builder(Component.literal("刷新名单"),
-                b -> SongModClient.requestListenList()).bounds(px + pw - 96, py + 56, 80, 18).build());
+                b -> SongModClient.requestListenList()).bounds(px + pw - 100, py + 56, 84, 18).build());
         joinBtns = new Button[MAX_LISTEN_ROWS];
         for (int i = 0; i < MAX_LISTEN_ROWS; i++) {
             final int row = i;
-            joinBtns[i] = addRenderableWidget(Button.builder(Component.literal("加入"), b -> joinRow(row))
-                    .bounds(px + pw - 76, py + 80 + i * 27, 60, 18).build());
+            joinBtns[i] = addRenderableWidget(Button.builder(Component.literal("一起听"), b -> joinRow(row))
+                    .bounds(px + pw - 84, py + 104 + i * 28, 68, 18).build());
         }
 
-        // ---- 我的 ----
-        volumeSlider = new SongSlider(px + 16, py + ph - 96, contentW, 18,
+        // ---- 我的页 ----
+        volumeSlider = new SongSlider(px + 56, py + ph - 92, cw - 40, 18,
                 SongModClient.settings() == null ? 0.8 : SongModClient.settings().volume,
                 (slider, value) -> SongModClient.setVolume((float) value));
         addRenderableWidget(volumeSlider);
-        cookieBox = new EditBox(this.font, px + 16, py + ph - 62, contentW - 96, 18,
-                Component.literal("自己的网易云 Cookie（可选，本地兜底用）"));
+        cookieBox = new EditBox(this.font, px + 56, py + ph - 58, cw - 96, 18,
+                Component.literal("自己的网易云 Cookie（可选）"));
         cookieBox.setMaxLength(400);
         cookieBox.setValue(SongModClient.neteaseCookie());
         addRenderableWidget(cookieBox);
         saveCookieBtn = addRenderableWidget(Button.builder(Component.literal("保存 Cookie"), b -> {
             SongModClient.setNeteaseCookie(cookieBox.getValue());
             cookieBox.setValue(SongModClient.neteaseCookie());
-        }).bounds(px + pw - 108, py + ph - 62, 92, 18).build());
+        }).bounds(px + pw - 104, py + ph - 59, 88, 18).build());
 
         setTab(tab);
     }
@@ -180,50 +185,18 @@ public class SongScreen extends Screen {
         boolean song = tab == TAB_SONG;
         boolean listen = tab == TAB_LISTEN;
         boolean mine = tab == TAB_MINE;
-        if (queryBox != null) {
-            queryBox.visible = song;
-        }
-        if (sendBtn != null) {
-            sendBtn.visible = song;
-        }
-        if (speedBtns != null) {
-            for (Button b : speedBtns) {
-                if (b != null) {
-                    b.visible = song;
-                }
-            }
-        }
-        if (progress != null) {
-            progress.visible = song;
-        }
-        if (playPauseBtn != null) {
-            playPauseBtn.visible = song;
-        }
-        if (stopBtn != null) {
-            stopBtn.visible = song;
-        }
-        if (lyricBtn != null) {
-            lyricBtn.visible = song;
-        }
-        if (refreshListenBtn != null) {
-            refreshListenBtn.visible = listen;
-        }
-        if (joinBtns != null) {
-            for (Button b : joinBtns) {
-                if (b != null) {
-                    b.visible = listen;
-                }
-            }
-        }
-        if (volumeSlider != null) {
-            volumeSlider.visible = mine;
-        }
-        if (cookieBox != null) {
-            cookieBox.visible = mine;
-        }
-        if (saveCookieBtn != null) {
-            saveCookieBtn.visible = mine;
-        }
+        if (queryBox != null) queryBox.visible = song;
+        if (sendBtn != null) sendBtn.visible = song;
+        if (speedBtns != null) for (Button b : speedBtns) if (b != null) b.visible = song;
+        if (progress != null) progress.visible = song;
+        if (playPauseBtn != null) playPauseBtn.visible = song;
+        if (stopBtn != null) stopBtn.visible = song;
+        if (lyricBtn != null) lyricBtn.visible = song;
+        if (refreshListenBtn != null) refreshListenBtn.visible = listen;
+        if (joinBtns != null) for (Button b : joinBtns) if (b != null) b.visible = listen;
+        if (volumeSlider != null) volumeSlider.visible = mine;
+        if (cookieBox != null) cookieBox.visible = mine;
+        if (saveCookieBtn != null) saveCookieBtn.visible = mine;
     }
 
     @Override
@@ -265,9 +238,9 @@ public class SongScreen extends Screen {
                 if (speedBtns[i] == null) {
                     continue;
                 }
-                boolean selected = Math.abs(SongSpeed.SPEEDS[i] - cfg.speed) < 0.01f;
+                boolean selected = Math.abs(speedValues[i] - cfg.speed) < 0.01f;
                 speedBtns[i].setMessage(Component.literal(
-                        (selected ? "§b" : "") + SongSpeed.label(SongSpeed.SPEEDS[i])));
+                        (selected ? "§b" : "") + SongSpeed.label(speedValues[i])));
             }
         }
         if (volumeSlider != null) {
@@ -286,42 +259,27 @@ public class SongScreen extends Screen {
                 joinBtns[i].setMessage(Component.literal(has ? "一起听" : "-"));
             }
         }
-        if (refreshListenBtn != null) {
-            refreshListenBtn.active = true;
-        }
     }
 
     private String playingStateLabel() {
         String state = SongPlayer.state();
-        if (SongPlayer.LOADING.equals(state)) {
-            return "  加载中…";
-        }
-        if (SongPlayer.ERROR.equals(state)) {
-            return "  播放失败";
-        }
-        if (SongPlayer.PAUSED.equals(state)) {
-            return "  已暂停";
-        }
+        if (SongPlayer.LOADING.equals(state)) return "  加载中…";
+        if (SongPlayer.ERROR.equals(state)) return "  播放失败";
+        if (SongPlayer.PAUSED.equals(state)) return "  已暂停";
         return "  还没有在放歌";
     }
 
     private void sendRequest() {
-        if (queryBox == null) {
-            return;
-        }
+        if (queryBox == null) return;
         String query = queryBox.getValue() == null ? "" : queryBox.getValue().trim();
-        if (query.isEmpty()) {
-            return;
-        }
+        if (query.isEmpty()) return;
         SongModClient.requestSong(query);
         queryBox.setValue("");
     }
 
     private void joinRow(int index) {
         List<SongProtocol.ListenEntry> entries = SongState.listeners;
-        if (entries == null || index < 0 || index >= entries.size()) {
-            return;
-        }
+        if (entries == null || index < 0 || index >= entries.size()) return;
         SongProtocol.ListenEntry entry = entries.get(index);
         SongConfig cfg = SongModClient.settings();
         SongModClient.requestJoin(entry.player, cfg == null ? 1f : cfg.speed);
@@ -331,7 +289,6 @@ public class SongScreen extends Screen {
     // ------------------------------------------------------------------
     // 绘制
     // ------------------------------------------------------------------
-
     @Override
     public void extractBackground(GuiGraphicsExtractor gui, int mouseX, int mouseY, float delta) {
         super.extractBackground(gui, mouseX, mouseY, delta);
@@ -346,7 +303,7 @@ public class SongScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor gui, int mouseX, int mouseY, float delta) {
         super.extractRenderState(gui, mouseX, mouseY, delta);
         try {
-            drawTexts(gui, mouseX, mouseY);
+            drawTexts(gui);
         } catch (Throwable ignored) {
             // 绘制出错也不能崩
         }
@@ -358,30 +315,17 @@ public class SongScreen extends Screen {
         int pw = panelW();
         int ph = panelH();
 
-        // 外发光 + 阴影
         gui.fill(px - 4, py - 4, px + pw + 4, py + ph + 4, 0x2248B4FF);
         gui.fill(px - 2, py - 2, px + pw + 2, py + ph + 2, 0x88000000);
-        // 主体渐变
         gui.fillGradient(px, py, px + pw, py + ph, PANEL_TOP, PANEL_BOTTOM);
-        // 顶部条
-        gui.fillGradient(px, py, px + pw, py + 26, HEADER_TOP, HEADER_BOTTOM);
-        // 强调线
-        gui.fill(px, py + 26, px + pw, py + 27, ACCENT);
+        gui.fillGradient(px, py, px + pw, py + 48, HEADER_TOP, HEADER_BOTTOM);
+        gui.fill(px, py + 48, px + pw, py + 49, ACCENT);
         gui.fill(px, py, px + 3, py + ph, ACCENT);
-        // 四角高光
-        gui.fill(px, py + ph - 2, px + pw, py + ph, 0x33000000);
 
-        // 页签高亮
-        int tabW = (pw - 60) / 3;
-        int tabY = py + 6;
-        int activeX = px + 8 + tabW * tab + (tab > 0 ? 2 * tab : 0);
-        if (tab == TAB_SONG) {
-            activeX = px + 8;
-        } else if (tab == TAB_LISTEN) {
-            activeX = px + 10 + tabW;
-        } else {
-            activeX = px + 12 + tabW * 2;
-        }
+        // 页签下划线
+        int tabW = (pw - 70) / 3;
+        int tabY = py + 28;
+        int activeX = px + 12 + tab * (tabW + 6) + tab * 2;
         gui.fill(activeX, tabY + 18, activeX + tabW, tabY + 20, ACCENT);
 
         if (tab == TAB_SONG) {
@@ -394,108 +338,98 @@ public class SongScreen extends Screen {
     }
 
     private void drawSongPage(GuiGraphicsExtractor gui, int px, int py, int pw, int ph) {
-        int contentW = pw - 32;
-        // 分区背景
-        gui.fill(px + 10, py + 54, px + pw - 10, py + 82, 0x33FFFFFF);
-        gui.fill(px + 10, py + 104, px + pw - 10, py + 134, 0x3310161F);
-        gui.fill(px + 10, py + 166, px + pw - 10, py + ph - 10, 0x3310161F);
-        // 分区标签
-        gui.text(this.font, "点歌", px + 16, py + 44, DIM);
-        gui.text(this.font, "倍速", px + 16, py + 90, DIM);
-        gui.text(this.font, "歌词", px + 16, py + 196, DIM);
-        // 播放进度区
-        gui.text(this.font, "正在播放", px + 16, py + 46 - 2, DIM);
+        int cw = contentW();
+        // 分区背板（只做轻微提示，不给每行都画，避免拥挤）
+        gui.fill(px + 12, py + 52, px + pw - 12, py + 78, 0x22FFFFFF);
+        gui.fill(px + 12, py + 102, px + pw - 12, py + 132, 0x33FFFFFF);
+        gui.fill(px + 12, py + 160, px + pw - 12, py + ph - 20, 0x2210161F);
+        gui.text(this.font, "点歌", px + 16, py + 61, DIM);
+        gui.text(this.font, "倍速", px + 16, py + 84, DIM);
+        gui.text(this.font, "正在播放", px + 16, py + 112, DIM);
     }
 
     private void drawListenPage(GuiGraphicsExtractor gui, int px, int py, int pw, int ph, int mouseX, int mouseY) {
-        gui.fill(px + 10, py + 52, px + pw - 10, py + ph - 10, 0x3310161F);
-        gui.text(this.font, "一起听 · 服务器上正在听歌的玩家", px + 16, py + 40, DIM);
+        gui.fill(px + 12, py + 52, px + pw - 12, py + ph - 20, 0x2210161F);
+        gui.text(this.font, "一起听 · 只显示正在播放的玩家", px + 16, py + 61, DIM);
         List<SongProtocol.ListenEntry> entries = SongState.listeners;
         int rows = entries == null ? 0 : Math.min(entries.size(), MAX_LISTEN_ROWS);
         if (rows == 0) {
             String status = SongState.listenersStatus == null || SongState.listenersStatus.isEmpty()
-                    ? "还没有数据，点右上角「刷新名单」" : SongState.listenersStatus;
-            gui.centeredText(this.font, status, px + pw / 2, py + 110, DIM);
+                    ? "现在没有人在听歌（或都放完了）" : SongState.listenersStatus;
+            gui.centeredText(this.font, status, px + pw / 2, py + 130, DIM);
             return;
         }
         for (int i = 0; i < rows; i++) {
-            int rowY = py + 80 + i * 27;
-            boolean hover = mouseX >= px + 12 && mouseX <= px + pw - 12
-                    && mouseY >= rowY - 3 && mouseY <= rowY + 20;
-            gui.fill(px + 12, rowY - 3, px + pw - 12, rowY + 20,
+            int rowY = py + 104 + i * 28;
+            boolean hover = mouseX >= px + 14 && mouseX <= px + pw - 14
+                    && mouseY >= rowY - 4 && mouseY <= rowY + 21;
+            gui.fill(px + 14, rowY - 4, px + pw - 14, rowY + 21,
                     hover ? ROW_HOVER : (i % 2 == 0 ? ROW_BG : ROW_BG2));
             SongProtocol.ListenEntry entry = entries.get(i);
             String elapsed = entry.elapsedSeconds >= 0
                     ? formatTime(entry.elapsedSeconds * 1000L) : "--:--";
-            gui.text(this.font, "§b" + shorten(entry.player, 16), px + 18, rowY + 4, TEXT);
-            gui.text(this.font, shorten(entry.label, 22), px + 84, rowY + 4, TEXT);
-            gui.text(this.font, elapsed, px + pw - 150, rowY + 4, ACCENT2);
+            gui.text(this.font, "§b" + shorten(entry.player, 16), px + 20, rowY + 3, TEXT);
+            gui.text(this.font, shorten(entry.label, 18), px + 96, rowY + 3, TEXT);
+            gui.text(this.font, elapsed, px + pw - 160, rowY + 3, ACCENT2);
         }
-        gui.text(this.font, "点「一起听」会从对方当前进度附近开始播放", px + 16, py + ph - 30, DIM);
     }
 
     private void drawMinePage(GuiGraphicsExtractor gui, int px, int py, int pw, int ph) {
-        gui.fill(px + 10, py + 52, px + pw - 10, py + ph - 108, 0x3310161F);
-        gui.text(this.font, "我点过的歌", px + 16, py + 40, DIM);
+        gui.fill(px + 12, py + 52, px + pw - 12, py + ph - 110, 0x2210161F);
+        gui.text(this.font, "我点过的歌", px + 16, py + 61, DIM);
         List<String> my = SongState.myRequests();
         if (my.isEmpty()) {
-            gui.centeredText(this.font, "还没有点过歌", px + pw / 2, py + 100, DIM);
+            gui.centeredText(this.font, "还没有点过歌", px + pw / 2, py + 110, DIM);
         } else {
             int shown = Math.min(my.size(), 8);
             for (int i = 0; i < shown; i++) {
                 gui.text(this.font, "§7· §f" + shorten(my.get(i), 34),
-                        px + 20, py + 60 + i * 12, TEXT);
+                        px + 20, py + 82 + i * 14, TEXT);
             }
         }
-        gui.text(this.font, "音量", px + 16, py + ph - 106, DIM);
-        gui.text(this.font, "Cookie 只填自己的（机器人不在线时才用于本地兜底）",
-                px + 16, py + ph - 74, DIM);
+        gui.text(this.font, "音量", px + 16, py + ph - 84, DIM);
+        gui.text(this.font, "Cookie（本地兜底用）", px + 16, py + ph - 54, DIM);
     }
 
-    private void drawTexts(GuiGraphicsExtractor gui, int mouseX, int mouseY) {
+    private void drawTexts(GuiGraphicsExtractor gui) {
         int px = panelX();
         int py = panelY();
         int pw = panelW();
         int ph = panelH();
 
-        // 标题
         gui.text(this.font, "§b♪ §f点歌台", px + 14, py + 8, TEXT);
-        // 状态
         String state = playingStateLabel().trim();
         String speed = SongSpeed.label(SongPlayer.speed());
         String status = "§7" + state + "  §8|  §7倍速 " + speed;
         int statusW = this.font.width(state + "  |  倍速 " + speed);
-        gui.text(this.font, status, px + pw - 30 - statusW, py + 9, TEXT);
+        gui.text(this.font, status, px + pw - 34 - statusW, py + 9, TEXT);
 
         if (tab == TAB_SONG) {
-            // 当前歌名
             String title = SongState.title == null || SongState.title.isEmpty()
                     ? "（空闲）" : SongState.title;
-            gui.text(this.font, "§f" + shorten(title, 34), px + 16, py + 176, ACCENT2);
-            // 歌词
+            gui.text(this.font, "§f" + shorten(title, 40), px + 16, py + 166, ACCENT2);
             String line = SongState.lyricLine;
             String next = SongState.nextLyricLine;
             if (line != null && !line.isEmpty()) {
-                gui.centeredText(this.font, "§b♪ " + shorten(line, 40),
-                        px + pw / 2, py + 196, TEXT);
+                gui.centeredText(this.font, "§b♪ " + shorten(line, 44),
+                        px + pw / 2, py + 186, TEXT);
                 if (next != null && !next.isEmpty()) {
-                    gui.centeredText(this.font, "§8" + shorten(next, 40),
-                            px + pw / 2, py + 208, DIM);
+                    gui.centeredText(this.font, "§8" + shorten(next, 44),
+                            px + pw / 2, py + 200, DIM);
                 }
             } else if (SongState.lyricsStatus != null && !SongState.lyricsStatus.isEmpty()) {
-                gui.centeredText(this.font, "§8" + Shorten(SongState.lyricsStatus, 40),
-                        px + pw / 2, py + 200, DIM);
+                gui.centeredText(this.font, "§8" + shorten(SongState.lyricsStatus, 44),
+                        px + pw / 2, py + 190, DIM);
             }
-            gui.text(this.font, "§8回车/点「点歌」发送；歌名后加倍速例：起风了 1.5",
-                    px + 16, py + ph - 26, DIM);
-            gui.text(this.font, "§8「一起听」页可跟别人听同一首；K 打开本界面",
-                    px + 16, py + ph - 38, DIM);
+            gui.text(this.font, "§8歌名后加倍速例：起风了 1.5 · 按 K 打开本界面",
+                    px + 16, py + ph - 16, DIM);
         } else if (tab == TAB_LISTEN) {
-            gui.text(this.font, "§8名单来自机器人，约 " + refreshSeconds() + " 秒刷新一次",
-                    px + 16, py + ph - 30, DIM);
+            gui.text(this.font, "§8名单来自机器人，只显示正在播放的玩家，约 "
+                            + refreshSeconds() + " 秒可刷新一次",
+                    px + 16, py + ph - 16, DIM);
         } else {
             gui.text(this.font, "§8这里只影响自己的客户端；Cookie 会写进 config/songmod.json",
-                    px + 16, py + ph - 40, DIM);
+                    px + 16, py + ph - 16, DIM);
         }
     }
 
@@ -504,14 +438,8 @@ public class SongScreen extends Screen {
         return cfg == null ? 15 : cfg.listenRefreshSeconds;
     }
 
-    private static String Shorten(String text, int max) {
-        return shorten(text, max);
-    }
-
     private static String shorten(String text, int max) {
-        if (text == null) {
-            return "";
-        }
+        if (text == null) return "";
         return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 

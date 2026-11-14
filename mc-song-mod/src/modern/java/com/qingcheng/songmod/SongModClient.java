@@ -64,6 +64,7 @@ public class SongModClient implements ClientModInitializer {
     private static volatile boolean expectingListReply = false;
     /** 上一次刷一起听名单的时间。 */
     private static volatile long lastListenRefreshAt = 0L;
+    private static volatile long lastListenJoinAt = 0L;
 
     /** 歌词显示节流。 */
     private static volatile String lastShownLyric = "";
@@ -240,6 +241,10 @@ public class SongModClient implements ClientModInitializer {
         if (config == null || !config.listenTogetherEnabled) {
             return;
         }
+        long now = System.currentTimeMillis();
+        if (now - lastListenRefreshAt < 5000L) {
+            return;                     // 冷却中：静默忽略
+        }
         expectingListReply = true;
         SongState.listenersStatus = "正在刷新…";
         lastListenRefreshAt = System.currentTimeMillis();
@@ -252,6 +257,11 @@ public class SongModClient implements ClientModInitializer {
         if (name.isEmpty()) {
             return;
         }
+        long nowJoin = System.currentTimeMillis();
+        if (nowJoin - lastListenJoinAt < 5000L) {
+            return;
+        }
+        lastListenJoinAt = nowJoin;
         String suffix = speed > 0 && Math.abs(speed - 1f) >= 0.001f
                 ? " " + SongSpeed.key(speed) : "";
         expectingListenReply = true;
@@ -497,7 +507,7 @@ public class SongModClient implements ClientModInitializer {
 
         // ① 机器人发来的一起听名单
         List<SongProtocol.ListenEntry> entries = SongProtocol.parseListenList(payload);
-        if (!entries.isEmpty() || payload.startsWith(SongProtocol.LISTEN_LIST_MARK)) {
+        if (payload.contains(SongProtocol.LISTEN_LIST_MARK) || !entries.isEmpty()) {
             expectingListReply = false;
             SongState.setListeners(entries);
             SongState.listenersStatus = entries.isEmpty() ? "现在没有人在听歌" : "";
@@ -583,13 +593,13 @@ public class SongModClient implements ClientModInitializer {
                 if (join.speed > 0) {
                     setSpeed(join.speed);
                 }
-                feedback("§b[点歌] §7正在获取一起听名单…");
+
             } else {
                 requestJoin(join.player, join.speed > 0 ? join.speed : config.speed);
                 if (join.speed > 0) {
                     setSpeed(join.speed);
                 }
-                feedback("§b[点歌] §7正在加入 §f" + join.player + " §7的一起听…");
+                SongState.listenersStatus = "正在加入 " + join.player + " 的一起听…";
             }
             return;
         }

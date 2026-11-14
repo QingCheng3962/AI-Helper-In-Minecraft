@@ -68,8 +68,9 @@ public class SongModClient implements ClientModInitializer {
     private static volatile long expectingListenAt = 0L;
     /** 正在等一起听名单。 */
     private static volatile boolean expectingListReply = false;
-    /** 上一次刷一起听名单的时间。 */
+    /** 上一次刷一起听名单 / 加入一起听的时间（客户端侧冷却，防连点刷屏）。 */
     private static volatile long lastListenRefreshAt = 0L;
+    private static volatile long lastListenJoinAt = 0L;
 
     /** 歌词显示节流。 */
     private static volatile String lastShownLyric = "";
@@ -241,23 +242,32 @@ public class SongModClient implements ClientModInitializer {
         sendChat(trigger() + stopWord());
     }
 
-    /** 界面刷新一起听名单。 */
+    /** 界面刷新一起听名单（5 秒冷却，防连点刷屏）。 */
     public static void requestListenList() {
         if (config == null || !config.listenTogetherEnabled) {
             return;
         }
+        long now = System.currentTimeMillis();
+        if (now - lastListenRefreshAt < 5000L) {
+            return;                     // 冷却中：静默忽略，不重复发消息
+        }
         expectingListReply = true;
         SongState.listenersStatus = "正在刷新…";
-        lastListenRefreshAt = System.currentTimeMillis();
+        lastListenRefreshAt = now;
         sendChat(trigger() + SongProtocol.LISTEN_WORD);
     }
 
-    /** 界面加入一起听。 */
+    /** 界面加入一起听（5 秒冷却）。 */
     public static void requestJoin(String player, float speed) {
         String name = player == null ? "" : player.trim();
         if (name.isEmpty()) {
             return;
         }
+        long nowJoin = System.currentTimeMillis();
+        if (nowJoin - lastListenJoinAt < 5000L) {
+            return;
+        }
+        lastListenJoinAt = nowJoin;
         String suffix = speed > 0 && Math.abs(speed - 1f) >= 0.001f
                 ? " " + SongSpeed.key(speed) : "";
         expectingListenReply = true;
@@ -380,9 +390,9 @@ public class SongModClient implements ClientModInitializer {
         System.out.println("[songmod] 收到点歌消息" + (mine ? "（我发的）: " : "（别人的）: ")
                 + shorten(payload, 200));
 
-        // ① 机器人发来的一起听名单
+        // ① 机器人发来的一起听名单（不要求正好在开头：服务器可能加前缀/改写格式）
         List<SongProtocol.ListenEntry> entries = SongProtocol.parseListenList(payload);
-        if (!entries.isEmpty() || payload.startsWith(SongProtocol.LISTEN_LIST_MARK)) {
+        if (payload.contains(SongProtocol.LISTEN_LIST_MARK) || !entries.isEmpty()) {
             expectingListReply = false;
             SongState.setListeners(entries);
             SongState.listenersStatus = entries.isEmpty() ? "现在没有人在听歌" : "";
@@ -468,13 +478,13 @@ public class SongModClient implements ClientModInitializer {
                 if (join.speed > 0) {
                     setSpeed(join.speed);
                 }
-                feedback("§b[点歌] §7正在获取一起听名单…");
+
             } else {
                 requestJoin(join.player, join.speed > 0 ? join.speed : config.speed);
                 if (join.speed > 0) {
                     setSpeed(join.speed);
                 }
-                feedback("§b[点歌] §7正在加入 §f" + join.player + " §7的一起听…");
+SongState.listenersStatus = "正在加入 " + join.player + " 的一起听…";
             }
             return;
         }

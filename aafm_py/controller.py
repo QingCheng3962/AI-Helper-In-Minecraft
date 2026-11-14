@@ -2753,12 +2753,29 @@ class Controller:
         }
         self._prune_listeners(now)
 
+    @staticmethod
+    def _listener_elapsed(item, now: float) -> float:
+        return max(0.0, now - float((item or {}).get('posted_at') or now))
+
+    @classmethod
+    def _listener_active(cls, item, now=None) -> bool:
+        """这个人现在是不是**真的还在播**（按歌曲时长判断，没时长就按 5 分钟封顶）。"""
+        if not item:
+            return False
+        now = time.time() if now is None else now
+        duration = int(item.get('duration') or 0) / 1000.0
+        if duration <= 0:
+            duration = 300.0
+        elapsed = cls._listener_elapsed(item, now)
+        return 0.0 <= elapsed < max(10.0, duration - 2.0)
+
     def _prune_listeners(self, now=None) -> None:
-        """清掉已经肯定放完/太旧的记录（至少 10 分钟）。"""
+        """清掉已经放完/太旧的记录。"""
         now = time.time() if now is None else now
         for key in list(self._song_listeners):
             item = self._song_listeners.get(key) or {}
-            limit = max(600.0, (int(item.get('duration') or 0) / 1000.0) + 60.0)
+            duration = int(item.get('duration') or 0) / 1000.0
+            limit = max(600.0, duration + 60.0)
             if now - float(item.get('posted_at') or 0.0) > limit:
                 self._song_listeners.pop(key, None)
 
@@ -2775,7 +2792,9 @@ class Controller:
         now = time.time()
         rows = []
         for item in self._song_listeners.values():
-            elapsed = int(max(0.0, now - float(item.get('posted_at') or now)))
+            if not self._listener_active(item, now):
+                continue
+            elapsed = int(self._listener_elapsed(item, now))
             label = str(item.get('title') or '')
             if item.get('artist'):
                 label = label + '-' + str(item.get('artist'))
@@ -2805,7 +2824,8 @@ class Controller:
         """把 target 正在听的歌按估算进度私聊给 who（客户端从那里开始播）。"""
         item = self._listener_for(target)
         if not item or not item.get('url'):
-            self._send_song_line(who, '[点歌]一起听：没找到 ' + str(target) + ' 正在听的歌（可能已经放完了）')
+            self._send_song_line(who, '[点歌]一起听：' + str(target)
+                                 + ' 现在没在放歌（或已经放完了），等 TA 点一首再来吧')
             return False
         now = time.time()
         elapsed = max(0.0, now - float(item.get('posted_at') or now))
@@ -2906,6 +2926,15 @@ class Controller:
         if now_l < getattr(self, '_song_loop_until', 0.0):
             return False
 
+        # ⓞ③ 机器人自己发出的「一起听名单」：不管被服务器改写成什么样，都不能再当指令处理
+        #     （否则公屏回声 → 再发一次 → 无限刷屏）
+        if '一起听名单' in after:
+            return False
+        # ⓞ④ 机器人自己发的播放数据（带混淆直链 / id: / 文案模板）也直接忽略，放在指令解析之前
+        if (' | ' in after or URL_MARK_HTTP in after or URL_MARK_HTTPS in after
+                or _AUDIO_URL_RE.search(after) or self._looks_like_play_text(after)):
+            return False
+
         # 停止指令：[点歌]停止 —— **只清这个玩家自己的**（谁点谁听，别把别人的歌关了）
         if stop_word and after.lower() == stop_word.lower():
             self.clear_song_queue(who)
@@ -2938,18 +2967,27 @@ class Controller:
         listen = self._parse_listen_command(after)
         if listen is not None:
             target_player, _listen_speed = listen
+            name = self._msg_name(who)
+            if not name:
+                # 机器人自己的回声 / 系统消息：不回应（尤其不能发公屏）
+                return False
+            now_l2 = time.time()
+            cooldowns = self.__dict__.setdefault('_listen_cool', {})
+            key = 'list' if not target_player else 'join:' + target_player.casefold()
+            last = float(cooldowns.get((name.casefold(), key), 0.0))
+            wait = 10.0 if not target_player else 5.0
+            if now_l2 - last < wait:
+                return True          # 冷却中：静默吞掉，别再刷消息
+            cooldowns[(name.casefold(), key)] = now_l2
+            if len(cooldowns) > 200:
+                for k in sorted(cooldowns, key=lambda x: cooldowns[x])[:80]:
+                    cooldowns.pop(k, None)
             if target_player:
-                self._join_listen(who, target_player)
+                self._join_listen(name, target_player)
             else:
-                self._send_listen_list(who)
+                self._send_listen_list(name)
             return True
-        # ① 机器人自己发的播放数据：带音频直链、或带混淆直链标记的，一律不再解析（防自触发死循环）
-        if (' | ' in after or URL_MARK_HTTP in after or URL_MARK_HTTPS in after
-                or _AUDIO_URL_RE.search(after)):
-            return False
         # ② 文案里带播放模板的固定文字（默认「点了一首」）→ 也是机器人自己发的
-        if self._looks_like_play_text(after):
-            return False
         # ③ 这首歌刚刚发过（多半是同一首歌又被点了一次）：**不再搜一遍**，直接把缓存好的直链
         #    换成新的点歌人重发 —— 快速响应、不等待；链接里还有 `id:` 供 Mod 自己兜底重取。
         posted_key = self._song_key(after)
