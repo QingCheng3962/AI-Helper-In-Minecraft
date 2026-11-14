@@ -201,3 +201,11 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 点歌 Mod jar 构建：1.21.1~1.21.11（11 个）由 Gradle/Loom 构建；26.1/26.1.1/26.1.2/26.2（4 个）用 `mc-song-mod/build_modern_local.py`（javac + zipfile，绕过沙箱 zipfs 只读问题）构建；15 个产物全部校验通过（fabric.mod.json 版本/依赖/java、入口类、GUI 类、内嵌 JLayer、lang）
   - 注意：26.1.1 / 26.2 的 Fabric API 聚合 jar 本机没缓存且下载超时，编译时借用了 26.1.2 的模块 jar；事件接口在 26.x 之间稳定，若实机出现事件不触发，用有网环境跑一次 Gradle 构建即可
 - [ ]（非必要）游戏画面渲染 / 群组服菜单选择 / 容器物品左右键交互
+## 2026-11-14 v0.3.7（数据层 + 安装包）
+
+- [x] 运行数据统一进 SQLite（`aafm_py/storage.py` → `data.db`）：好感度（原 affinity.json）、写书进度（book_progress.json）、提示词模板（mcai_prompt_templates.json）、QQ 账号记录（qq_accounts.json）
+  - 老 JSON 第一次访问自动导入，成功后改名 `<名字>.json.bak`（不删）
+  - 表：affinity / kv / prompt_templates / qq_accounts / meta；WAL + 单库一把锁；连接弱引用缓存（没人用自动关，Windows 下临时目录才能删干净）
+  - 迁移失败可重试（不会把 `_migrated` 提前置真导致丢数据）
+  - 设置文件（config.json / mcai_chat.json）仍保持 JSON：要人手改、带 API Key，放 DB 反而不好维护
+- [x] 测试：156 项全部通过（test_affinity_save / test_config_persistence 改成 SQLite 契约）

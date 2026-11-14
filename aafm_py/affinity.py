@@ -2,7 +2,7 @@
 """好感度（affinity）：每个玩家一个分数，聊天/点歌会慢慢涨。
 
 设计要点：
-- 数据存本地 ``affinity.json``（**不要提交进仓库**），结构 ``{version, players:{名字: {...}}}``；
+- 数据存本地 SQLite data.db 的 affinity 表（v0.3.7 起；老的 affinity.json 会自动迁移）；
 - 每次加分都有**冷却**（聊天默认 5 分钟才 +1），避免刷屏刷分；
 - 每天第一次互动额外 +1（``lastDay``）；
 - 分数 → 等级/称号，供 ``[触发词]好感度`` 查询。
@@ -11,11 +11,12 @@
 """
 from __future__ import annotations
 
-import json
 import copy
 import os
 import threading
 import time
+
+from . import storage
 from typing import Any, Dict, List, Optional, Tuple
 
 # (起始分, 等级名, 备注)
@@ -38,8 +39,10 @@ class AffinityStore:
     """好感度存取（线程安全，写盘用临时文件 + 原子替换）。"""
 
     def __init__(self, path: str):
+        #: 兼容老接口：仍接收 affinity.json 的路径（库在同一个目录的 data.db）
         self.path = path
         self._lock = threading.Lock()
+        self._table = storage.JsonTable(path, 'affinity')
         self.data: Dict[str, Any] = {'version': 1, 'players': {}}
         self.last_error: str = ''
         self.load()
@@ -49,33 +52,23 @@ class AffinityStore:
     # ------------------------------------------------------------------
     def load(self) -> None:
         try:
-            if os.path.exists(self.path):
-                with open(self.path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                if isinstance(data, dict) and isinstance(data.get('players'), dict):
-                    self.data = data
-                    self.data.setdefault('version', 1)
+            players = self._table.load_all()
+            self.data = {'version': 1, 'players': players}
         except Exception:  # noqa: BLE001
             # 坏了就当空的，别让好感度把机器人拖崩
             self.data = {'version': 1, 'players': {}}
 
+    def _write_entry(self, key: str, entry: Dict[str, Any]) -> None:
+        self._table.set(key, entry)
+
     def save(self) -> bool:
+        # 整份写回（add() 已经按玩家写过一次；这个给外部强制落盘用）
         try:
-            folder = os.path.dirname(self.path)
-            if folder:
-                os.makedirs(folder, exist_ok=True)
-            tmp = self.path + '.tmp'
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, self.path)
+            self._table.bulk_set(self.data.get('players') or {})
             self.last_error = ''
             return True
         except Exception as e:  # noqa: BLE001
             self.last_error = str(e)
-            try:
-                os.unlink(self.path + '.tmp')
-            except OSError:
-                pass
             return False
 
     def _entry(self, name: str) -> Dict[str, Any]:
@@ -182,8 +175,12 @@ class AffinityStore:
                 entry['songs'] = int(entry.get('songs') or 0) + 1
             entry['updated'] = now
             score = int(entry['score'])
-            if not self.save():
+            try:
+                self._write_entry(key, entry)
+                self.last_error = ''
+            except Exception as e:  # noqa: BLE001
                 # 落盘失败：回滚内存，避免界面显示一个重启后不存在的分数。
+                self.last_error = str(e)
                 players = self.data.setdefault('players', {})
                 players[key] = snapshot
                 return None
