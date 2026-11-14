@@ -10,7 +10,7 @@
 | 配置项 | 说明 |
 | --- | --- |
 | `song.apiEnabled = true` | 开启点歌 API（开启后自动启动 HTTP 服务） |
-| `qq.imageHttpHost` / `qq.imageHttpPort` | 监听地址/端口（默认 0.0.0.0:8765） |
+| `qq.imageHttpHost` / `qq.imageHttpPort` | 监听地址/端口（默认 0.0.0.0:8767） |
 | `qq.webApiToken` | 访问 Token（**强烈建议设置**；任何能访问端口的人都能点歌） |
 
 接口（`X-Token: <token>` 或 `Authorization: Bearer <token>`，也支持 `?token=`）：
@@ -18,7 +18,7 @@
 ### 点歌
 
 ```bash
-curl -X POST http://127.0.0.1:8765/api/song/request \
+curl -X POST http://127.0.0.1:8767/api/song/request \
   -H "X-Token: YOUR_TOKEN" -H "Content-Type: application/json" \
   -d '{"player":"网页","query":"起风了","speed":"1.5"}'
 ```
@@ -28,7 +28,7 @@ curl -X POST http://127.0.0.1:8765/api/song/request \
 ### 当前播放 / 队列
 
 ```bash
-curl -H "X-Token: YOUR_TOKEN" http://127.0.0.1:8765/api/song/state
+curl -H "X-Token: YOUR_TOKEN" http://127.0.0.1:8767/api/song/state
 ```
 
 返回当前歌曲、点歌人、队列、是否连接。
@@ -36,7 +36,7 @@ curl -H "X-Token: YOUR_TOKEN" http://127.0.0.1:8765/api/song/state
 ### 一起听名单（只列**真的还在播**的人）
 
 ```bash
-curl -H "X-Token: YOUR_TOKEN" http://127.0.0.1:8765/api/song/listeners
+curl -H "X-Token: YOUR_TOKEN" http://127.0.0.1:8767/api/song/listeners
 ```
 
 ### 安全
@@ -53,7 +53,7 @@ Mod「我的」页可以配置：
 | --- | --- |
 | 模式：服务器 / 自用 | 服务器=点歌/一起听走机器人；自用=本机搜歌播放，不发聊天、不连服务器 |
 | HTTP API：开/关 | 开了就优先走 HTTPS 网关（点歌、一起听名单、加入）；失败自动回退聊天 |
-| API 地址 | 可填 **https://你的域名**（也支持 http://内网IP:8765） |
+| API 地址 | **已写死**为 ${DOMAIN}（示例地址；换需改源码重新编译），见下方说明 |
 | API Token | 机器人 config.json 的 `qq.webApiToken` |
 | 机器人超时(秒) | 聊天点歌等直链、API 请求的超时（默认 30，5–180） |
 

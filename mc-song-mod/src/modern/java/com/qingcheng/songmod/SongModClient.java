@@ -236,8 +236,8 @@ public class SongModClient implements ClientModInitializer {
     }
 
     public static boolean apiEnabled() {
-        return config != null && config.apiEnabled
-                && config.apiBase != null && !config.apiBase.trim().isEmpty();
+        // 地址写死在 SongApiClient.DEFAULT_BASE（示例站点），这里只看开关
+        return config != null && config.apiEnabled && !modeSolo();
     }
 
     public static String modeLabel() {
@@ -326,7 +326,7 @@ public class SongModClient implements ClientModInitializer {
             return;
         }
         if (apiEnabled()) {
-            final String base = config.apiBase;
+            final String base = SongApiClient.DEFAULT_BASE;
             final String token = config.apiToken;
             final int timeout = config.botTimeoutSeconds;
             final String playerName = myName();
@@ -416,7 +416,7 @@ public class SongModClient implements ClientModInitializer {
         lastListenRefreshAt = now;
         SongState.listenersStatus = "正在刷新…";
         if (apiEnabled()) {
-            final String base = config.apiBase;
+            final String base = SongApiClient.DEFAULT_BASE;
             final String token = config.apiToken;
             final int timeout = config.botTimeoutSeconds;
             POOL.submit(() -> {
@@ -461,7 +461,7 @@ public class SongModClient implements ClientModInitializer {
         }
         lastListenJoinAt = nowJoin;
         if (apiEnabled()) {
-            final String base = config.apiBase;
+            final String base = SongApiClient.DEFAULT_BASE;
             final String token = config.apiToken;
             final int timeout = config.botTimeoutSeconds;
             final String playerName = myName();

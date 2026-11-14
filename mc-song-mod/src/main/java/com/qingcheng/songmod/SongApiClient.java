@@ -23,6 +23,15 @@ import java.util.List;
  */
 public final class SongApiClient {
 
+    /**
+     * 点歌服务地址（<b>示例地址</b>）：cubexmusic.qingchengsep.top。
+     *
+     * <p>客户端把这个地址<b>写死</b>，玩家不用也不能在界面里改；
+     * 要换成你自己的机器人/网关，请修改这里重新编译 Mod。
+     * 也欢迎把你的机器人接入本示例站点（服务端开 song.apiEnabled + Token 即可）。
+     */
+    public static final String DEFAULT_BASE = "https://cubexmusic.qingchengsep.top";
+
     private SongApiClient() {
     }
 

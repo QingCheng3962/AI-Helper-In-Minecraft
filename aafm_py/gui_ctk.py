@@ -220,6 +220,34 @@ class CtkApp:
         ctk.CTkButton(line2, text='点歌帮助（私聊我）', width=150,
                       command=self._on_song_help).pack(side='right', padx=12, pady=12)
 
+        # ---- 点歌服务（HTTP API）：服务端配置都在这里，Mod 客户端只管用 ----
+        api = self._section(tab, '点歌服务（Mod → 机器人 HTTP API → 网易云 → 返回播放数据）')
+        self.var_song_api = ctk.BooleanVar(value=True)
+        self.var_song_api_port = ctk.StringVar(value='8767')
+        self.var_song_api_token = ctk.StringVar(value='')
+        self.var_song_announce = ctk.BooleanVar(value=True)
+        self.var_song_announce_style = ctk.StringVar(value='可点击')
+        self.var_song_announce_text = ctk.StringVar(value='{player} 点了一首《{title}》')
+        self.var_song_cookie = ctk.StringVar(value='')
+        self._check(api, '启用点歌 HTTP API（Mod 的点歌/一起听都走它）', self.var_song_api)
+        self._field(api, '监听端口', self.var_song_api_port, 100)
+        self._field(api, 'API Token（Mod 端填同一个）', self.var_song_api_token, 320, show='*')
+        self._check(api, '公屏播报「谁点歌了」', self.var_song_announce)
+        style_row = ctk.CTkFrame(api)
+        style_row.pack(fill='x', padx=12, pady=2)
+        ctk.CTkLabel(style_row, text='播报方式', width=96, anchor='e').pack(side='left')
+        ctk.CTkOptionMenu(style_row, values=['可点击', '纯文本'],
+                          variable=self.var_song_announce_style, width=120).pack(
+            side='left', padx=8, pady=2)
+        self._field(api, '播报文案', self.var_song_announce_text, 320)
+        self._field(api, '网易云 Cookie', self.var_song_cookie, 360, show='*')
+        ctk.CTkLabel(api, text=('Mod「我的」页 API 地址已写死为 https://cubexmusic.qingchengsep.top'
+                                '（示例地址；要换需改源码重新编译）。客户端只需填同一个 Token。'),
+                     text_color='#90a4ae', wraplength=560, justify='left').pack(
+            anchor='w', padx=16, pady=(2, 6))
+        ctk.CTkButton(tab, text='保存点歌服务配置并生效', width=220,
+                      command=self._save_song_api).pack(anchor='w', padx=20, pady=(0, 8))
+
         ctk.CTkLabel(tab, text='机器人播放队列：', anchor='w').pack(fill='x', padx=20, pady=(6, 0))
         self.song_queue_box = ctk.CTkTextbox(tab, height=260)
         self.song_queue_box.pack(fill='both', expand=True, padx=12, pady=8)
@@ -948,6 +976,31 @@ class CtkApp:
         self._append_log('界面主题已切换：' + label, 'info')
 
     # ------------------------------------------------------------------
+    # 点歌服务（HTTP API）配置
+    # ------------------------------------------------------------------
+    def _save_song_api(self) -> None:
+        cfg = self.controller.config
+        song = cfg.song
+        qq = cfg.qq
+        song.apiEnabled = bool(self.var_song_api.get())
+        try:
+            qq.imageHttpPort = max(1, min(65535, int(self.var_song_api_port.get())))
+        except (TypeError, ValueError):
+            qq.imageHttpPort = 8767
+        qq.webApiToken = (self.var_song_api_token.get() or '').strip()
+        song.announceRequest = bool(self.var_song_announce.get())
+        song.announceStyle = 'click' if self.var_song_announce_style.get() == '可点击' else 'plain'
+        song.announceText = (self.var_song_announce_text.get() or '').strip() or '{player} 点了一首《{title}》'
+        song.neteaseCookie = (self.var_song_cookie.get() or '').strip()
+        song.validate()
+        cfg.validate()
+        ok = cfg.save()
+        started = self.controller.start_song_api()
+        state = '已启动' if started else '未启动/已关闭'
+        self._append_log('点歌服务配置已保存（API %s，端口 %s）。' % (state, qq.imageHttpPort),
+                         'info' if ok else 'error')
+
+    # ------------------------------------------------------------------
     # 扩展配置：AI / 玩家 / 文档转书 / 资料库 / QQ / 重连 / 杂项
     # ------------------------------------------------------------------
     @staticmethod
@@ -1079,6 +1132,15 @@ class CtkApp:
         self.var_rc_autolobby_interval.set(str(rc.autoLobbyIntervalSeconds))
         self.var_rc_online.set(bool(rc.onlineCheckEnabled))
         self.var_rc_online_interval.set(str(rc.onlineCheckIntervalSeconds))
+        # --- 点歌服务 ---
+        song_cfg = cfg.song
+        self.var_song_api.set(bool(song_cfg.apiEnabled))
+        self.var_song_api_port.set(str(cfg.qq.imageHttpPort or 8767))
+        self.var_song_api_token.set(cfg.qq.webApiToken or '')
+        self.var_song_announce.set(bool(song_cfg.announceRequest))
+        self.var_song_announce_style.set('可点击' if song_cfg.announceStyle == 'click' else '纯文本')
+        self.var_song_announce_text.set(song_cfg.announceText or '{player} 点了一首《{title}》')
+        self.var_song_cookie.set(song_cfg.neteaseCookie or '')
         # --- 杂项 / 外观 ---
         misc = cfg.misc
         source_labels = {'anime': '番剧追番榜', 'home': 'B 站首页推荐',

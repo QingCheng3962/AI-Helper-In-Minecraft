@@ -250,3 +250,12 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
   原位 seek 1.5s 未生效时自动按目标进度用直链重新起播（兼容解码器跳不过去的情况）
 - [x] 测试：tests/test_song_api.py 改为验证服务端解析返回播放数据/歌词（mock netease），全量 Python 169 项通过
 - [x] 全量 15 版本 jar 重打 + 安装包重打
+### v0.3.6-26.11.15-Fxied 补充（示例地址写死 + GUI 配置 + 端口 8767）
+
+- [x] Mod 点歌服务地址**写死**为示例站点 `https://cubexmusic.qingchengsep.top`（`SongApiClient.DEFAULT_BASE`）；
+  客户端不再显示/允许编辑 API 地址，只填 Token；改地址需改源码重新编译；也可把自己的机器人接入该站点
+- [x] 默认端口 8765 → **8767**（config `qq.imageHttpPort`），GUI 可改（CTk 与 tkinter「点歌」页都加「点歌服务（HTTP API）」配置区：
+  启用开关 / 端口 / Token / 播报谁点歌 / 播报方式 / 文案 / 网易云 Cookie，保存即生效）
+- [x] `Controller.start_song_api()`：保存配置立即启动/停止 HTTP 服务；连接服务器时也会按配置自动启动
+- [x] 文档：点歌API.md / README / README_EN 说明「地址写死为示例站点、改需重编译、端口 8767」
+- [x] 测试：Python 169 项通过；CTk 配置往返 smoke 通过；两代 Mod 编译通过；15 版本 jar 重打

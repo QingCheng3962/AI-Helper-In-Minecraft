@@ -740,13 +740,47 @@ class AiPlayerGUI:
             row=6, column=0, columnspan=3, sticky='w', padx=4)
         play.columnconfigure(1, weight=1)
 
-        info = ttk.LabelFrame(sc.inner, text='说明 / 使用方法（服务端零改动）', padding=8)
+        api = ttk.LabelFrame(sc.inner, text='点歌服务（HTTP API，给 Mod 客户端用）', padding=8)
+        api.pack(fill='x', pady=(8, 0))
+        self.var_song_api = tk.BooleanVar(value=False)
+        self.var_song_api_port = tk.StringVar(value='8767')
+        self.var_song_api_token = tk.StringVar()
+        self.var_song_announce = tk.BooleanVar(value=True)
+        self.var_song_announce_style = tk.StringVar(value='click')
+        self.var_song_announce_text = tk.StringVar(value='{player} 点了一首《{title}》')
+        row = ttk.Frame(api)
+        row.pack(fill='x')
+        ttk.Checkbutton(row, text='启用点歌 HTTP API（Mod 点歌 / 一起听都走它）',
+                        variable=self.var_song_api).pack(side='left', padx=(4, 12))
+        ttk.Label(row, text='端口').pack(side='left')
+        ttk.Entry(row, textvariable=self.var_song_api_port, width=8).pack(side='left', padx=4)
+        ttk.Label(row, text='Token').pack(side='left', padx=(12, 2))
+        ttk.Entry(row, textvariable=self.var_song_api_token, width=26, show='*').pack(
+            side='left', padx=4)
+        row2 = ttk.Frame(api)
+        row2.pack(fill='x', pady=(6, 0))
+        ttk.Checkbutton(row2, text='公屏播报「谁点歌了」',
+                        variable=self.var_song_announce).pack(side='left', padx=(4, 12))
+        ttk.Label(row2, text='方式').pack(side='left')
+        ttk.Combobox(row2, textvariable=self.var_song_announce_style, width=8,
+                     state='readonly', values=['click', 'plain']).pack(side='left', padx=4)
+        ttk.Label(row2, text='文案').pack(side='left', padx=(12, 2))
+        ttk.Entry(row2, textvariable=self.var_song_announce_text, width=32).pack(
+            side='left', padx=4)
+        ttk.Button(api, text='保存点歌服务配置并生效',
+                   command=self._on_save_song_api).pack(anchor='w', padx=4, pady=(8, 2))
+        ttk.Label(api, foreground='#888888', wraplength=780, justify='left',
+                  text='Mod 客户端 API 地址已写死为 https://cubexmusic.qingchengsep.top'
+                       '（示例地址；要换需改源码重新编译）。Mod 端只需填同一个 Token。').pack(
+            anchor='w', padx=4)
+
+        info = ttk.LabelFrame(sc.inner, text='说明 / 使用方法', padding=8)
         info.pack(fill='x', pady=(8, 0))
         ttk.Label(info, justify='left', wraplength=780, foreground='#666666',
                   text=(
-                      '原理：机器人在「点歌」页登录网易云会员后，看到聊天里的 [点歌]歌名 就用会员账号'
-                      '解析出可播放直链并发到公屏，各客户端 Mod 直接播放 —— 相当于“全服点歌”，'
-                      '而**服务端不需要装任何插件**。\n'
+                      '原理（v0.3.6-26.11.15-Fxied 起）：Mod 把歌名 POST 到本机 HTTP API（上面的点歌服务），'
+                      '机器人用登录的会员 Cookie 搜索、取直链、取歌词，把播放数据直接返回给 Mod —— '
+                      '客户端不搜歌、不发聊天，配置都在服务端。\n'
                       '  1) 把点歌 Mod（songmod，Fabric 1.21.1~26.2）放进玩家的 mods/ 文件夹；\n'
                       '  2) 玩家在聊天里发 [点歌]告白气球，或直接用 Mod 里的「点歌台」界面；\n'
                       '     （玩家发 [点歌]help 机器人会私聊他全部用法：歌名/停止/台/help/登录）\n'
@@ -754,6 +788,26 @@ class AiPlayerGUI:
                       'Mod 的触发词 / 音量 / 界面按键在客户端 config/songmod.json 里改。\n'
                       '源码：项目目录 mc-song-mod/。'
                   )).pack(anchor='w', padx=4, pady=4)
+
+    def _on_save_song_api(self) -> None:
+        cfg = self.controller.config
+        cfg.song.apiEnabled = bool(self.var_song_api.get())
+        try:
+            cfg.qq.imageHttpPort = max(1, min(65535, int(self.var_song_api_port.get())))
+        except (TypeError, ValueError):
+            cfg.qq.imageHttpPort = 8767
+        cfg.qq.webApiToken = (self.var_song_api_token.get() or '').strip()
+        cfg.song.announceRequest = bool(self.var_song_announce.get())
+        cfg.song.announceStyle = 'click' if str(self.var_song_announce_style.get()) == 'click' else 'plain'
+        cfg.song.announceText = (self.var_song_announce_text.get() or '').strip() or '{player} 点了一首《{title}》'
+        cfg.song.validate()
+        cfg.validate()
+        if not cfg.save():
+            self._append_log('点歌服务配置保存失败（磁盘/权限？）。', 'error')
+            return
+        started = self.controller.start_song_api()
+        self._append_log('点歌服务配置已保存（API %s，端口 %s）。'
+                         % ('已启动' if started else '未启动/已关闭', cfg.qq.imageHttpPort), 'info')
 
     def _on_song_play(self):
         if not self._gather_config():
@@ -2022,9 +2076,9 @@ class AiPlayerGUI:
         ttk.Radiobutton(r4, text='内网其他设备出站（B 跑 other_qq_pic_sent）',
                         variable=self.var_qq_web_mode, value='relay',
                         command=self._on_qq_web_mode).pack(side='left', padx=(12, 0))
-        ttk.Label(img, text='A 自己开：网站/CF 直接连本机 127.0.0.1:8765；'
+        ttk.Label(img, text='A 自己开：网站/CF 直接连本机 127.0.0.1:8767；'
                             'B 转发：B 上运行 other_qq_pic_sent/relay.py，'
-                            'A 只需让 B 能访问 8765（监听地址 0.0.0.0）。',
+                            'A 只需让 B 能访问 8767（监听地址 0.0.0.0）。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
         ttk.Label(img, text='监听地址：127.0.0.1=只给本机反代；0.0.0.0=允许 B 机器经内网访问（需防火墙限制）。'
                             '公网地址留空=自动探测公网 IP，例 https://pic.qingchengsep.top。'
@@ -2575,6 +2629,12 @@ class AiPlayerGUI:
         self.var_song_reply_text.set(cfg.song.replyText or '')
         self.var_song_reply_cooldown.set(str(cfg.song.replyCooldownSeconds))
         self.var_song_netease_cookie.set(cfg.song.neteaseCookie or '')
+        self.var_song_api.set(bool(getattr(cfg.song, 'apiEnabled', False)))
+        self.var_song_api_port.set(str(cfg.qq.imageHttpPort or 8767))
+        self.var_song_api_token.set(cfg.qq.webApiToken or '')
+        self.var_song_announce.set(bool(getattr(cfg.song, 'announceRequest', True)))
+        self.var_song_announce_style.set(getattr(cfg.song, 'announceStyle', 'click') or 'click')
+        self.var_song_announce_text.set(getattr(cfg.song, 'announceText', '') or '{player} 点了一首《{title}》')
         self.var_song_play_text.set(cfg.song.playText or '{player} 点了一首 {music}')
         self.var_song_instant_play.set(bool(getattr(cfg.song, 'instantPlay', True)))
         self.var_song_private_play.set(bool(getattr(cfg.song, 'privatePlay', True)))
@@ -2841,7 +2901,7 @@ class AiPlayerGUI:
         qq.toolTrigger = self.var_qq_tool_trigger.get().strip() or '[AI工具]'
         qq.imageAsLink = self.var_qq_image_link.get()
         qq.imageHttpHost = (self.var_qq_img_host.get() or '0.0.0.0').strip()
-        qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8765)
+        qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8767)
         qq.imagePublicBase = self.var_qq_img_base.get().strip()
         qq.webApiEnabled = bool(self.var_qq_web_api.get())
         qq.webApiToken = self.var_qq_web_token.get().strip()
@@ -2919,6 +2979,15 @@ class AiPlayerGUI:
         song.replyText = self.var_song_reply_text.get().strip()
         song.replyCooldownSeconds = self._parse_int(self.var_song_reply_cooldown.get(), 20)
         song.neteaseCookie = self.var_song_netease_cookie.get().strip()
+        song.apiEnabled = bool(self.var_song_api.get())
+        try:
+            cfg.qq.imageHttpPort = max(1, min(65535, int(self.var_song_api_port.get())))
+        except (TypeError, ValueError):
+            cfg.qq.imageHttpPort = 8767
+        cfg.qq.webApiToken = (self.var_song_api_token.get() or '').strip()
+        song.announceRequest = bool(self.var_song_announce.get())
+        song.announceStyle = 'click' if str(self.var_song_announce_style.get()) == 'click' else 'plain'
+        song.announceText = (self.var_song_announce_text.get() or '').strip() or '{player} 点了一首《{title}》'
         song.playText = self.var_song_play_text.get().strip() or '{player} 点了一首 {music}'
         song.instantPlay = bool(self.var_song_instant_play.get())
         song.privatePlay = bool(self.var_song_private_play.get())

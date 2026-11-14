@@ -56,7 +56,6 @@ public class SongScreen extends Screen {
     // ---- 连接模式 / API / 超时 ----
     private Button modeBtn;
     private Button apiToggleBtn;
-    private EditBox apiBaseBox;
     private EditBox apiTokenBox;
     private EditBox timeoutBox;
 
@@ -185,12 +184,6 @@ public class SongScreen extends Screen {
                     SongModClient.setApiEnabled(cfgMine == null ? false : !cfgMine.apiEnabled);
                     apiToggleBtn.setMessage(Component.literal(apiText(SongModClient.settings())));
                 }).bounds(px + 152, py + 76, 130, 18).build());
-        apiBaseBox = new EditBox(this.font, px + 56, py + 100, cw - 72, 18,
-                Component.literal("https://你的域名（机器人点歌 API）"));
-        apiBaseBox.setMaxLength(200);
-        apiBaseBox.setValue(cfgMine == null ? "" : cfgMine.apiBase);
-        apiBaseBox.setResponder(text -> SongModClient.setApiBase(text));
-        addRenderableWidget(apiBaseBox);
         apiTokenBox = new EditBox(this.font, px + 56, py + 124, cw - 72, 18,
                 Component.literal("API Token"));
         apiTokenBox.setMaxLength(200);
@@ -242,7 +235,6 @@ public class SongScreen extends Screen {
         if (joinBtns != null) for (Button b : joinBtns) if (b != null) b.visible = listen;
         if (modeBtn != null) modeBtn.visible = mine;
         if (apiToggleBtn != null) apiToggleBtn.visible = mine;
-        if (apiBaseBox != null) apiBaseBox.visible = mine;
         if (apiTokenBox != null) apiTokenBox.visible = mine;
         if (timeoutBox != null) timeoutBox.visible = mine;
         if (volumeSlider != null) volumeSlider.visible = mine;
@@ -441,7 +433,9 @@ public class SongScreen extends Screen {
     private void drawMinePage(GuiGraphics gui, int px, int py, int pw, int ph) {
         gui.fill(px + 12, py + 52, px + pw - 12, py + ph - 110, 0x2210161F);
         gui.drawString(this.font, "我点过的歌", px + 16, py + 61, DIM);
-        gui.drawString(this.font, "API 地址", px + 16, py + 104, DIM);
+        gui.drawString(this.font, "服务地址", px + 16, py + 100, DIM);
+        gui.drawString(this.font, "§7cubexmusic.qingchengsep.top §8(示例)",
+                px + 64, py + 100, DIM);
         gui.drawString(this.font, "Token", px + 16, py + 128, DIM);
         gui.drawString(this.font, "超时(秒)", px + 16, py + 152, ACCENT2);
         List<String> my = SongState.myRequests();
@@ -495,7 +489,7 @@ public class SongScreen extends Screen {
                             + refreshSeconds() + " 秒可刷新一次",
                     px + 16, py + ph - 16, DIM);
         } else {
-            gui.drawString(this.font, "§8点歌/一起听可走 HTTPS 网关（我的页配置），失败自动回退聊天",
+            gui.drawString(this.font, "§8点歌服务地址已写死（示例站点），改地址需改源码重新编译",
                     px + 16, py + ph - 16, DIM);
         }
     }

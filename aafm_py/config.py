@@ -511,7 +511,7 @@ class QqConfig:
     # HTTP server (only the ``/pic_http/`` path is exposed).
     imageAsLink: bool = False
     imageHttpHost: str = '0.0.0.0'
-    imageHttpPort: int = 8765
+    imageHttpPort: int = 8767
     # Public base used in the link, e.g. http://1.2.3.4:8765 . Empty => try to
     # auto-detect the machine's public IP, falling back to 127.0.0.1.
     imagePublicBase: str = ''
@@ -610,7 +610,7 @@ class QqConfig:
         try:
             self.imageHttpPort = int(self.imageHttpPort)
         except (TypeError, ValueError):
-            self.imageHttpPort = 8765
+            self.imageHttpPort = 8767
         self.imageHttpPort = _clamp_int(self.imageHttpPort, 1, 65535)
         self.autoReconnect = bool(self.autoReconnect)
         self.healthCheckSeconds = _clamp_int(self.healthCheckSeconds, 0, 3600)

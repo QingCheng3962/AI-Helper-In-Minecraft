@@ -451,6 +451,11 @@ class Controller:
         return self._connecting
 
     def connect(self) -> None:
+        # 自动启动点歌 API（song.apiEnabled=true 时）
+        try:
+            self.start_song_api()
+        except Exception:  # noqa: BLE001
+            pass
         if self._connecting or self.connected:
             return
         self._relogin_triggered = False
@@ -1449,6 +1454,40 @@ class Controller:
         except Exception as e:  # noqa: BLE001
             self._post_ui({'kind': 'log', 'level': 'warn',
                            'message': '无法打开 cache 目录: ' + str(e)})
+
+    def start_song_api(self) -> bool:
+        """按配置启动/停止「点歌 HTTP API」（和图片服务共用端口，可单独开启）。
+
+        GUI 保存点歌配置后调用；返回是否正在提供服务。
+        """
+        cfg = self.config.qq
+        song = self.config.song
+        enabled = bool(getattr(song, 'apiEnabled', False))
+        if not enabled:
+            try:
+                self._photo.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': '点歌 HTTP API 已关闭。'})
+            return False
+        try:
+            self._photo.song_request = self._api_song_request
+            self._photo.song_join = self._api_song_join
+            self._photo.song_state = self._api_song_state
+            self._photo.song_listeners = self._api_song_listeners
+            self._photo.start(cfg.imageHttpHost, cfg.imageHttpPort,
+                              token=cfg.webApiToken,
+                              public_base=cfg.imagePublicBase)
+            self._post_ui({'kind': 'log', 'level': 'info',
+                           'message': f'点歌 HTTP API 已启动：http://{cfg.imageHttpHost}:'
+                                      f'{cfg.imageHttpPort}/api/song/request（Mod 的「我的」页'
+                                      f'填这个地址 + Token = qq.webApiToken）'})
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self._post_ui({'kind': 'log', 'level': 'error',
+                           'message': '启动点歌 HTTP API 失败：' + str(exc)})
+            return False
 
     def _start_qq(self) -> None:
         self._qq_connected = False

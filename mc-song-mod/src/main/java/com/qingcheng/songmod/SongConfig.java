@@ -98,12 +98,13 @@ public final class SongConfig {
      * </ul>
      */
     public String mode = "server";
-    /** 机器人 HTTP API 基地址（可填 https://xxx），例如 https://song.example.com。 */
-    public String apiBase = "";
+    /** 机器人 HTTP API 基地址。客户端已写死为 SongApiClient.DEFAULT_BASE（示例地址），
+     *  这里只作为显示/兼容字段，实际请求地址见 SongApiClient.DEFAULT_BASE。 */
+    public String apiBase = SongApiClient.DEFAULT_BASE;
     /** 机器人 HTTP API 的 Token（= 机器人 config.json 里的 qq.webApiToken）。 */
     public String apiToken = "";
-    /** 是否优先走 HTTP API（点歌/一起听名单/加入）；失败自动回退聊天。 */
-    public boolean apiEnabled = false;
+    /** 是否走 HTTP API（点歌/一起听名单/加入）；关掉才退回聊天（一般保持开启）。 */
+    public boolean apiEnabled = true;
     /** 机器人超时（秒）：等聊天直链、HTTP API 请求都用它。 */
     public int botTimeoutSeconds = 30;
     /** 一起听名单自动刷新间隔（秒，0=只在打开界面时刷新）。 */
