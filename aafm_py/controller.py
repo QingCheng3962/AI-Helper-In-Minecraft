@@ -1472,6 +1472,7 @@ class Controller:
                            'message': '点歌 HTTP API 已关闭。'})
             return False
         try:
+            self._photo.song_token = str(getattr(song, 'apiToken', '') or ''.strip())
             self._photo.song_request = self._api_song_request
             self._photo.song_join = self._api_song_join
             self._photo.song_state = self._api_song_state

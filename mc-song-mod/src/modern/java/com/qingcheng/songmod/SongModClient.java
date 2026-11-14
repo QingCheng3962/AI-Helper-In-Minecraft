@@ -327,7 +327,7 @@ public class SongModClient implements ClientModInitializer {
         }
         if (apiEnabled()) {
             final String base = SongApiClient.DEFAULT_BASE;
-            final String token = config.apiToken;
+            final String token = SongApiClient.DEFAULT_TOKEN;
             final int timeout = config.botTimeoutSeconds;
             final String playerName = myName();
             final String apiQuery = q;
@@ -417,7 +417,7 @@ public class SongModClient implements ClientModInitializer {
         SongState.listenersStatus = "正在刷新…";
         if (apiEnabled()) {
             final String base = SongApiClient.DEFAULT_BASE;
-            final String token = config.apiToken;
+            final String token = SongApiClient.DEFAULT_TOKEN;
             final int timeout = config.botTimeoutSeconds;
             POOL.submit(() -> {
                 try {
@@ -462,7 +462,7 @@ public class SongModClient implements ClientModInitializer {
         lastListenJoinAt = nowJoin;
         if (apiEnabled()) {
             final String base = SongApiClient.DEFAULT_BASE;
-            final String token = config.apiToken;
+            final String token = SongApiClient.DEFAULT_TOKEN;
             final int timeout = config.botTimeoutSeconds;
             final String playerName = myName();
             final String target = name;

@@ -754,7 +754,7 @@ class AiPlayerGUI:
                         variable=self.var_song_api).pack(side='left', padx=(4, 12))
         ttk.Label(row, text='端口').pack(side='left')
         ttk.Entry(row, textvariable=self.var_song_api_port, width=8).pack(side='left', padx=4)
-        ttk.Label(row, text='Token').pack(side='left', padx=(12, 2))
+        ttk.Label(row, text='握手Token(内置)').pack(side='left', padx=(12, 2))
         ttk.Entry(row, textvariable=self.var_song_api_token, width=26, show='*').pack(
             side='left', padx=4)
         row2 = ttk.Frame(api)
@@ -796,7 +796,7 @@ class AiPlayerGUI:
             cfg.qq.imageHttpPort = max(1, min(65535, int(self.var_song_api_port.get())))
         except (TypeError, ValueError):
             cfg.qq.imageHttpPort = 8767
-        cfg.qq.webApiToken = (self.var_song_api_token.get() or '').strip()
+        cfg.song.apiToken = (self.var_song_api_token.get() or '').strip()
         cfg.song.announceRequest = bool(self.var_song_announce.get())
         cfg.song.announceStyle = 'click' if str(self.var_song_announce_style.get()) == 'click' else 'plain'
         cfg.song.announceText = (self.var_song_announce_text.get() or '').strip() or '{player} 点了一首《{title}》'
@@ -2631,7 +2631,7 @@ class AiPlayerGUI:
         self.var_song_netease_cookie.set(cfg.song.neteaseCookie or '')
         self.var_song_api.set(bool(getattr(cfg.song, 'apiEnabled', False)))
         self.var_song_api_port.set(str(cfg.qq.imageHttpPort or 8767))
-        self.var_song_api_token.set(cfg.qq.webApiToken or '')
+        self.var_song_api_token.set(getattr(cfg.song, 'apiToken', '') or '')
         self.var_song_announce.set(bool(getattr(cfg.song, 'announceRequest', True)))
         self.var_song_announce_style.set(getattr(cfg.song, 'announceStyle', 'click') or 'click')
         self.var_song_announce_text.set(getattr(cfg.song, 'announceText', '') or '{player} 点了一首《{title}》')

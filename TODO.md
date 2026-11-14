@@ -259,3 +259,7 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] `Controller.start_song_api()`：保存配置立即启动/停止 HTTP 服务；连接服务器时也会按配置自动启动
 - [x] 文档：点歌API.md / README / README_EN 说明「地址写死为示例站点、改需重编译、端口 8767」
 - [x] 测试：Python 169 项通过；CTk 配置往返 smoke 通过；两代 Mod 编译通过；15 版本 jar 重打
+- [x] 玩家零配置：点歌地址 + **32 位内置握手 Token**（``SongApiClient.DEFAULT_TOKEN` = 服务端 `song.apiToken` 默认值`）；
+  客户端每次请求带 X-Token，服务端校验 401；新增 `GET /api/song/ping` 握手自检；
+  Mod「我的」页不再显示 Token/地址输入（只保留模式/超时/API 开关）
+- [x] AGENTS.md 开发守则：用户要求 push 时**直接用其本机 GitHub 账户**（凭据管理器），不询问/索要/打印 Token

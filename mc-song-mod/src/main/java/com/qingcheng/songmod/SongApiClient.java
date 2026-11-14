@@ -32,6 +32,12 @@ public final class SongApiClient {
      */
     public static final String DEFAULT_BASE = "https://cubexmusic.qingchengsep.top";
 
+    /**
+     * 内置握手 Token（32 位随机字符）：服务器端 config 里 `song.apiToken` 的默认值就是它。
+     * 玩家不用配置；两边要改就一起改（改 Mod 需重新编译）。
+     */
+    public static final String DEFAULT_TOKEN = "qpDEsVriYMSMGBvV25AYUXXpSJYaxMds";
+
     private SongApiClient() {
     }
 

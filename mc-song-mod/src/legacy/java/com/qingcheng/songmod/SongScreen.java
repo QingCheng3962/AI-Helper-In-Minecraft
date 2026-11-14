@@ -56,7 +56,6 @@ public class SongScreen extends Screen {
     // ---- 连接模式 / API / 超时 ----
     private Button modeBtn;
     private Button apiToggleBtn;
-    private EditBox apiTokenBox;
     private EditBox timeoutBox;
 
     private Button tabSongBtn;
@@ -184,12 +183,6 @@ public class SongScreen extends Screen {
                     SongModClient.setApiEnabled(cfgMine == null ? false : !cfgMine.apiEnabled);
                     apiToggleBtn.setMessage(Component.literal(apiText(SongModClient.settings())));
                 }).bounds(px + 152, py + 76, 130, 18).build());
-        apiTokenBox = new EditBox(this.font, px + 56, py + 124, cw - 72, 18,
-                Component.literal("API Token"));
-        apiTokenBox.setMaxLength(200);
-        apiTokenBox.setValue(cfgMine == null ? "" : cfgMine.apiToken);
-        apiTokenBox.setResponder(text -> SongModClient.setApiToken(text));
-        addRenderableWidget(apiTokenBox);
         timeoutBox = new EditBox(this.font, px + 56, py + 148, 60, 18,
                 Component.literal("机器人超时"));
         timeoutBox.setMaxLength(3);
@@ -235,7 +228,6 @@ public class SongScreen extends Screen {
         if (joinBtns != null) for (Button b : joinBtns) if (b != null) b.visible = listen;
         if (modeBtn != null) modeBtn.visible = mine;
         if (apiToggleBtn != null) apiToggleBtn.visible = mine;
-        if (apiTokenBox != null) apiTokenBox.visible = mine;
         if (timeoutBox != null) timeoutBox.visible = mine;
         if (volumeSlider != null) volumeSlider.visible = mine;
         if (cookieBox != null) cookieBox.visible = mine;
@@ -436,7 +428,8 @@ public class SongScreen extends Screen {
         gui.drawString(this.font, "服务地址", px + 16, py + 100, DIM);
         gui.drawString(this.font, "§7cubexmusic.qingchengsep.top §8(示例)",
                 px + 64, py + 100, DIM);
-        gui.drawString(this.font, "Token", px + 16, py + 128, DIM);
+        gui.drawString(this.font, "握手Token", px + 16, py + 128, DIM);
+        gui.drawString(this.font, "§a已内置§8（32 位，无需配置）", px + 76, py + 128, DIM);
         gui.drawString(this.font, "超时(秒)", px + 16, py + 152, ACCENT2);
         List<String> my = SongState.myRequests();
         if (my.isEmpty()) {
@@ -489,7 +482,7 @@ public class SongScreen extends Screen {
                             + refreshSeconds() + " 秒可刷新一次",
                     px + 16, py + ph - 16, DIM);
         } else {
-            gui.drawString(this.font, "§8点歌服务地址已写死（示例站点），改地址需改源码重新编译",
+            gui.drawString(this.font, "§8服务地址与握手 Token 都已内置，玩家无需配置；改需重编译",
                     px + 16, py + ph - 16, DIM);
         }
     }

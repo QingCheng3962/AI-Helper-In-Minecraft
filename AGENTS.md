@@ -4,7 +4,9 @@
 
 ## 一、Git 工作流（最重要）
 
-1. **默认只在本地 `git commit`，不要 `git push`。**
+1. **默认只在本地 `git commit`，不要 `git push`。**（用户明确要求推送时：**直接用用户本机 GitHub 账户**——
+   凭据在 Windows 凭据管理器里的 `git credential`，用 `GIT_TERMINAL_PROMPT=0` 非交互推送；
+   **不要**询问/索要/打印 Token，也不要换成别的账号或新建仓库。）
    - 只有用户**明确要求**（"推送" / "push" / "推到 GitHub"）时才执行 `git push`。
    - 用户没提推送 → 改完、提交完就停下，在回复里说明「已本地提交 `<hash>`，等你要求再推」。
 2. **不要删除 / 重建已被 Release 使用的 tag。**

@@ -231,7 +231,7 @@ class CtkApp:
         self.var_song_cookie = ctk.StringVar(value='')
         self._check(api, '启用点歌 HTTP API（Mod 的点歌/一起听都走它）', self.var_song_api)
         self._field(api, '监听端口', self.var_song_api_port, 100)
-        self._field(api, 'API Token（Mod 端填同一个）', self.var_song_api_token, 320, show='*')
+        self._field(api, '握手 Token（32 位，已内置）', self.var_song_api_token, 320, show='*')
         self._check(api, '公屏播报「谁点歌了」', self.var_song_announce)
         style_row = ctk.CTkFrame(api)
         style_row.pack(fill='x', padx=12, pady=2)
@@ -241,8 +241,8 @@ class CtkApp:
             side='left', padx=8, pady=2)
         self._field(api, '播报文案', self.var_song_announce_text, 320)
         self._field(api, '网易云 Cookie', self.var_song_cookie, 360, show='*')
-        ctk.CTkLabel(api, text=('Mod「我的」页 API 地址已写死为 https://cubexmusic.qingchengsep.top'
-                                '（示例地址；要换需改源码重新编译）。客户端只需填同一个 Token。'),
+        ctk.CTkLabel(api, text=('Mod 端已内置同一个 32 位握手 Token，玩家**不需要配置任何东西**；'
+                                'API 地址也写死为 https://cubexmusic.qingchengsep.top（示例，改需重编译）。'),
                      text_color='#90a4ae', wraplength=560, justify='left').pack(
             anchor='w', padx=16, pady=(2, 6))
         ctk.CTkButton(tab, text='保存点歌服务配置并生效', width=220,
@@ -987,7 +987,7 @@ class CtkApp:
             qq.imageHttpPort = max(1, min(65535, int(self.var_song_api_port.get())))
         except (TypeError, ValueError):
             qq.imageHttpPort = 8767
-        qq.webApiToken = (self.var_song_api_token.get() or '').strip()
+        song.apiToken = (self.var_song_api_token.get() or '').strip()
         song.announceRequest = bool(self.var_song_announce.get())
         song.announceStyle = 'click' if self.var_song_announce_style.get() == '可点击' else 'plain'
         song.announceText = (self.var_song_announce_text.get() or '').strip() or '{player} 点了一首《{title}》'
@@ -1136,7 +1136,9 @@ class CtkApp:
         song_cfg = cfg.song
         self.var_song_api.set(bool(song_cfg.apiEnabled))
         self.var_song_api_port.set(str(cfg.qq.imageHttpPort or 8767))
-        self.var_song_api_token.set(cfg.qq.webApiToken or '')
+        self.var_song_api_token.set(song_cfg.apiToken or '')
+        # song_cfg 在上面「点歌服务」段已定义
+
         self.var_song_announce.set(bool(song_cfg.announceRequest))
         self.var_song_announce_style.set('可点击' if song_cfg.announceStyle == 'click' else '纯文本')
         self.var_song_announce_text.set(song_cfg.announceText or '{player} 点了一首《{title}》')

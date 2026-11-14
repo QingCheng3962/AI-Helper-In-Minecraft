@@ -273,6 +273,16 @@ class _PhotoHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _song_authorized(self) -> bool:
+        token = str(self.photo.song_token or '')
+        if not token:
+            return self._authorized()
+        supplied = (self.headers.get('X-Token')
+                    or self.headers.get('X-Api-Token') or '')
+        if not supplied:
+            supplied = (self._query().get('token') or [''])[0]
+        return _credential_equal(str(supplied), token)
+
     def _authorized(self) -> bool:
         token = str(self.photo.token or '')
         if not token:
@@ -371,7 +381,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
         if path not in ('/api/song/request', '/api/song/join'):
             self.send_error(404, 'Not Found')
             return
-        if not self._authorized():
+        if not self._song_authorized():
             self._json(401, {'ok': False, 'error': 'unauthorized'})
             return
         try:
@@ -419,8 +429,16 @@ class _PhotoHandler(BaseHTTPRequestHandler):
             return
 
         # ---- 点歌 API（不经过聊天：Mod/网页/脚本可直接点歌、查状态、看一起听名单）----
+        if path == '/api/song/ping':
+            if not self._song_authorized():
+                self._json(401, {'ok': False, 'error': 'unauthorized'})
+                return
+            self._json(200, {'ok': True, 'service': 'song-api', 'version': 1,
+                             'features': ['request', 'state', 'listeners', 'join']})
+            return
+
         if path == '/api/song/state':
-            if not self._authorized():
+            if not self._song_authorized():
                 self._json(401, {'ok': False, 'error': 'unauthorized'})
                 return
             data = self.photo.song_state() if self.photo.song_state else {}
@@ -428,7 +446,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/song/listeners':
-            if not self._authorized():
+            if not self._song_authorized():
                 self._json(401, {'ok': False, 'error': 'unauthorized'})
                 return
             data = self.photo.song_listeners() if self.photo.song_listeners else []
@@ -510,6 +528,7 @@ class PhotoServer:
         # 每次启动都换一个实例 ID：中继靠它识别「上游重启、ID 从 1 重新计数」。
         self.instance = uuid.uuid4().hex
         #: 点歌 API 回调（由 Controller 注入；None = 未启用）
+        self.song_token = ''
         self.song_request = None
         self.song_join = None
         self.song_state = None

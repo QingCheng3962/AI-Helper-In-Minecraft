@@ -776,6 +776,11 @@ class DocBookConfig:
         self.lastFile = str(self.lastFile or '')
 
 
+#: 点歌 HTTP API 的**内置握手 Token**（32 位随机字符串）。
+#: Mod 客户端里写的是同一个值：玩家不用配置，服务端把这里和 Mod 常量保持一致即可。
+SONG_API_DEFAULT_TOKEN = 'qpDEsVriYMSMGBvV25AYUXXpSJYaxMds'
+
+
 @dataclass
 class SongConfig:
     """游戏内点歌（客户端 Mod 方案：玩家装 songmod，聊天里发 ``[点歌]歌名`` 本地播放，
@@ -818,8 +823,11 @@ class SongConfig:
     announceText: str = '{player} 点了一首《{title}》'
 
     # 点歌 HTTP API（/api/song/*）：不用聊天也能点歌。
-    # 复用图片服务的端口/Token（qq.imageHttpPort / qq.webApiToken）；开启后服务会自动启动。
+    # 端口复用图片服务的（qq.imageHttpPort，默认 8767）；Token 用下面这个「内置握手 Token」，
+    # 客户端里写死了同一个值，玩家无需任何配置。
     apiEnabled: bool = False
+    # 与 Mod 握手用的 Token（默认 = SONG_API_DEFAULT_TOKEN；改了要同步重编译 Mod）
+    apiToken: str = SONG_API_DEFAULT_TOKEN
 
     def validate(self) -> None:
         self.trigger = str(self.trigger or '').strip() or '[点歌]'
@@ -834,6 +842,7 @@ class SongConfig:
         self.instantPlay = bool(self.instantPlay)
         self.privatePlay = bool(self.privatePlay)
         self.apiEnabled = bool(self.apiEnabled)
+        self.apiToken = str(self.apiToken or '') or SONG_API_DEFAULT_TOKEN
         self.announceRequest = bool(self.announceRequest)
         style = str(self.announceStyle or 'click').strip().lower()
         self.announceStyle = style if style in ('click', 'plain') else 'click'
