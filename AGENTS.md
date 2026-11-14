@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File build_all.ps1
 - Python 改动至少过一遍 `python -m py_compile aafm_py/*.py`。
 - **只改 `aafm_py/` 的 bug 修复不需要重打 jar**；改了 `mc-song-mod/src/**` 或 `fabric.mod.json` 才需要。
 - jar 名格式：`Song_<项目版本>_<游戏版本>.jar`；`fabric.mod.json` 的 `minecraft` 依赖必须是 `~${minecraft_version}`（按版本注入，别写死）。
-- **版本号用语义化（SemVer）**：项目当前 `v0.3.7`、Mod 当前 `0.1.0`（都在 `README*.md` / `mc-song-mod/gradle.properties` / `package.json` 里改）；**README 只写最新版本，历史版本写 `更新日志.md`**。旧 tag（`v1.0`/`v2.0`/`v3.0`/`v3.1`/`v3.2.0`）和已发的 Release **保留不动**，别再按旧编号发版。
+- **版本号用语义化（SemVer）**：项目当前 `v0.3.6-26.11.14`、Mod 当前 `0.1.0`（都在 `README*.md` / `mc-song-mod/gradle.properties` / `package.json` 里改）；**README 只写最新版本，历史版本写 `更新日志.md`**。旧 tag（`v1.0`/`v2.0`/`v3.0`/`v3.1`/`v3.2.0`）和已发的 Release **保留不动**，别再按旧编号发版。
 
 ## 四、几个人肉踩过的坑（别重犯）
 
@@ -76,7 +76,7 @@ powershell -ExecutionPolicy Bypass -File build_all.ps1
 - 对外链接统一走 `aafm_py/links.py`（支持与工单 support.qingchengsep.top / 开发者博客 qingchengsep.top），别把 URL 散落在界面代码里。
 - 点歌 Mod 的聊天协议（倍速 / 一起听 / 歌词）在 `SongProtocol` + `SongSpeed`（纯 Java，无 MC 依赖），改协议要同步 1.21.x 与 26.x 两套客户端 + 机器人 `controller.py`。
 
-## 七、数据存储与安装包（v0.3.7 起）
+## 七、数据存储与安装包（v0.3.6-26.11.14 起）
 
 - **运行数据统一在 SQLite `data.db`**（`aafm_py/storage.py`）：好感度 / 写书进度 / 提示词模板 / QQ 账号。
   新加持久化数据时**加表**而不是新建 JSON；老 JSON 迁移必须「先导入、再备份成 .json.bak」，不许直接删用户数据。

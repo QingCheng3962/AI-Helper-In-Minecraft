@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.7** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.6-26.11.14** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -32,9 +32,9 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 ## Changelog
 
 > All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.2 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
-> Current version: **`v0.3.7`**; the client mod stays at `0.1.0` (jar names unchanged).
+> Current version: **`v0.3.6-26.11.14`**; the client mod stays at `0.1.0` (jar names unchanged).
 
-### v0.3.7
+### v0.3.6-26.11.14
 
 - **One-click Windows installer** (`installer/`): a C# setup wizard wrapped in a single `.exe` — pick an install folder, extract, create desktop/Start-menu shortcuts. It bundles the Python 3.9 runtime with every pip dependency, the Node runtime and production `node_modules`, so the target machine needs **no Python/Node installed**. NapCat is bundled by default and optional at install time.
 - **Runtime data in SQLite** (`data.db`): affinity, book-write progress, prompt templates and QQ account records (tables `affinity`/`kv`/`prompt_templates`/`qq_accounts`/`meta`; WAL + single lock). Old JSON files are auto-migrated on first access and backed up as `<name>.json.bak`.
