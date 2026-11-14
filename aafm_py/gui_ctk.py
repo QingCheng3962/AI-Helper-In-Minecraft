@@ -1,22 +1,29 @@
 """CustomTkinter 版主界面（新的默认入口）。
 
-原来的 tkinter 界面（aafm_py/gui.py）有 11 个标签页、功能非常完整；这里用
-**CustomTkinter** 重做一个更现代、更省心的主界面，覆盖日常最常用的部分：
+**CustomTkinter** 主界面：功能已与原 tkinter 界面同步（v0.3.6-26.11.14 起），
+安装包里的 .exe 默认就是它，不再需要 --legacy 才能用全功能：
 
 - 设置：服务器地址/端口/版本、登录方式、机器人名字、连接/断开、AI 开关、发聊天
+- AI 配置：提供方 / 地址 / 密钥 / 模型 / 温度 / 最大 token / 联网搜索 / 文生图
+- 玩家配置：系统提示词 / 触发正则 / 冷却 / 自动·定时回复 / 上下文 / 黑名单
 - 点歌：点歌（含倍速）、停止、一起听名单、当前播放/队列
-- 工具：端口扫描（常见端口 / 自定义范围 / 全端口，并能识别 Minecraft 版本与 MOTD）、
-  视频推荐、今日幸运值、签到、群发私聊
+- 文档转书：文档 → 游戏内书与笔（分页预览 / 成书署名 / 暂停停止续写清空）
+- 玩家资料库：xlsx/csv 资料表、性格研究、别名分析
+- QQ 转述：SnowLuma / NapCat 网关（启动/连接/重连/断开、双向转发）
+- 重连·踢出：自动重连、被踢后 /lobby、主动重连、在线检测
+- 工具：端口扫描（常见/自定义/全端口 + Minecraft status 识别）、视频推荐、幸运值、签到、群发
 - 日志：实时日志 + 自己往游戏里发消息
 - 关于：支持与工单、开发者博客、仓库链接、版本信息
 
-需要老界面的全部功能（文档转书 / 玩家资料库 / QQ 转述 / 界面美化 / 重连踢出等）时，
-用 python main.py --legacy 打开原 tkinter 界面即可（两边共用同一个 Controller）。
+原 tkinter 界面仍保留（python main.py --legacy），两边共用同一个 Controller 与 data.db。
 """
 from __future__ import annotations
 
+import os
+import re
 import threading
 import time
+from tkinter import filedialog
 from typing import Any, Dict, List
 
 try:
@@ -26,11 +33,12 @@ except Exception as exc:  # noqa: BLE001
 
 from tkinter import messagebox
 
-from . import links, portscan
+from . import docbook, links, portscan, storage
+from .config import PromptTemplateManager
 from .controller import Controller
 
 APP_TITLE = 'aafm AI 玩家'
-VERSION = 'v0.3.6-ctk'
+VERSION = 'v0.3.6-26.11.14'
 
 LEVEL_COLORS = {
     'error': '#ff6b6b',
@@ -67,6 +75,10 @@ class CtkApp:
         self._build_topbar()
         self._build_tabs()
         self._load_config()
+        try:
+            ctk.set_appearance_mode('dark')
+        except Exception:  # noqa: BLE001
+            pass
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
         self.root.after(200, self._poll)
 
@@ -88,10 +100,17 @@ class CtkApp:
     def _build_tabs(self) -> None:
         self.tabs = ctk.CTkTabview(self.root)
         self.tabs.pack(fill='both', expand=True, padx=12, pady=(10, 12))
-        for name in ('设置', '点歌', '工具', '日志', '关于'):
+        for name in ('设置', 'AI 配置', '玩家配置', '点歌', '文档转书',
+                     '资料库', 'QQ 转述', '重连', '工具', '日志', '关于'):
             self.tabs.add(name)
         self._build_settings_tab(self.tabs.tab('设置'))
+        self._build_ai_tab(self.tabs.tab('AI 配置'))
+        self._build_player_tab(self.tabs.tab('玩家配置'))
         self._build_song_tab(self.tabs.tab('点歌'))
+        self._build_docbook_tab(self.tabs.tab('文档转书'))
+        self._build_roster_tab(self.tabs.tab('资料库'))
+        self._build_qq_tab(self.tabs.tab('QQ 转述'))
+        self._build_reconnect_tab(self.tabs.tab('重连'))
         self._build_tools_tab(self.tabs.tab('工具'))
         self._build_log_tab(self.tabs.tab('日志'))
         self._build_about_tab(self.tabs.tab('关于'))
@@ -141,7 +160,19 @@ class CtkApp:
         ctk.CTkButton(ai_frame, text='清空 AI 上下文', width=130,
                       command=lambda: self.controller.clear_ai_context()).pack(
             side='left', padx=8, pady=12)
-        ctk.CTkButton(ai_frame, text='旧界面（全部功能）', width=160,
+        ctk.CTkButton(ai_frame, text='打开旧界面（兼容）', width=160,
+                      fg_color='#455a64', hover_color='#37474f',
+                      command=self._open_legacy).pack(side='right', padx=12, pady=12)
+
+        look = ctk.CTkFrame(tab)
+        look.pack(fill='x', padx=8, pady=(0, 8))
+        ctk.CTkLabel(look, text='界面主题', width=90, anchor='e').pack(
+            side='left', padx=(12, 8), pady=12)
+        self.var_theme = ctk.StringVar(value='深色')
+        ctk.CTkOptionMenu(look, values=['深色', '浅色', '跟随系统'],
+                          variable=self.var_theme, width=140,
+                          command=self._on_theme_changed).pack(side='left', padx=8, pady=12)
+        ctk.CTkButton(look, text='打开旧界面（兼容）', width=160,
                       fg_color='#455a64', hover_color='#37474f',
                       command=self._open_legacy).pack(side='right', padx=12, pady=12)
 
@@ -246,13 +277,49 @@ class CtkApp:
             ctk.CTkButton(row, text=text, width=110, command=handler).pack(
                 side='left', padx=6, pady=6)
         mass = ctk.CTkFrame(extra)
-        mass.pack(fill='x', padx=8, pady=(4, 10))
+        mass.pack(fill='x', padx=8, pady=(4, 6))
         self.var_mass = ctk.StringVar(value='')
         ctk.CTkEntry(mass, textvariable=self.var_mass,
                      placeholder_text='群发私聊内容（逐个 /msg 在线玩家）').pack(
             side='left', fill='x', expand=True, padx=(6, 8), pady=6)
         ctk.CTkButton(mass, text='群发', width=84, command=self._on_mass).pack(
             side='left', padx=(0, 6), pady=6)
+
+        # ---- 杂项：视频推荐 / 幸运值 / 签到 / 小票机 ----
+        self.var_misc_video_enabled = ctk.BooleanVar(value=True)
+        self.var_misc_video_source = ctk.StringVar(value='番剧追番榜')
+        self.var_misc_video_count = ctk.StringVar(value='3')
+        self.var_misc_video_cooldown = ctk.StringVar(value='30')
+        self.var_misc_luck_enabled = ctk.BooleanVar(value=True)
+        self.var_misc_checkin_enabled = ctk.BooleanVar(value=True)
+        self.var_mass_gap = ctk.StringVar(value='0.5')
+        self.var_receipt_enabled = ctk.BooleanVar(value=False)
+        self.var_receipt_printer = ctk.StringVar(value='')
+        self.var_receipt_paper = ctk.StringVar(value='58')
+        self.var_receipt_maxper = ctk.StringVar(value='20')
+        self.var_receipt_dryrun = ctk.BooleanVar(value=False)
+
+        misc = self._section(tab, '杂项：视频推荐 / 幸运值 / 签到 / 小票机')
+        row = ctk.CTkFrame(misc)
+        row.pack(fill='x', padx=12, pady=2)
+        ctk.CTkLabel(row, text='视频来源', width=96, anchor='e').pack(side='left')
+        ctk.CTkOptionMenu(row, values=['番剧追番榜', 'B 站首页推荐', 'B 站首页热门',
+                                       'B 站排行榜', 'B 站收藏夹'],
+                          variable=self.var_misc_video_source, width=150).pack(
+            side='left', padx=8, pady=2)
+        self._check(misc, '启用视频推荐', self.var_misc_video_enabled)
+        self._field(misc, '每次推荐条数', self.var_misc_video_count, 90)
+        self._field(misc, '推荐冷却 (秒)', self.var_misc_video_cooldown, 90)
+        self._check(misc, '启用今日幸运值', self.var_misc_luck_enabled)
+        self._check(misc, '启用每日签到', self.var_misc_checkin_enabled)
+        self._field(misc, '群发间隔 (秒)', self.var_mass_gap, 90)
+        ctk.CTkLabel(misc, text='— Minecraft 聊天小票机（ESC/POS）—',
+                     text_color='#90a4ae').pack(anchor='w', padx=16, pady=(8, 0))
+        self._check(misc, '打印玩家聊天到小票机', self.var_receipt_enabled)
+        self._field(misc, '打印机名', self.var_receipt_printer, 240)
+        self._field(misc, '纸宽 (58/80)', self.var_receipt_paper, 90)
+        self._field(misc, '每分钟上限', self.var_receipt_maxper, 90)
+        self._check(misc, '仅生成预览不真打印（dry-run）', self.var_receipt_dryrun)
 
     # ---------------------------- 日志 ----------------------------
     def _build_log_tab(self, tab) -> None:
@@ -295,9 +362,543 @@ class CtkApp:
                       fg_color='#37474f', hover_color='#263238',
                       command=lambda: self._open_link(links.REPO_URL)).pack(
             anchor='w', padx=16, pady=6)
-        ctk.CTkLabel(frame, text=('提示：这个 CustomTkinter 界面覆盖日常使用；文档转书 / 玩家资料库 / '
-                                  'QQ 转述 / 界面美化 / 重连踢出等功能在旧界面里（设置页按钮，或 python main.py --legacy）。'),
+        ctk.CTkLabel(frame, text=('新界面已包含全部功能（AI/玩家配置、文档转书、玩家资料库、QQ 转述、重连踢出、端口扫描等）；'
+                                  '旧 tkinter 界面仍可用 python main.py --legacy 打开，两边共用同一份 data.db 数据。'),
                      justify='left', text_color='#78909c').pack(anchor='w', padx=16, pady=(20, 16))
+
+    # ------------------------------------------------------------------
+    # 通用小工具
+    # ------------------------------------------------------------------
+    def _section(self, parent, title: str):
+        frame = ctk.CTkFrame(parent)
+        frame.pack(fill='x', padx=8, pady=6)
+        ctk.CTkLabel(frame, text=title, anchor='w',
+                     font=ctk.CTkFont(size=14, weight='bold')).pack(
+            anchor='w', padx=12, pady=(8, 2))
+        return frame
+
+    def _field(self, parent, label: str, var, width: int = 260, show=None):
+        row = ctk.CTkFrame(parent)
+        row.pack(fill='x', padx=12, pady=2)
+        ctk.CTkLabel(row, text=label, width=96, anchor='e').pack(side='left')
+        ctk.CTkEntry(row, textvariable=var, width=width, show=show).pack(
+            side='left', padx=8, pady=2)
+        return row
+
+    def _check(self, parent, text: str, var):
+        box = ctk.CTkCheckBox(parent, text=text, variable=var)
+        box.pack(anchor='w', padx=14, pady=3)
+        return box
+
+    def _save_all(self, message: str = '设置已保存。') -> None:
+        if self._gather_config():
+            self._append_log(message)
+
+    # ------------------------------------------------------------------
+    # AI 配置
+    # ------------------------------------------------------------------
+    def _build_ai_tab(self, tab) -> None:
+        self.var_ai_provider = ctk.StringVar(value='openai')
+        self.var_ai_base = ctk.StringVar(value='')
+        self.var_ai_key = ctk.StringVar(value='')
+        self.var_ai_model = ctk.StringVar(value='gpt-4o-mini')
+        self.var_ai_temp = ctk.StringVar(value='0.7')
+        self.var_ai_maxtok = ctk.StringVar(value='1024')
+        self.var_ai_timeout = ctk.StringVar(value='30')
+        self.var_ai_search = ctk.BooleanVar(value=False)
+        self.var_ai_image = ctk.BooleanVar(value=False)
+
+        api = self._section(tab, '模型 API（OpenAI 兼容，也支持 Anthropic）')
+        row = ctk.CTkFrame(api)
+        row.pack(fill='x', padx=12, pady=2)
+        ctk.CTkLabel(row, text='提供方', width=96, anchor='e').pack(side='left')
+        ctk.CTkOptionMenu(row, values=['openai', 'deepseek', 'moonshot', 'ollama',
+                                       'anthropic', 'custom'],
+                          variable=self.var_ai_provider, width=160).pack(
+            side='left', padx=8, pady=2)
+        self._field(api, 'API 地址', self.var_ai_base, 360)
+        self._field(api, 'API Key', self.var_ai_key, 360, show='*')
+        self._field(api, '模型', self.var_ai_model, 240)
+        self._field(api, '温度 (0-2)', self.var_ai_temp, 100)
+        self._field(api, '最大 tokens', self.var_ai_maxtok, 100)
+        self._field(api, '超时 (秒)', self.var_ai_timeout, 100)
+        ctk.CTkLabel(api, text='地址留空 = 用提供方默认；API Key 只存在本机 config/mcai_chat.json',
+                     text_color='#90a4ae').pack(anchor='w', padx=16, pady=(2, 8))
+
+        extra = self._section(tab, '扩展能力')
+        self._check(extra, '联网搜索（遇到需要新鲜信息的问题时自动搜）', self.var_ai_search)
+        self._check(extra, '文生图（把图片 URL 发到聊天）', self.var_ai_image)
+
+        buttons = ctk.CTkFrame(tab)
+        buttons.pack(fill='x', padx=8, pady=8)
+        ctk.CTkButton(buttons, text='保存 AI 配置', width=130,
+                      command=lambda: self._save_all('AI 配置已保存。')).pack(
+            side='left', padx=12, pady=8)
+        ctk.CTkButton(buttons, text='测试连接', width=110,
+                      fg_color='#455a64', hover_color='#37474f',
+                      command=self._on_test_ai).pack(side='left', padx=6, pady=8)
+
+    def _on_test_ai(self) -> None:
+        self._gather_config()
+        try:
+            from .llm import LLMClient  # noqa: F401
+        except Exception:  # noqa: BLE001
+            pass
+        self._append_log('已保存配置。连接服务器后可用「让机器人说话」验证模型是否正常。', 'info')
+
+    # ------------------------------------------------------------------
+    # 玩家配置
+    # ------------------------------------------------------------------
+    def _build_player_tab(self, tab) -> None:
+        self.var_trigger = ctk.StringVar(value='')
+        self.var_cooldown = ctk.StringVar(value='10')
+        self.var_ctx_enabled = ctk.BooleanVar(value=True)
+        self.var_ctx_len = ctk.StringVar(value='20')
+        self.var_ctx_server = ctk.BooleanVar(value=True)
+        self.var_auto_reply = ctk.BooleanVar(value=False)
+        self.var_schedule = ctk.BooleanVar(value=False)
+        self.var_schedule_interval = ctk.StringVar(value='30')
+        self.var_ai_enabled_cfg = ctk.BooleanVar(value=False)
+        self.var_blocked_regex = ctk.StringVar(value='')
+
+        prompt = self._section(tab, '系统提示词（决定 AI 的说话风格与人设）')
+        self.prompt_box = ctk.CTkTextbox(prompt, height=170)
+        self.prompt_box.pack(fill='x', padx=12, pady=(2, 10))
+
+        tpl = ctk.CTkFrame(tab)
+        tpl.pack(fill='x', padx=8, pady=(0, 6))
+        self.var_template = ctk.StringVar(value='')
+        ctk.CTkLabel(tpl, text='提示词模板', width=96, anchor='e').pack(side='left', padx=(12, 4))
+        self.template_menu = ctk.CTkOptionMenu(tpl, values=['（无）'], width=180,
+                                               variable=self.var_template)
+        self.template_menu.pack(side='left', padx=6, pady=6)
+        ctk.CTkButton(tpl, text='应用模板', width=90, command=self._on_apply_template).pack(
+            side='left', padx=4, pady=6)
+        ctk.CTkButton(tpl, text='保存为模板', width=100, command=self._on_save_template).pack(
+            side='left', padx=4, pady=6)
+        ctk.CTkButton(tpl, text='删除模板', width=90, command=self._on_delete_template).pack(
+            side='left', padx=4, pady=6)
+
+        trig = self._section(tab, '触发与回复')
+        self._field(trig, '触发正则', self.var_trigger, 380)
+        self._field(trig, '触发冷却 (秒)', self.var_cooldown, 100)
+        self._check(trig, '启用「自动回复」（有人在聊天里说话就回）', self.var_auto_reply)
+        self._check(trig, '启用「定时回复」（每隔一段时间主动说一句）', self.var_schedule)
+        self._field(trig, '定时间隔 (秒)', self.var_schedule_interval, 100)
+        self._check(trig, 'AI 玩家总开关（等同顶部工具栏的 AI 开关）', self.var_ai_enabled_cfg)
+        ctk.CTkLabel(trig, text='触发正则说明：[DiaoHelper] 这种整体是正则/字面量，多个用英文逗号分隔',
+                     text_color='#90a4ae').pack(anchor='w', padx=16, pady=(2, 8))
+
+        ctx = self._section(tab, '上下文')
+        self._check(ctx, '启用对话上下文', self.var_ctx_enabled)
+        self._field(ctx, '上下文条数', self.var_ctx_len, 100)
+        self._check(ctx, '服务器公告/指令输出也进上下文', self.var_ctx_server)
+
+        blocked = self._section(tab, '过滤与黑名单')
+        self._field(blocked, '过滤正则', self.var_blocked_regex, 380)
+        ctk.CTkLabel(blocked, text='黑名单玩家（每行一个名字）',
+                     text_color='#90a4ae').pack(anchor='w', padx=16)
+        self.blocked_box = ctk.CTkTextbox(blocked, height=90)
+        self.blocked_box.pack(fill='x', padx=12, pady=(2, 10))
+
+        buttons = ctk.CTkFrame(tab)
+        buttons.pack(fill='x', padx=8, pady=8)
+        ctk.CTkButton(buttons, text='保存玩家配置', width=130,
+                      command=lambda: self._save_all('玩家配置已保存。')).pack(
+            side='left', padx=12, pady=8)
+        ctk.CTkButton(buttons, text='清空 AI 上下文', width=130,
+                      fg_color='#455a64', hover_color='#37474f',
+                      command=lambda: self.controller.clear_ai_context()).pack(
+            side='left', padx=6, pady=8)
+
+    # ------------------------------------------------------------------
+    # 文档转书
+    # ------------------------------------------------------------------
+    def _build_docbook_tab(self, tab) -> None:
+        self.var_book_file = ctk.StringVar(value='')
+        self.var_book_lines = ctk.StringVar(value='14')
+        self.var_book_pages = ctk.StringVar(value='100')
+        self.var_book_title = ctk.StringVar(value='')
+        self.var_book_start = ctk.StringVar(value='')
+        self.var_book_end = ctk.StringVar(value='')
+        self.var_book_startbook = ctk.StringVar(value='1')
+        self.var_book_sign = ctk.BooleanVar(value=False)
+        self.var_book_drop = ctk.BooleanVar(value=False)
+        self.var_book_autoget = ctk.BooleanVar(value=True)
+
+        src = self._section(tab, '文档')
+        row = ctk.CTkFrame(src)
+        row.pack(fill='x', padx=12, pady=2)
+        ctk.CTkLabel(row, text='文件', width=96, anchor='e').pack(side='left')
+        ctk.CTkEntry(row, textvariable=self.var_book_file, width=380).pack(
+            side='left', padx=8, pady=2)
+        ctk.CTkButton(row, text='选择文件…', width=100,
+                      command=self._on_choose_book_file).pack(side='left', padx=4)
+        self._field(src, '每页最大行数', self.var_book_lines, 100)
+        self._field(src, '每本书最大页数', self.var_book_pages, 100)
+        self._check(src, '编辑为成书（署名）', self.var_book_sign)
+        self._field(src, '书名模板 ({number})', self.var_book_title, 240)
+        self._field(src, '开始提示', self.var_book_start, 320)
+        self._field(src, '结束提示', self.var_book_end, 320)
+        self._check(src, '写完后把书丢出', self.var_book_drop)
+        self._check(src, '创造模式下缺书时自动获取', self.var_book_autoget)
+
+        ctl = ctk.CTkFrame(tab)
+        ctl.pack(fill='x', padx=8, pady=6)
+        ctk.CTkButton(ctl, text='预览分页', width=100,
+                      command=self._on_preview_book).pack(side='left', padx=8, pady=6)
+        ctk.CTkButton(ctl, text='写入书与笔', width=110,
+                      command=self._on_write_book).pack(side='left', padx=6, pady=6)
+        ctk.CTkButton(ctl, text='从第', width=50,
+                      fg_color='#455a64', command=self._on_start_from_book).pack(
+            side='left', padx=(12, 0), pady=6)
+        ctk.CTkEntry(ctl, textvariable=self.var_book_startbook, width=50).pack(
+            side='left', padx=2, pady=6)
+        ctk.CTkLabel(ctl, text='册开始').pack(side='left', padx=(0, 6))
+        for text, handler in (('暂停', lambda: self._on_book_control('pause')),
+                              ('停止', lambda: self._on_book_control('stop')),
+                              ('继续', self._on_continue_book),
+                              ('重写', self._on_rewrite_book),
+                              ('清空书页', self._on_clear_book)):
+            ctk.CTkButton(ctl, text=text, width=70, fg_color='#37474f',
+                          hover_color='#263238', command=handler).pack(
+                side='left', padx=4, pady=6)
+        self.book_preview = ctk.CTkTextbox(tab, height=220)
+        self.book_preview.pack(fill='both', expand=True, padx=12, pady=(0, 8))
+
+    def _on_choose_book_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title='选择要转换的文档',
+            filetypes=[('文档', '*.txt *.docx *.doc'), ('所有文件', '*.*')])
+        if not path:
+            return
+        self.var_book_file.set(path)
+        self._on_preview_book()
+
+    def _book_pages(self):
+        path = (self.var_book_file.get() or '').strip()
+        if not path:
+            messagebox.showwarning(APP_TITLE, '请先选择要转换的文档。')
+            return None
+        if not os.path.exists(path):
+            messagebox.showerror(APP_TITLE, '文件不存在：\n' + path)
+            return None
+        try:
+            lines = int((self.var_book_lines.get() or '14').strip())
+        except ValueError:
+            lines = 14
+        lines = max(1, min(docbook.MAX_LINES_PER_PAGE, lines))
+        try:
+            return docbook.load_pages(path, max_chars=docbook.MAX_PAGE_CHARS,
+                                      max_lines=lines)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_TITLE, '读取文档失败：\n' + str(exc))
+            return None
+
+    def _on_preview_book(self) -> None:
+        pages = self._book_pages()
+        if pages is None:
+            return
+        self.book_preview.configure(state='normal')
+        self.book_preview.delete('1.0', 'end')
+        if not pages:
+            self.book_preview.insert('end', '（没有解析到文本内容）')
+        else:
+            total = sum(len(p) for p in pages)
+            self.book_preview.insert(
+                'end', '共 %d 页，%d 字符（每页 ≤ %d 行）\n%s\n' % (
+                    len(pages), total, docbook.MAX_LINES_PER_PAGE, '=' * 48))
+            for i, page in enumerate(pages, 1):
+                self.book_preview.insert('end', '—— 第 %d 页 ——\n%s\n\n' % (i, page))
+        self.book_preview.configure(state='disabled')
+        self._append_log('已预览分页：%d 页。' % len(pages), 'info')
+
+    def _on_write_book(self) -> None:
+        pages = self._book_pages()
+        if pages is None:
+            return
+        if not pages:
+            messagebox.showwarning(APP_TITLE, '没有解析到可写入的文本内容。')
+            return
+        if not self._gather_config():
+            return
+        cfg = self.controller.config.docBook
+        ok = self.controller.write_book(
+            pages,
+            start_text=cfg.startText, end_text=cfg.endText,
+            end_drop=cfg.endDrop, auto_get_book=cfg.autoGetBook,
+            pages_per_book=cfg.pagesPerBook, sign_book=cfg.signBook,
+            title_template=cfg.titleTemplate,
+            doc_file=(self.var_book_file.get() or '').strip(),
+            start_page=0, book_start=1)
+        self._append_log('已发送写入指令：%d 页。' % len(pages) if ok
+                         else '写入指令发送失败（未连接或引擎未就绪）。',
+                         'song' if ok else 'error')
+
+    def _on_start_from_book(self) -> None:
+        pages = self._book_pages()
+        if pages is None or not pages:
+            return
+        if not self._gather_config():
+            return
+        cfg = self.controller.config.docBook
+        per_book = max(1, int(cfg.pagesPerBook or 100))
+        total_books = max(1, (len(pages) + per_book - 1) // per_book)
+        try:
+            book_no = int((self.var_book_startbook.get() or '1').strip())
+        except ValueError:
+            book_no = 1
+        if book_no < 1 or book_no > total_books:
+            messagebox.showwarning(APP_TITLE, '本文档约 %d 册，起始册号超出范围。' % total_books)
+            return
+        start_page = (book_no - 1) * per_book
+        ok = self.controller.write_book(
+            pages,
+            start_text=cfg.startText, end_text=cfg.endText,
+            end_drop=cfg.endDrop, auto_get_book=cfg.autoGetBook,
+            pages_per_book=per_book, sign_book=cfg.signBook,
+            title_template=cfg.titleTemplate,
+            doc_file=(self.var_book_file.get() or '').strip(),
+            start_page=start_page, book_start=book_no)
+        self._append_log('已发送写入指令：从第 %d 册开始。' % book_no if ok
+                         else '写入指令发送失败。', 'song' if ok else 'error')
+
+    def _on_book_control(self, action: str) -> None:
+        self._gather_config()
+        self.controller.pause_book(action)
+
+    def _on_continue_book(self) -> None:
+        if self._gather_config():
+            self.controller.continue_book()
+
+    def _on_rewrite_book(self) -> None:
+        if not messagebox.askyesno(APP_TITLE, '从第一页重新写入？（已记录的进度将被覆盖）'):
+            return
+        if self._gather_config():
+            self.controller.rewrite_book()
+
+    def _on_clear_book(self) -> None:
+        if not messagebox.askyesno(APP_TITLE, '清空机器人背包里所有「书与笔」的内容？'):
+            return
+        ok = self.controller.clear_book()
+        self._append_log('已发送清空书与笔指令。' if ok else '清空指令发送失败。',
+                         'song' if ok else 'error')
+
+    # ------------------------------------------------------------------
+    # 玩家资料库
+    # ------------------------------------------------------------------
+    def _build_roster_tab(self, tab) -> None:
+        self.var_roster_enabled = ctk.BooleanVar(value=True)
+        self.var_roster_persona = ctk.BooleanVar(value=True)
+        self.var_roster_alias = ctk.BooleanVar(value=True)
+        self.var_roster_interval = ctk.StringVar(value='180')
+        box = self._section(tab, '资料表（xlsx / csv：玩家名 | 玩家描述 | 别名 | AI 记录）')
+        self._check(box, '启用玩家资料库（「xxx是谁」按表回答、聊天自动学习）',
+                    self.var_roster_enabled)
+        self._check(box, '启用性格研究（AI 读聊天后写 AI 记录）', self.var_roster_persona)
+        self._field(box, '研究间隔 (秒)', self.var_roster_interval, 100)
+        self._check(box, '启用别名分析', self.var_roster_alias)
+        ctk.CTkLabel(box, text='已加载资料表：', text_color='#90a4ae').pack(
+            anchor='w', padx=16, pady=(6, 0))
+        self.roster_box = ctk.CTkTextbox(tab, height=160)
+        self.roster_box.pack(fill='x', padx=12, pady=6)
+        self.roster_box.configure(state='disabled')
+        bar = ctk.CTkFrame(tab)
+        bar.pack(fill='x', padx=8, pady=6)
+        for text, handler in (('添加文件…', self._on_roster_add),
+                              ('移除选中', self._on_roster_remove),
+                              ('导出模板…', self._on_roster_template),
+                              ('刷新列表', self._refresh_roster_list)):
+            ctk.CTkButton(bar, text=text, width=110, command=handler).pack(
+                side='left', padx=6, pady=6)
+        ctk.CTkButton(bar, text='保存资料库设置', width=150,
+                      command=lambda: self._save_all('资料库设置已保存。')).pack(
+            side='right', padx=6, pady=6)
+
+    def _refresh_roster_list(self) -> None:
+        paths = []
+        try:
+            paths = list(self.controller.roster.file_paths())
+        except Exception:  # noqa: BLE001
+            paths = list(getattr(self.controller.config.roster, 'files', []) or [])
+        self.roster_box.configure(state='normal')
+        self.roster_box.delete('1.0', 'end')
+        self.roster_box.insert('end', '\n'.join(paths) if paths else '（还没有资料表）')
+        self.roster_box.configure(state='disabled')
+
+    def _on_roster_add(self) -> None:
+        path = filedialog.askopenfilename(
+            title='选择玩家资料表',
+            filetypes=[('表格', '*.xlsx *.csv'), ('所有文件', '*.*')])
+        if not path:
+            return
+        try:
+            count = self.controller.roster_add_file(path)
+            self._refresh_roster_list()
+            self._append_log('已添加资料表：%s（%s 行）' % (path, count), 'info')
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_TITLE, '添加失败：\n' + str(exc))
+
+    def _on_roster_remove(self) -> None:
+        try:
+            indexes = self.roster_box.tag_ranges('sel')
+            if not indexes:
+                messagebox.showinfo(APP_TITLE, '先在列表里选中要移除的文件。')
+                return
+            selected = self.roster_box.get('sel.first', 'sel.last')
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            self.controller.roster_remove_file(selected.strip())
+            self._refresh_roster_list()
+            self._append_log('已移除资料表：' + selected.strip(), 'info')
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_TITLE, '移除失败：\n' + str(exc))
+
+    def _on_roster_template(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title='导出玩家资料模板', defaultextension='.xlsx',
+            filetypes=[('Excel', '*.xlsx')])
+        if not path:
+            return
+        try:
+            self.controller.export_roster_template(path)
+            self._append_log('已导出资料模板：' + path, 'info')
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_TITLE, '导出失败：\n' + str(exc))
+
+    # ------------------------------------------------------------------
+    # QQ 转述
+    # ------------------------------------------------------------------
+    def _build_qq_tab(self, tab) -> None:
+        self.var_qq_framework = ctk.StringVar(value='snowluma')
+        self.var_qq_path = ctk.StringVar(value='')
+        self.var_qq_mode = ctk.StringVar(value='forward')
+        self.var_qq_url = ctk.StringVar(value='ws://127.0.0.1:3001')
+        self.var_qq_token = ctk.StringVar(value='')
+        self.var_qq_groups = ctk.StringVar(value='')
+        self.var_qq_to_mc = ctk.BooleanVar(value=True)
+        self.var_mc_to_qq = ctk.BooleanVar(value=False)
+        self.var_mc_trigger = ctk.StringVar(value='[sentQ]')
+
+        net = self._section(tab, 'OneBot 11 网关（SnowLuma / NapCat）')
+        row = ctk.CTkFrame(net)
+        row.pack(fill='x', padx=12, pady=2)
+        ctk.CTkLabel(row, text='框架', width=96, anchor='e').pack(side='left')
+        ctk.CTkOptionMenu(row, values=['snowluma', 'napcat'],
+                          variable=self.var_qq_framework, width=140,
+                          command=lambda _v: self._load_qq_widgets()).pack(
+            side='left', padx=8, pady=2)
+        self._field(net, '启动路径', self.var_qq_path, 380)
+        self._field(net, '连接模式', self.var_qq_mode, 120)
+        self._field(net, '正向地址', self.var_qq_url, 300)
+        self._field(net, 'Access Token', self.var_qq_token, 300, show='*')
+        self.qq_status = ctk.CTkLabel(net, text='QQ 未连接', text_color='#90a4ae')
+        self.qq_status.pack(anchor='w', padx=16, pady=(2, 8))
+
+        bar = ctk.CTkFrame(tab)
+        bar.pack(fill='x', padx=8, pady=4)
+        for text, handler in (('启动框架', self._on_qq_launch),
+                              ('连接', self._on_qq_start),
+                              ('重连', self._on_qq_restart),
+                              ('断开', self._on_qq_stop)):
+            ctk.CTkButton(bar, text=text, width=100, command=handler).pack(
+                side='left', padx=6, pady=6)
+
+        relay = self._section(tab, '双向转发')
+        self._check(relay, 'QQ → MC（群消息发到游戏公屏）', self.var_qq_to_mc)
+        self._field(relay, '群号(逗号分隔)', self.var_qq_groups, 300)
+        self._check(relay, 'MC → QQ（公屏以触发词开头时转发到群）', self.var_mc_to_qq)
+        self._field(relay, 'MC 触发词', self.var_mc_trigger, 160)
+        ctk.CTkButton(tab, text='保存 QQ 设置', width=130,
+                      command=lambda: self._save_all('QQ 设置已保存。')).pack(
+            anchor='w', padx=20, pady=10)
+
+    def _load_qq_widgets(self) -> None:
+        cfg = self.controller.config.qq
+        endpoint = cfg.active()
+        self.var_qq_path.set(endpoint.launcherPath or '')
+        self.var_qq_mode.set(endpoint.mode or 'forward')
+        self.var_qq_url.set(endpoint.url or 'ws://127.0.0.1:3001')
+        self.var_qq_token.set(endpoint.accessToken or '')
+        self.var_qq_groups.set(','.join(cfg.groups or []))
+        self.var_qq_to_mc.set(bool(cfg.qqToMcEnabled))
+        self.var_mc_to_qq.set(bool(cfg.mcToQqEnabled))
+        self.var_mc_trigger.set(cfg.mcTrigger or '[sentQ]')
+        self.var_qq_framework.set(cfg.framework or 'snowluma')
+
+    def _on_qq_launch(self) -> None:
+        if not self._gather_config():
+            return
+        try:
+            self.controller.start_qq_framework()
+            self._append_log('已请求启动 QQ 框架（详见日志页输出）。', 'info')
+        except Exception as exc:  # noqa: BLE001
+            self._append_log('启动 QQ 框架失败：' + str(exc), 'error')
+
+    def _on_qq_start(self) -> None:
+        if not self._gather_config():
+            return
+        try:
+            self.controller.start_qq()
+            self._append_log('正在连接 QQ 网关…', 'info')
+        except Exception as exc:  # noqa: BLE001
+            self._append_log('连接 QQ 失败：' + str(exc), 'error')
+
+    def _on_qq_restart(self) -> None:
+        if not self._gather_config():
+            return
+        try:
+            self.controller.restart_qq()
+            self._append_log('正在重连 QQ 网关…', 'info')
+        except Exception as exc:  # noqa: BLE001
+            self._append_log('重连 QQ 失败：' + str(exc), 'error')
+
+    def _on_qq_stop(self) -> None:
+        try:
+            self.controller.stop_qq()
+            self._append_log('已断开 QQ 网关。', 'info')
+        except Exception as exc:  # noqa: BLE001
+            self._append_log('断开 QQ 失败：' + str(exc), 'error')
+
+    # ------------------------------------------------------------------
+    # 重连·踢出
+    # ------------------------------------------------------------------
+    def _build_reconnect_tab(self, tab) -> None:
+        self.var_rc_enabled = ctk.BooleanVar(value=True)
+        self.var_rc_delay = ctk.StringVar(value='5')
+        self.var_rc_max = ctk.StringVar(value='5')
+        self.var_rc_lobby = ctk.BooleanVar(value=True)
+        self.var_rc_lobby_delay = ctk.StringVar(value='2')
+        self.var_rc_proactive = ctk.BooleanVar(value=False)
+        self.var_rc_proactive_interval = ctk.StringVar(value='300')
+        self.var_rc_keep = ctk.BooleanVar(value=False)
+        self.var_rc_keep_minutes = ctk.StringVar(value='0')
+        self.var_rc_autolobby = ctk.BooleanVar(value=False)
+        self.var_rc_autolobby_interval = ctk.StringVar(value='300')
+        self.var_rc_online = ctk.BooleanVar(value=False)
+        self.var_rc_online_interval = ctk.StringVar(value='60')
+
+        base = self._section(tab, '掉线 / 被踢自动重连')
+        self._check(base, '连接意外断开时自动重连（手动断开不触发）', self.var_rc_enabled)
+        self._field(base, '重连延迟 (秒)', self.var_rc_delay, 100)
+        self._field(base, '最多尝试次数', self.var_rc_max, 100)
+        self._check(base, '被踢后重连成功时自动发 /lobby', self.var_rc_lobby)
+        self._field(base, '/lobby 延迟 (秒)', self.var_rc_lobby_delay, 100)
+        self._check(base, '一直重试直到服务器回来', self.var_rc_keep)
+        self._field(base, '最长重试 (分钟, 0=不限)', self.var_rc_keep_minutes, 120)
+
+        extra = self._section(tab, '主动保活')
+        self._check(extra, '在线时主动掉线重连（刷新会话）', self.var_rc_proactive)
+        self._field(extra, '主动重连间隔 (秒)', self.var_rc_proactive_interval, 120)
+        self._check(extra, '在线时定时发 /lobby', self.var_rc_autolobby)
+        self._field(extra, '/lobby 间隔 (秒)', self.var_rc_autolobby_interval, 120)
+        self._check(extra, '定时检查在线状态，掉线自动重连', self.var_rc_online)
+        self._field(extra, '在线检测间隔 (秒)', self.var_rc_online_interval, 120)
+
+        ctk.CTkButton(tab, text='保存重连设置', width=140,
+                      command=lambda: self._save_all('重连设置已保存。')).pack(
+            anchor='w', padx=20, pady=10)
 
     # ------------------------------------------------------------------
     def _load_config(self) -> None:
@@ -308,6 +909,7 @@ class CtkApp:
         self.var_auth.set(cfg.auth.type or 'offline')
         self.var_username.set(cfg.auth.username or 'AI_Bot')
         self.var_scan_host.set(cfg.server.host or '')
+        self._load_extended()
 
     def _gather_config(self) -> bool:
         cfg = self.controller.config
@@ -323,6 +925,9 @@ class CtkApp:
         if not cfg.save():
             messagebox.showerror(APP_TITLE, '设置保存失败（磁盘/权限问题？）')
             return False
+        if not self._gather_extended():
+            messagebox.showerror(APP_TITLE, '部分设置保存失败（AI / QQ / 重连 / 资料库），请检查 data.db 写入权限。')
+            return False
         reload_ai = getattr(self.controller, 'reload_ai_player', None)
         if callable(reload_ai):
             try:
@@ -330,6 +935,291 @@ class CtkApp:
             except Exception:  # noqa: BLE001
                 pass
         return True
+
+    # ------------------------------------------------------------------
+    # 外观主题
+    # ------------------------------------------------------------------
+    def _on_theme_changed(self, label: str) -> None:
+        mode = {'深色': 'dark', '浅色': 'light', '跟随系统': 'system'}.get(label, 'dark')
+        try:
+            ctk.set_appearance_mode(mode)
+        except Exception:  # noqa: BLE001
+            pass
+        self._append_log('界面主题已切换：' + label, 'info')
+
+    # ------------------------------------------------------------------
+    # 扩展配置：AI / 玩家 / 文档转书 / 资料库 / QQ / 重连 / 杂项
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _as_int(var, default: int) -> int:
+        try:
+            return int(str(var.get()).strip())
+        except (TypeError, ValueError, AttributeError):
+            return default
+
+    @staticmethod
+    def _as_float(var, default: float) -> float:
+        try:
+            return float(str(var.get()).strip())
+        except (TypeError, ValueError, AttributeError):
+            return default
+
+    def _refresh_templates(self) -> None:
+        try:
+            names = [str(t.get('name') or '') for t in PromptTemplateManager.get_all()]
+        except Exception:  # noqa: BLE001
+            names = []
+        names = [n for n in names if n]
+        try:
+            self.template_menu.configure(values=['（无）'] + names)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_apply_template(self) -> None:
+        name = (self.var_template.get() or '').strip()
+        if not name or name == '（无）':
+            return
+        for item in PromptTemplateManager.get_all():
+            if str(item.get('name')) == name:
+                self.prompt_box.delete('1.0', 'end')
+                self.prompt_box.insert('end', str(item.get('prompt') or ''))
+                self._append_log('已应用提示词模板：' + name, 'info')
+                return
+        messagebox.showinfo(APP_TITLE, '模板不存在：' + name)
+
+    def _on_save_template(self) -> None:
+        dialog = ctk.CTkInputDialog(text='给这个提示词起个名字：', title='保存提示词模板')
+        name = (dialog.get_input() or '').strip()
+        if not name:
+            return
+        prompt = self.prompt_box.get('1.0', 'end').strip()
+        if PromptTemplateManager.save(name, prompt):
+            self._refresh_templates()
+            self.var_template.set(name)
+            self._append_log('提示词模板已保存：' + name, 'info')
+        else:
+            messagebox.showerror(APP_TITLE, '模板保存失败（data.db 写入失败）。')
+
+    def _on_delete_template(self) -> None:
+        name = (self.var_template.get() or '').strip()
+        if not name or name == '（无）':
+            return
+        if not messagebox.askyesno(APP_TITLE, '删除提示词模板「' + name + '」？'):
+            return
+        if PromptTemplateManager.delete(name):
+            self._refresh_templates()
+            self.var_template.set('（无）')
+            self._append_log('已删除提示词模板：' + name, 'info')
+
+    def _load_extended(self) -> None:
+        cfg = self.controller.config
+        ai = self.controller.ai_config
+        # --- AI 配置 ---
+        self.var_ai_provider.set(ai.provider or 'openai')
+        self.var_ai_base.set(ai.baseUrl or '')
+        self.var_ai_key.set(ai.apiKey or '')
+        self.var_ai_model.set(ai.model or 'gpt-4o-mini')
+        self.var_ai_temp.set(str(ai.temperature))
+        self.var_ai_maxtok.set(str(ai.maxTokens))
+        self.var_ai_timeout.set(str(ai.timeoutSeconds))
+        self.var_ai_search.set(bool(ai.searchEnabled))
+        self.var_ai_image.set(bool(ai.imageGenerationEnabled))
+        # --- 玩家配置 ---
+        self.var_trigger.set(ai.triggerRegex or '')
+        self.var_cooldown.set(str(ai.triggerCooldownSeconds))
+        self.var_ctx_enabled.set(bool(ai.contextEnabled))
+        self.var_ctx_len.set(str(ai.contextLength))
+        self.var_ctx_server.set(bool(ai.serverMessagesInContext))
+        self.var_auto_reply.set(bool(ai.autoReplyEnabled))
+        self.var_schedule.set(bool(ai.scheduleEnabled))
+        self.var_schedule_interval.set(str(ai.scheduleIntervalSeconds))
+        self.var_ai_enabled_cfg.set(bool(ai.enabled))
+        self.prompt_box.delete('1.0', 'end')
+        self.prompt_box.insert('end', ai.systemPrompt or '')
+        self.var_blocked_regex.set(', '.join(ai.blockedRegexPatterns or []))
+        names = []
+        for item in ai.blockedPlayers or []:
+            if isinstance(item, dict) and item.get('name'):
+                names.append(str(item['name']))
+        self.blocked_box.delete('1.0', 'end')
+        self.blocked_box.insert('end', '\n'.join(names))
+        self._refresh_templates()
+        # --- 文档转书 ---
+        db = cfg.docBook
+        self.var_book_lines.set(str(db.pageLines or 14))
+        self.var_book_pages.set(str(db.pagesPerBook or 100))
+        self.var_book_sign.set(bool(db.signBook))
+        self.var_book_title.set(db.titleTemplate or '')
+        self.var_book_start.set(db.startText or '')
+        self.var_book_end.set(db.endText or '')
+        self.var_book_drop.set(bool(db.endDrop))
+        self.var_book_autoget.set(bool(db.autoGetBook))
+        if db.lastFile:
+            self.var_book_file.set(db.lastFile)
+        # --- 资料库 ---
+        roster = cfg.roster
+        self.var_roster_enabled.set(bool(roster.enabled))
+        self.var_roster_persona.set(bool(roster.personalityEnabled))
+        self.var_roster_alias.set(bool(roster.aliasEnabled))
+        self.var_roster_interval.set(str(roster.researchIntervalSeconds))
+        self._refresh_roster_list()
+        # --- QQ / 重连 ---
+        self._load_qq_widgets()
+        rc = cfg.reconnect
+        self.var_rc_enabled.set(bool(rc.enabled))
+        self.var_rc_delay.set(str(rc.delaySeconds))
+        self.var_rc_max.set(str(rc.maxAttempts))
+        self.var_rc_lobby.set(bool(rc.kickLobbyEnabled))
+        self.var_rc_lobby_delay.set(str(rc.kickLobbyDelaySeconds))
+        self.var_rc_proactive.set(bool(rc.proactiveEnabled))
+        self.var_rc_proactive_interval.set(str(rc.proactiveIntervalSeconds))
+        self.var_rc_keep.set(bool(rc.keepRetrying))
+        self.var_rc_keep_minutes.set(str(rc.keepRetryMaxMinutes))
+        self.var_rc_autolobby.set(bool(rc.autoLobbyEnabled))
+        self.var_rc_autolobby_interval.set(str(rc.autoLobbyIntervalSeconds))
+        self.var_rc_online.set(bool(rc.onlineCheckEnabled))
+        self.var_rc_online_interval.set(str(rc.onlineCheckIntervalSeconds))
+        # --- 杂项 / 外观 ---
+        misc = cfg.misc
+        source_labels = {'anime': '番剧追番榜', 'home': 'B 站首页推荐',
+                         'hot': 'B 站首页热门', 'rank': 'B 站排行榜',
+                         'fav': 'B 站收藏夹'}
+        self.var_misc_video_enabled.set(bool(misc.videoEnabled))
+        self.var_misc_video_source.set(source_labels.get(misc.videoSource, '番剧追番榜'))
+        self.var_misc_video_count.set(str(misc.videoCount))
+        self.var_misc_video_cooldown.set(str(misc.videoCooldownSeconds))
+        self.var_misc_luck_enabled.set(bool(misc.luckEnabled))
+        self.var_misc_checkin_enabled.set(bool(misc.checkinEnabled))
+        self.var_mass_gap.set(str(misc.massGapSeconds))
+        self.var_receipt_enabled.set(bool(misc.mcChatPrintEnabled))
+        self.var_receipt_printer.set(misc.mcChatPrinterName or '')
+        self.var_receipt_paper.set(str(misc.mcChatPaperWidth or 58))
+        self.var_receipt_maxper.set(str(misc.mcChatPrintMaxPerMinute or 20))
+        self.var_receipt_dryrun.set(bool(misc.mcChatPrintDryRun))
+        theme = str(getattr(cfg.appearance, 'textTheme', 'auto') or 'auto')
+        self.var_theme.set({'dark': '深色', 'light': '浅色'}.get(theme, '跟随系统'))
+
+    def _gather_extended(self) -> bool:
+        cfg = self.controller.config
+        ai = self.controller.ai_config
+        # --- AI ---
+        ai.provider = (self.var_ai_provider.get() or 'openai').strip() or 'openai'
+        ai.baseUrl = (self.var_ai_base.get() or '').strip()
+        ai.apiKey = (self.var_ai_key.get() or '').strip()
+        ai.model = (self.var_ai_model.get() or 'gpt-4o-mini').strip() or 'gpt-4o-mini'
+        ai.temperature = max(0.0, min(2.0, self._as_float(self.var_ai_temp, 0.7)))
+        ai.maxTokens = max(16, self._as_int(self.var_ai_maxtok, 1024))
+        ai.timeoutSeconds = max(5, self._as_int(self.var_ai_timeout, 30))
+        ai.searchEnabled = bool(self.var_ai_search.get())
+        ai.imageGenerationEnabled = bool(self.var_ai_image.get())
+        # --- 玩家 ---
+        ai.triggerRegex = (self.var_trigger.get() or '').strip()
+        ai.triggerCooldownSeconds = max(0, self._as_int(self.var_cooldown, 10))
+        ai.contextEnabled = bool(self.var_ctx_enabled.get())
+        ai.contextLength = max(0, self._as_int(self.var_ctx_len, 20))
+        ai.serverMessagesInContext = bool(self.var_ctx_server.get())
+        ai.autoReplyEnabled = bool(self.var_auto_reply.get())
+        ai.scheduleEnabled = bool(self.var_schedule.get())
+        ai.scheduleIntervalSeconds = max(5, self._as_int(self.var_schedule_interval, 30))
+        ai.systemPrompt = self.prompt_box.get('1.0', 'end').strip()
+        regex_text = (self.var_blocked_regex.get() or '').strip()
+        ai.blockedRegexPatterns = [p.strip() for p in re.split(r'[,，\n]', regex_text) if p.strip()]
+        blocked_names = [line.strip() for line in
+                         (self.blocked_box.get('1.0', 'end') or '').splitlines()
+                         if line.strip()]
+        ai.blockedPlayers = [{'name': name} for name in blocked_names]
+        enabled = bool(self.var_ai_enabled_cfg.get())
+        ai.enabled = enabled
+        # --- 文档转书 ---
+        db = cfg.docBook
+        db.pageLines = max(1, min(14, self._as_int(self.var_book_lines, 14)))
+        db.pagesPerBook = max(1, min(100, self._as_int(self.var_book_pages, 100)))
+        db.signBook = bool(self.var_book_sign.get())
+        db.titleTemplate = (self.var_book_title.get() or '').strip()
+        db.startText = (self.var_book_start.get() or '').strip()
+        db.endText = (self.var_book_end.get() or '').strip()
+        db.endDrop = bool(self.var_book_drop.get())
+        db.autoGetBook = bool(self.var_book_autoget.get())
+        if self.var_book_file.get():
+            db.lastFile = self.var_book_file.get().strip()
+        # --- 资料库 ---
+        roster = cfg.roster
+        roster.enabled = bool(self.var_roster_enabled.get())
+        roster.personalityEnabled = bool(self.var_roster_persona.get())
+        roster.aliasEnabled = bool(self.var_roster_alias.get())
+        roster.researchIntervalSeconds = max(10, self._as_int(self.var_roster_interval, 180))
+        # --- QQ ---
+        qq = cfg.qq
+        framework = (self.var_qq_framework.get() or 'snowluma').strip()
+        if framework not in ('snowluma', 'napcat'):
+            framework = 'snowluma'
+        qq.framework = framework
+        endpoint = qq.active()
+        endpoint.launcherPath = (self.var_qq_path.get() or '').strip()
+        mode = (self.var_qq_mode.get() or 'forward').strip()
+        endpoint.mode = mode if mode in ('forward', 'reverse') else 'forward'
+        endpoint.url = (self.var_qq_url.get() or '').strip() or 'ws://127.0.0.1:3001'
+        endpoint.accessToken = (self.var_qq_token.get() or '').strip()
+        qq.groups = [g.strip() for g in re.split(r'[,，\s]+',
+                                                self.var_qq_groups.get() or '') if g.strip()]
+        qq.qqToMcEnabled = bool(self.var_qq_to_mc.get())
+        qq.mcToQqEnabled = bool(self.var_mc_to_qq.get())
+        qq.mcTrigger = (self.var_mc_trigger.get() or '[sentQ]').strip() or '[sentQ]'
+        # --- 重连 ---
+        rc = cfg.reconnect
+        rc.enabled = bool(self.var_rc_enabled.get())
+        rc.delaySeconds = max(0, self._as_int(self.var_rc_delay, 5))
+        rc.maxAttempts = max(1, self._as_int(self.var_rc_max, 5))
+        rc.kickLobbyEnabled = bool(self.var_rc_lobby.get())
+        rc.kickLobbyDelaySeconds = max(0, self._as_int(self.var_rc_lobby_delay, 2))
+        rc.proactiveEnabled = bool(self.var_rc_proactive.get())
+        rc.proactiveIntervalSeconds = max(1, self._as_int(self.var_rc_proactive_interval, 300))
+        rc.keepRetrying = bool(self.var_rc_keep.get())
+        rc.keepRetryMaxMinutes = max(0, self._as_int(self.var_rc_keep_minutes, 0))
+        rc.autoLobbyEnabled = bool(self.var_rc_autolobby.get())
+        rc.autoLobbyIntervalSeconds = max(1, self._as_int(self.var_rc_autolobby_interval, 300))
+        rc.onlineCheckEnabled = bool(self.var_rc_online.get())
+        rc.onlineCheckIntervalSeconds = max(1, self._as_int(self.var_rc_online_interval, 60))
+        # --- 杂项 ---
+        misc = cfg.misc
+        misc.videoEnabled = bool(self.var_misc_video_enabled.get())
+        keys = {'番剧追番榜': 'anime', 'B 站首页推荐': 'home', 'B 站首页热门': 'hot',
+                'B 站排行榜': 'rank', 'B 站收藏夹': 'fav'}
+        misc.videoSource = keys.get(self.var_misc_video_source.get(), 'anime')
+        misc.videoCount = max(1, min(10, self._as_int(self.var_misc_video_count, 3)))
+        misc.videoCooldownSeconds = max(0, self._as_int(self.var_misc_video_cooldown, 30))
+        misc.luckEnabled = bool(self.var_misc_luck_enabled.get())
+        misc.checkinEnabled = bool(self.var_misc_checkin_enabled.get())
+        misc.massGapSeconds = max(0.0, self._as_float(self.var_mass_gap, 0.5))
+        misc.mcChatPrintEnabled = bool(self.var_receipt_enabled.get())
+        misc.mcChatPrinterName = (self.var_receipt_printer.get() or '').strip()
+        misc.mcChatPaperWidth = 80 if self._as_int(self.var_receipt_paper, 58) == 80 else 58
+        misc.mcChatPrintMaxPerMinute = max(0, self._as_int(self.var_receipt_maxper, 20))
+        misc.mcChatPrintDryRun = bool(self.var_receipt_dryrun.get())
+        # --- 外观（只存主题偏好；CTk 界面用深色系布局）---
+        theme = {'深色': 'dark', '浅色': 'light', '跟随系统': 'auto'}.get(
+            self.var_theme.get(), 'auto')
+        cfg.appearance.textTheme = theme
+
+        ai.validate()
+        cfg.validate()
+        ok = ai.save()
+        ok = cfg.save() and ok
+        try:
+            self.controller.sync_roster_runtime()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.controller.set_ai_enabled(enabled)
+        except Exception:  # noqa: BLE001
+            pass
+        reload_ai = getattr(self.controller, 'reload_ai_player', None)
+        if callable(reload_ai):
+            try:
+                reload_ai()
+            except Exception:  # noqa: BLE001
+                pass
+        return bool(ok)
 
     # ------------------------------------------------------------------
     def _on_save(self) -> None:

@@ -53,6 +53,7 @@
 
 ### v0.3.6-26.11.14
 
+- **两套界面功能已同步**：CustomTkinter 新界面补齐全部标签页（AI 配置 / 玩家配置 / 文档转书 / 玩家资料库 / QQ 转述 / 重连·踢出 / 杂项 / 端口扫描 / 日志 / 关于，主题可切深色/浅色/跟随系统），装完 exe 默认就是全功能，不再需要 `--legacy`；原 tkinter 界面也同步加了**端口扫描**与**支持与工单 / 开发者博客**入口，两边共用同一个 `data.db`。
 - **一键安装包（.exe）**：新增 `installer/`，用 Python 组装 payload + C#（csc）编译安装向导，产出**单个 exe**：选择安装路径、释放文件、建桌面/开始菜单快捷方式；自带 **Python 3.9 运行时 + 全部依赖 + Node 运行时 + 生产 node_modules**，目标机器**不用另装 Python / Node**。默认还把自带 NapCat 一起打进去（可选不装）。
 - **运行数据统一到 SQLite（`data.db`）**：好感度、写书进度、提示词模板、QQ 账号记录不再散落在 JSON 文件里；老文件第一次访问自动迁移并备份成 `<名字>.json.bak`。表：`affinity` / `kv` / `prompt_templates` / `qq_accounts` / `meta`；WAL + 单库锁 + 连接弱引用缓存。
 - 设置文件（`config.json` / `mcai_chat.json`）**仍是 JSON**：需要人手改、方便备份，且含 API Key，放 DB 反而不方便（要一起搬也可以，说一声）。

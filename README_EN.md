@@ -35,6 +35,7 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ### v0.3.6-26.11.14
 
+- **Both GUIs now expose the full feature set**: the CustomTkinter UI gained every tab (AI / player config, doc-to-book, player roster, QQ relay, reconnect, misc, port scan, logs, about; theme switch). The original tkinter UI also received port scanning plus support-ticket / dev-blog buttons, and both share the same `data.db`.
 - **One-click Windows installer** (`installer/`): a C# setup wizard wrapped in a single `.exe` — pick an install folder, extract, create desktop/Start-menu shortcuts. It bundles the Python 3.9 runtime with every pip dependency, the Node runtime and production `node_modules`, so the target machine needs **no Python/Node installed**. NapCat is bundled by default and optional at install time.
 - **Runtime data in SQLite** (`data.db`): affinity, book-write progress, prompt templates and QQ account records (tables `affinity`/`kv`/`prompt_templates`/`qq_accounts`/`meta`; WAL + single lock). Old JSON files are auto-migrated on first access and backed up as `<name>.json.bak`.
 - Settings (`config.json` / `mcai_chat.json`) intentionally stay JSON (hand-editable, contain API keys).
