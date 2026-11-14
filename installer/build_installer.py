@@ -36,7 +36,7 @@ CSC = Path(r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe')
 NODE_EXE = Path(r'C:\Program Files\nodejs\node.exe')
 NPM_CMD = Path(r'C:\Program Files\nodejs\npm.cmd')
 NAPCAT_DIR = ROOT / 'NapCat'
-MOD_VERSION = '0.3.6-26.11.14'
+MOD_VERSION = '0.3.6-26.11.15-Fxied'
 MAGIC = b'AAFMINS1'
 FOOTER = 48
 
@@ -56,11 +56,11 @@ ROOT_FILES = [
     'main.py', 'bot_engine.js', 'qq_engine.js', 'bookwriter.js', 'quiz.js', 'autoeat.js',
     '3rdparty_auth.js', 'msa_auth.js', 'utils.js', 'logger.js', 'verify.js', 'app.js',
     'package.json', 'package-lock.json', 'requirements.txt', 'README.md', 'README_EN.md',
-    'HELP.md', '更新日志.md', 'TODO.md', 'LICENSE', '.env.example',
+    'HELP.md', '更新日志.md', 'TODO.md', 'LICENSE', '.env.example', 'AGENTS.md',
 ]
 
 #: 要带上的目录（相对路径）
-ROOT_DIRS = ['aafm_py', 'docs', 'other_qq_pic_sent', 'promo']
+ROOT_DIRS = ['aafm_py', 'docs', 'other_qq_pic_sent', 'promo', 'tests']
 
 #: 绝不能进安装包的用户数据
 EXCLUDE_NAMES = {
@@ -122,6 +122,64 @@ def stage_app() -> None:
         (PAYLOAD / '服务端插件').mkdir(parents=True, exist_ok=True)
         for jar in bridge_dist.glob('*.jar'):
             shutil.copy2(jar, PAYLOAD / '服务端插件' / jar.name)
+
+    # ---- 完全打包：源码 / 构建脚本 / 测试 / 文档一个都不少 ----
+    log('打包源码与构建脚本（完全打包）…')
+
+    def copy_selected(src: Path, dst: Path, names) -> None:
+        for name in names:
+            item = src / name
+            if not item.exists():
+                continue
+            if item.is_dir():
+                copy_tree(item, dst / name)
+            else:
+                dst.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, dst / name)
+
+    # 点歌 Mod 源码 + 构建脚本（玩家可自行重打 jar）
+    mod_src = ROOT / 'mc-song-mod'
+    if mod_src.is_dir():
+        mod_dst = PAYLOAD / 'Mod' / '源码'
+        copy_selected(mod_src, mod_dst, [
+            'src', 'build.gradle', 'settings.gradle', 'gradle.properties',
+            'gradle', 'gradlew', 'gradlew.bat', 'build_all.ps1',
+            'build_modern_local.py', 'README.md',
+        ])
+        # 桌面版说明
+        mod_readme = mod_src / 'README.md'
+        if mod_readme.is_file():
+            shutil.copy2(mod_readme, PAYLOAD / 'Mod' / '点歌Mod说明.md')
+
+    # 服务端插件源码（ZMusicBridge）
+    bridge_src = ROOT / 'mc-music-bridge'
+    if bridge_src.is_dir():
+        bridge_dst = PAYLOAD / '服务端插件' / '源码'
+        copy_selected(bridge_src, bridge_dst, [
+            'src', 'build.gradle', 'settings.gradle', 'gradle.properties',
+            'gradle', 'gradlew', 'gradlew.bat', 'README.md',
+        ])
+
+    # 安装包源码（想自己改安装界面/重新打包的人可以直接用）
+    inst_src = ROOT / 'installer'
+    if inst_src.is_dir():
+        inst_dst = PAYLOAD / '安装包源码'
+        copy_selected(inst_src, inst_dst, [
+            'Setup.cs', 'Launcher.cs', 'build_installer.py', 'README.md',
+        ])
+
+    # 其它零碎：文档/宣传/脚本
+    extra_files = {
+        'installer/README.md': '文档/安装包说明.md',
+        'AGENTS.md': '文档/AGENTS.md',
+        'docs/点歌API.md': '文档/点歌API.md',
+    }
+    for src_name, dst_name in extra_files.items():
+        src = ROOT / src_name
+        if src.is_file():
+            target = PAYLOAD / dst_name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
 
 
 def stage_python() -> None:

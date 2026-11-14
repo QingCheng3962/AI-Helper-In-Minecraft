@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.6-26.11.14** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.6-26.11.15-Fxied** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,7 +31,16 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> Only v0.3.6-26.11.14 / v0.3.6 / v0.3.5 are kept here; older entries (v0.3.4 and earlier) live in [更新日志.md](更新日志.md).
+> Only v0.3.6-26.11.15-Fxied / v0.3.6-26.11.14 / v0.3.6 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
+
+### v0.3.6-26.11.15-Fxied
+
+- **Installer (.exe) UI rebuilt**: branded dark header, flat modern buttons, custom progress bar, install log, version/feature summary; can launch the app right after install.
+- **Complete packaging (every last piece)**: `tests/`, `mc-song-mod/` source + build scripts, `mc-music-bridge/` source, `installer/` source, `docs/`, `promo/`, `AGENTS.md` — everything ships inside the exe; a fresh install is fully self-contained.
+- **Mod direct API / solo mode**: configurable HTTPS gateway URL + token + bot timeout; song requests, listener list and joining use HTTPS first (fallback to chat); solo mode never touches the server.
+- **Who requested a song + click-to-listen**: the bot announces the requester and a clickable button → client command `/songmod join <player>` → `POST /api/song/join` with zero chat traffic; falls back to plain text when the bot has no OP.
+- **Song GUI fixes**: roomier layout, speed buttons 2.0→0.5, listener spam/ghost entries fixed, seek `Index out of bounds` fixed.
+- Regression: 169 Python tests, all 15 mod jars rebuilt, installer silent-install self-check passed.
 
 ### v0.3.6-26.11.14
 

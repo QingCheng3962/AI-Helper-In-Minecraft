@@ -19,7 +19,7 @@ python installer/build_installer.py --no-napcat    # 不带 NapCat
 python installer/build_installer.py --no-napcat --verify   # 构建 + 静默安装自检
 ```
 
-产物：`dist/installer/AIHelper-Setup-v0.3.6-26.11.14.exe`（体积大，已在 `.gitignore`，发布走 GitHub Releases）。
+产物：`dist/installer/AIHelper-Setup-v0.3.6-26.11.15-Fxied.exe`（体积大，已在 `.gitignore`，发布走 GitHub Releases）。
 
 ## 安装包做了什么
 
@@ -33,7 +33,7 @@ python installer/build_installer.py --no-napcat --verify   # 构建 + 静默安�
 静默安装（脚本/CI 用）：
 
 ```powershell
-AIHelper-Setup-v0.3.6-26.11.14.exe /S /D=D:\Games\AIHelper /NAPCAT=1
+AIHelper-Setup-v0.3.6-26.11.15-Fxied.exe /S /D=D:\Games\AIHelper /NAPCAT=1
 ```
 
 ## 说明

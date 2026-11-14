@@ -1,6 +1,6 @@
 """CustomTkinter 版主界面（新的默认入口）。
 
-**CustomTkinter** 主界面：功能已与原 tkinter 界面同步（v0.3.6-26.11.14 起），
+**CustomTkinter** 主界面：功能已与原 tkinter 界面同步（v0.3.6-26.11.15-Fxied 起），
 安装包里的 .exe 默认就是它，不再需要 --legacy 才能用全功能：
 
 - 设置：服务器地址/端口/版本、登录方式、机器人名字、连接/断开、AI 开关、发聊天
@@ -38,7 +38,7 @@ from .config import PromptTemplateManager
 from .controller import Controller
 
 APP_TITLE = 'aafm AI 玩家'
-VERSION = 'v0.3.6-26.11.14'
+VERSION = 'v0.3.6-26.11.15-Fxied'
 
 LEVEL_COLORS = {
     'error': '#ff6b6b',

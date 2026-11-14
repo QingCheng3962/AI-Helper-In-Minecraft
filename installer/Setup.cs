@@ -14,6 +14,7 @@ namespace AafmSetup
     static class Program
     {
         const string MAGIC = "AAFMINS1";
+        internal const string VERSION = "0.3.6-26.11.15-Fxied";
         const int FOOTER = 48;   // magic(8) + appOff(8) + appLen(8) + napOff(8) + napLen(8) + crc-ish(8)
 
         [STAThread]
@@ -258,49 +259,147 @@ namespace AafmSetup
         }
     }
 
+    /// <summary>深色渐变头部：品牌 + 版本 + 副标题。</summary>
+    internal class HeaderPanel : Panel
+    {
+        public HeaderPanel()
+        {
+            DoubleBuffered = true;
+            ResizeRedraw = true;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var rect = new Rectangle(0, 0, Width, Height);
+            using (var brush = new System.Drawing.Drawing2D.LinearGradientBrush(
+                rect, Color.FromArgb(23, 32, 52), Color.FromArgb(38, 84, 150), 25f))
+            {
+                g.FillRectangle(brush, rect);
+            }
+            // 右上角光晕
+            using (var glow = new SolidBrush(Color.FromArgb(26, 120, 200, 255)))
+            {
+                g.FillEllipse(glow, Width - 260, -90, 380, 260);
+            }
+            using (var accent = new SolidBrush(Color.FromArgb(88, 166, 255)))
+            {
+                g.FillRectangle(accent, 0, Height - 3, Width, 3);
+            }
+            using (var titleFont = new Font("Microsoft YaHei UI", 20f, FontStyle.Bold))
+            using (var subFont = new Font("Microsoft YaHei UI", 9f))
+            using (var verFont = new Font("Microsoft YaHei UI", 8.5f))
+            using (var white = new SolidBrush(Color.White))
+            using (var soft = new SolidBrush(Color.FromArgb(198, 214, 232)))
+            using (var verBrush = new SolidBrush(Color.FromArgb(140, 210, 255)))
+            {
+                g.DrawString("AI Helper In Minecraft", titleFont, white, 24f, 18f);
+                g.DrawString("无客户端 Minecraft AI 玩家 · 点歌 Mod · QQ 转述 · 全部功能内置",
+                    subFont, soft, 26f, 58f);
+                string ver = "v" + Program.VERSION;
+                var size = g.MeasureString(ver, verFont);
+                g.DrawString(ver, verFont, verBrush, Width - size.Width - 26f, 20f);
+                g.DrawString("一键完全安装", verFont, verBrush, Width - g.MeasureString("一键完全安装", verFont).Width - 26f, 40f);
+            }
+        }
+    }
+
+    /// <summary>自绘的细进度条（比系统 ProgressBar 好看且能显示在深色面板上）。</summary>
+    internal class SlimProgress : Control
+    {
+        int value;
+        public SlimProgress()
+        {
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+        }
+
+        public int Value
+        {
+            get { return value; }
+            set
+            {
+                this.value = Math.Max(0, Math.Min(100, value));
+                Invalidate();
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var track = new Rectangle(0, 0, Width - 1, Height - 1);
+            using (var bg = new SolidBrush(Color.FromArgb(238, 242, 247)))
+            using (var border = new Pen(Color.FromArgb(205, 216, 230)))
+            {
+                g.FillRectangle(bg, track);
+                g.DrawRectangle(border, track);
+            }
+            if (value > 0)
+            {
+                int w = (int)((Width - 2) * value / 100.0);
+                if (w < 6) w = 6;
+                var fill = new Rectangle(1, 1, w, Height - 2);
+                using (var brush = new System.Drawing.Drawing2D.LinearGradientBrush(
+                    new Rectangle(0, 0, Math.Max(2, Width - 2), Height),
+                    Color.FromArgb(46, 134, 255), Color.FromArgb(88, 166, 255), 0f))
+                {
+                    g.FillRectangle(brush, fill);
+                }
+            }
+        }
+    }
+
     internal class SetupForm : Form
     {
         readonly TextBox pathBox = new TextBox();
         readonly CheckBox napcatBox = new CheckBox();
-        readonly ProgressBar bar = new ProgressBar();
+        readonly SlimProgress bar = new SlimProgress();
+        readonly Label percentLabel = new Label();
         readonly Label status = new Label();
+        readonly TextBox logBox = new TextBox();
         readonly Button installButton = new Button();
+        readonly Button openButton = new Button();
         readonly Button exitButton = new Button();
         readonly Button browseButton = new Button();
+        readonly Label sizeHint = new Label();
         readonly StringBuilder logText = new StringBuilder();
+        string installedDir = "";
 
         public SetupForm()
         {
-            Text = "AI Helper In Minecraft 安装程序";
-            ClientSize = new Size(560, 340);
+            Text = "AI Helper In Minecraft 安装程序 v" + Program.VERSION;
+            ClientSize = new Size(660, 540);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
+            BackColor = Color.FromArgb(246, 248, 252);
             Font = new Font("Microsoft YaHei UI", 9f);
 
-            var title = new Label();
-            title.Text = "AI Helper In Minecraft";
-            title.Font = new Font("Microsoft YaHei UI", 16f, FontStyle.Bold);
-            title.SetBounds(24, 18, 500, 34);
-            Controls.Add(title);
+            var header = new HeaderPanel();
+            header.SetBounds(0, 0, 660, 96);
+            Controls.Add(header);
 
-            var subtitle = new Label();
-            subtitle.Text = "无客户端的 Minecraft AI 玩家 · 游戏内点歌 Mod · QQ 转述（内置 Python / Node 运行时，无需另装）";
-            subtitle.ForeColor = Color.DimGray;
-            subtitle.SetBounds(26, 54, 500, 20);
-            Controls.Add(subtitle);
+            var features = new Label();
+            features.Text = "✓ 内置 Python 3.9 + Node.js 运行时与全部依赖，目标机器无需另装环境\n"
+                + "✓ 15 个版本点歌 Mod（1.21.1 ~ 26.2）、服务端插件、源码/测试/文档全部在这一个 exe 里";
+            features.ForeColor = Color.FromArgb(72, 90, 112);
+            features.SetBounds(24, 112, 612, 40);
+            Controls.Add(features);
 
             var pathLabel = new Label();
             pathLabel.Text = "安装到：";
-            pathLabel.SetBounds(26, 92, 70, 22);
+            pathLabel.SetBounds(24, 166, 70, 22);
             Controls.Add(pathLabel);
 
-            pathBox.SetBounds(96, 90, 350, 24);
+            pathBox.SetBounds(96, 164, 446, 25);
             pathBox.Text = defaultInstallDir();
             Controls.Add(pathBox);
 
+            StyleButton(browseButton, Color.White, Color.FromArgb(46, 78, 112));
             browseButton.Text = "浏览…";
-            browseButton.SetBounds(452, 89, 80, 26);
+            browseButton.SetBounds(548, 163, 88, 27);
             browseButton.Click += delegate
             {
                 using (var dlg = new FolderBrowserDialog())
@@ -312,29 +411,84 @@ namespace AafmSetup
             };
             Controls.Add(browseButton);
 
-            napcatBox.Text = "同时安装 NapCat（QQ 转述功能，可选，体积较大）";
-            napcatBox.SetBounds(96, 124, 430, 22);
+            napcatBox.Text = "同时安装 NapCat（QQ 转述，可选）";
+            napcatBox.SetBounds(96, 198, 300, 22);
             napcatBox.Checked = true;
+            napcatBox.CheckedChanged += delegate { UpdateSizeHint(); };
             Controls.Add(napcatBox);
 
-            bar.SetBounds(26, 162, 506, 22);
-            bar.Minimum = 0; bar.Maximum = 100;
+            sizeHint.ForeColor = Color.FromArgb(122, 138, 158);
+            sizeHint.SetBounds(96, 222, 540, 20);
+            Controls.Add(sizeHint);
+            UpdateSizeHint();
+
+            var progLabel = new Label();
+            progLabel.Text = "安装进度";
+            progLabel.ForeColor = Color.FromArgb(72, 90, 112);
+            progLabel.SetBounds(24, 254, 90, 20);
+            Controls.Add(progLabel);
+
+            bar.SetBounds(24, 276, 552, 16);
             Controls.Add(bar);
 
-            status.Text = "点「开始安装」把程序和运行环境释放到上面的目录。";
-            status.ForeColor = Color.DimGray;
-            status.SetBounds(26, 190, 506, 40);
+            percentLabel.Text = "0%";
+            percentLabel.ForeColor = Color.FromArgb(46, 134, 255);
+            percentLabel.SetBounds(586, 272, 52, 22);
+            percentLabel.TextAlign = ContentAlignment.MiddleRight;
+            Controls.Add(percentLabel);
+
+            status.Text = "点「开始安装」把程序、运行环境与全部功能释放到上面的目录。";
+            status.ForeColor = Color.FromArgb(72, 90, 112);
+            status.SetBounds(24, 300, 612, 38);
             Controls.Add(status);
 
+            logBox.SetBounds(24, 340, 612, 110);
+            logBox.Multiline = true;
+            logBox.ReadOnly = true;
+            logBox.ScrollBars = ScrollBars.Vertical;
+            logBox.BackColor = Color.White;
+            logBox.ForeColor = Color.FromArgb(60, 76, 96);
+            logBox.BorderStyle = BorderStyle.FixedSingle;
+            Controls.Add(logBox);
+
+            StyleButton(installButton, Color.FromArgb(46, 134, 255), Color.White);
             installButton.Text = "开始安装";
-            installButton.SetBounds(300, 280, 110, 34);
+            installButton.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
+            installButton.SetBounds(24, 470, 160, 42);
             installButton.Click += delegate { StartInstall(); };
             Controls.Add(installButton);
 
+            StyleButton(openButton, Color.White, Color.FromArgb(46, 78, 112));
+            openButton.Text = "打开安装目录";
+            openButton.Enabled = false;
+            openButton.SetBounds(196, 470, 140, 42);
+            openButton.Click += delegate { OpenFolder(); };
+            Controls.Add(openButton);
+
+            StyleButton(exitButton, Color.White, Color.FromArgb(46, 78, 112));
             exitButton.Text = "退出";
-            exitButton.SetBounds(422, 280, 110, 34);
+            exitButton.SetBounds(544, 470, 92, 42);
             exitButton.Click += delegate { Close(); };
             Controls.Add(exitButton);
+
+            AcceptButton = installButton;
+        }
+
+        static void StyleButton(Button button, Color back, Color fore)
+        {
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.BackColor = back;
+            button.ForeColor = fore;
+            button.Cursor = Cursors.Hand;
+            button.UseVisualStyleBackColor = false;
+        }
+
+        void UpdateSizeHint()
+        {
+            sizeHint.Text = napcatBox.Checked
+                ? "预计释放约 330 MB（含 NapCat 约 110 MB）· 全部功能已内置，装完即用"
+                : "预计释放约 220 MB（不含 NapCat）· QQ 转述需要 NapCat，可之后单独安装";
         }
 
         static string defaultInstallDir()
@@ -346,7 +500,10 @@ namespace AafmSetup
         {
             if (InvokeRequired) { BeginInvoke(new Action<string>(SetStatus), text); return; }
             status.Text = text;
-            logText.AppendLine(text);
+            logText.AppendLine("[" + DateTime.Now.ToString("HH:mm:ss") + "] " + text);
+            logBox.Text = logText.ToString();
+            logBox.SelectionStart = logBox.TextLength;
+            logBox.ScrollToCaret();
         }
 
         void SetPercent(int value)
@@ -355,6 +512,13 @@ namespace AafmSetup
             if (value < 0) value = 0;
             if (value > 100) value = 100;
             bar.Value = value;
+            percentLabel.Text = value + "%";
+        }
+
+        void OpenFolder()
+        {
+            try { Process.Start("explorer.exe", installedDir); }
+            catch (Exception e) { MessageBox.Show("打开失败：" + e.Message, Text); }
         }
 
         void StartInstall()
@@ -372,10 +536,16 @@ namespace AafmSetup
                 return;
             }
             installButton.Enabled = false;
+            openButton.Enabled = false;
             exitButton.Enabled = false;
             browseButton.Enabled = false;
             pathBox.Enabled = false;
             napcatBox.Enabled = false;
+            installedDir = target;
+            bar.Value = 0;
+            percentLabel.Text = "0%";
+            logText.Clear();
+            logBox.Clear();
             bool withNapcat = napcatBox.Checked;
             var thread = new Thread(delegate()
             {
@@ -389,7 +559,9 @@ namespace AafmSetup
                     napcatBox.Enabled = true;
                     if (code == 0)
                     {
-                        status.Text = "安装完成！可双击桌面「AI Helper」启动。";
+                        openButton.Enabled = true;
+                        SetPercent(100);
+                        status.Text = "安装完成！双击桌面「AI Helper」或点「打开安装目录」开始使用。";
                         if (MessageBox.Show("安装完成，要现在启动 AI Helper 吗？", Text,
                                 MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                         {
@@ -397,7 +569,10 @@ namespace AafmSetup
                             try { Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = target }); }
                             catch (Exception e) { MessageBox.Show("启动失败：" + e.Message, Text); }
                         }
-                        Close();
+                    }
+                    else
+                    {
+                        status.Text = "安装失败（退出码 " + code + "），请查看上方日志。";
                     }
                 }));
             });
