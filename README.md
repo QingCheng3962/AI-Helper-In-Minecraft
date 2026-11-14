@@ -48,12 +48,8 @@
 
 ## 更新日志
 
-> 安装包与数据层改造见下方 v0.3.6-26.11.14 条目；v0.3.6 及更早历史在 [更新日志.md](更新日志.md)。
-
-> 新界面与点歌 Mod 的完整说明见下方 v0.3.6 条目；v0.3.5 及更早历史在 [更新日志.md](更新日志.md)。
-
-> 版本号统一为语义化写法（`MAJOR.MINOR.PATCH`）。**最新版本写在下面**；**v0.3.2 及更早的历史记录见 [更新日志.md](更新日志.md)**（含中文与英文历史）。
-> 当前版本 **`v0.3.6-26.11.14`**；Mod（`mc-song-mod/`）保持 `0.1.0`，jar 名不变。
+> 版本号统一为语义化写法（`MAJOR.MINOR.PATCH`）。**README 只保留 v0.3.6-26.11.14 / v0.3.6 / v0.3.5 三个版本**，
+> **更早的历史（v0.3.4 及更早）见 [更新日志.md](更新日志.md)**。
 
 ### v0.3.6-26.11.14
 
@@ -74,6 +70,7 @@
 - **端口扫描**（新界面「工具」页）：常见端口 / 自定义范围 / 全端口，TCP 并发扫描后对开放端口做 **Minecraft Server List Ping**，能直接认出**版本号 / MOTD / 在线人数**，一键把端口填回设置。
 - **支持与工单 / 开发者博客**：新界面「关于」页与 README 增加 <https://support.qingchengsep.top>（工单）与 <https://qingchengsep.top>（开发者博客）入口。
 - 回归：新增 `tests/run_song_core_java.py`（51 项纯逻辑断言：倍速解析/聊天协议/LRC/MP3 帧索引，不需要 MC、网络或音频设备）；Python 156 项、Node 58 项照旧通过。
+
 ### v0.3.5
 
 - **会话/并发安全**：中继按上游实例 + 真实高水位重同步（#39）；Bot/QQ 引擎事件带代次，旧进程迟到事件不再污染新会话（#52）；ZMusic 请求/广播代次，`stop` / 退出 / 禁用使在途搜索失效（#41）；OAuth 回调增加 `state`、超时、单次处理与错误关闭（#48）。
@@ -82,37 +79,6 @@
 - **表格安全**：XLSX 插列时平移公式引用（#42）；玩家名/描述/别名等文本以 `'` 前缀阻断公式注入（#54）。
 - **进程/凭据**：关闭时停止小票线程并丢弃未开始队列（#46）；AutoEat 增加代次，断开后旧定时器失效（#47）；浏览器启动改用 `execFile` 且只允许 `http/https`（#55）；中继 Token 只发给上游同源，跨来源跳转自动剥离（#56）。
 - 回归测试：Python 156 项、Node 58 项、Java 点歌 Mod 15+15+8 场景通过；ZMusic 插件构建通过。
-### v0.3.4
-
-- **QQ 群工具命令改用可配置前缀**：默认 `[AI工具]`，在 GUI「QQ 转述」可改（`qq.toolTrigger`）。支持 `[AI工具]在线玩家`、`[AI工具]视频`、`[AI工具]音乐 歌名`，与 AI 对话提示词分开，避免冲突；旧的 `[AI]在线玩家` 不再当工具命令。
-- **MC → QQ 支持 `@QQ号`**：公屏转述内容里写 `@123456789`，机器人会切成 OneBot `at` 段，在 QQ 群里真正艾特对方，而不是发一串纯文本。
-- **Minecraft 聊天小票机**：**杂项** 页新增开关，只把玩家聊天打印到 Windows 热敏小票机，效果相当于把 `chat.log` 打到纸上；ESC/POS + GBK，后台队列不阻塞 MC，支持 58/80mm、每分钟上限、跳过 `/` 命令和仅生成预览。配置项见 `misc.mcChatPrint*`。
-- 回归测试补充：QQ 工具命令、`@QQ号` at 段、小票机排版/预览/队列；Python 126 项、Node 8 项通过。
-
-### v0.3.3
-
-- **QQ 群内在线玩家**：群内发送 `[AI]在线玩家` 查询在线玩家（v0.3.4 起工具命令改用可配置的 `[AI工具]` 前缀）。
-- **修复表情代码被并进图片 URL**：`[图片]` 后紧跟 `[哭]` 等表情代码时，链接后强制补空格；同时对最终 MC 文本做 URL 边界处理，避免服务端 `URI.create(...gif[哭])` 解析失败导致整条 system_chat 丢包（感谢 [@FurryAoao](https://github.com/FurryAoao) 报告 [#38](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/38)）。
-- **QQ 文本不再能伪造颜色码/占位符**：群友正文里的 `&c` / `§c` 会被中和，`[图片]` / `[视频]` 字面量不会抢走真正的媒体链接（引擎改用内部私有区标记）。
-- **视频 Range 支持**：A/B/Web 的媒体服务支持 `Range`（206 / `Content-Range` / `Accept-Ranges`），浏览器 `<video>` 可拖动进度条，iOS/Safari 兼容性更好。
-- **媒体大小与磁盘保护**：单文件上限（默认 100 MB）、磁盘剩余低于阈值（默认 200 MB）暂停保存；超限/空间不足会跳过并提示。
-- **媒体自动清理**：`pic_http/` 每小时最多清理一次，按保留天数（默认 7 天）和总大小上限（默认 2 GB，0=不限）删除旧图片/视频与过期 `.part`；B 端中继同步清理旧消息和媒体。
-- **`.mp4` 视频支持**：QQ 视频（`.mp4` / `.m4v` / `.mov`）像图片一样下载到 `pic_http/`，MC 公屏发 `[视频] 链接`；网站 API 新增 `videos` 字段，图片墙用 `<video>` 播放；保留原始文件名时视频名也会保留。
-- **B 端中继同步视频**：`other_qq_pic_sent/relay.py` 下载/入库/对外提供视频，SQLite 旧库自动补 `videos` 列；`/文件名.mp4` 根路径可直接访问；Web 后台 CSP 增加 `media-src 'self'`。
-- 回归测试补充：链接后空格、表情代码 URL 分离、`.mp4` 落盘/访问、Range、媒体上限/清理、视频字段序列化、B 端 mp4 同步。
-
-### v0.3.3-beta
-
-- **网站接入（QQ → 网站）**：`qq.webApiEnabled` + `qq.webApiToken`；内置 HTTP 服务新增 `GET /api/qq/messages?since=&limit=`、`GET /api/qq/images?limit=`、`GET /api/qq/stream`（SSE）和 `GET /health`，支持 `X-Token` / `Authorization: Bearer` / `?token=`，CORS 可配置。
-- **纯图片消息不再丢弃**：`qq_engine.js` 先解析图片再判断文本，纯图片消息以 `[图片]` 进入网站 API 与 MC 转述。
-- **图片只落盘一次**：网站 API 与 MC 公屏链接共用 `_prepare_qq_images()` 的结果，MC 离线时图片仍会保存供网站读取。
-- GUI「QQ 转述 → 图片转本地链接」新增「监听地址」「启用网站 API」开关、「Token」输入框与「保留 QQ 图片原始文件名」开关；配置项见 `qq.imageHttpHost` / `qq.webApiEnabled` / `qq.webApiToken` / `qq.imagePreserveName`。
-- **两种接入方案**：① **此设备出站**（A 自己开、网站/CF 直连 8765）；② **内网其他设备出站**（B 上跑 `other_qq_pic_sent/relay.py` 中继，去 A 收消息/图片，再对外提供 API 和图片）。GUI 的「网站出站方式」可直接切换。
-- **Python 中继**（`other_qq_pic_sent/relay.py`，标准库无依赖）：轮询 A、下载图片到 `relay_data/pic_http/`、消息落 SQLite、本地递增 id、指纹去重、A 重启 id 归零自动处理；对外提供同一套 `/api/qq/*` 与图片 `/<文件名>`（兼容旧 `/pic_http/<文件名>`）。
-- **Python Web 后台**（`other_qq_pic_sent/webapp.py`）：默认**免登录**图片墙 + 只读 API，全部标准库；可选 `require_login` + PBKDF2/会话/CSRF/限速；CSP、XSS/SSRF/路径穿越防护；Token 只在服务端使用。图片地址为 `https://域名/文件名`（不带 `/pic_http/`）。
-- A/B 部署模板：`docs/deploy/nginx-pic.conf`、`docs/deploy/cloudflared-pic.yml`、`other_qq_pic_sent/qq-relay.service`。
-- 完整接入文档（两个方案、Cloudflare、Python Web 后台、自己的网站用 Flask/FastAPI 接入、轮询/SSE）：[`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md)。
-- **QSP 完整使用说明**（QQ 图片发到 MC / 网站，逐步操作 + 排错）：[how to use QSP(QQ sent picture to minecraft).md](<how to use QSP(QQ sent picture to minecraft).md>)。
 
 ## 目录结构
 
