@@ -76,7 +76,7 @@ A：Minecraft 机器人（Python GUI + Node 引擎）
 |---|---|---|
 | 适用 | 机器人、网站同一台机器 | 机器人内网、网站在另一台服务器 |
 | 额外程序 | 无 | `other_qq_pic_sent/webapp.py` |
-|  Website 入口 | A:8765 | B:8080（Cloudflare 指向它） |
+|  Website 入口 | A:8767 | B:8080（Cloudflare 指向它） |
 | 网页 | 无（只有 API） | 有（Python 图片墙，默认免登录） |
 | 图片存储 | A 的 `pic_http/` | A + B 的 `relay_data/pic_http/` |
 | 消息历史 | A 内存最近 500 条 | B 的 SQLite，重启不丢 |
@@ -95,7 +95,7 @@ A：Minecraft 机器人（Python GUI + Node 引擎）
 | 启用网站 API | ✅（需要网站时） | 开启 `/api/qq/*` |
 | 网站出站方式 | **此设备出站** | A 直接给网站/CF |
 | 监听地址 | `127.0.0.1` | 网站同机；如需局域网访问改 `0.0.0.0` |
-| 端口 | `8765` | 默认 |
+| 端口 | `8767` | 默认 |
 | 公网地址 | `https://pic.qingchengsep.top` | **必须填**，否则 MC 里看到 `127.0.0.1` |
 | Token | 长随机串 | 网站 API 用 |
 | 保留 QQ 图片/视频原始文件名 | 可选 | 勾选后用 QQ 原名 |
@@ -113,7 +113,7 @@ A：Minecraft 机器人（Python GUI + Node 引擎）
 A 本机：
 
 ```bash
-curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:8767/health
 ```
 
 返回 `{"ok":true,...}`。
@@ -121,7 +121,7 @@ curl http://127.0.0.1:8765/health
 浏览器打开：
 
 ```
-http://127.0.0.1:8765/pic_http/
+http://127.0.0.1:8767/pic_http/
 ```
 
 会 404（正常，不提供目录列表）；只要某张图片能访问即可。
@@ -132,7 +132,7 @@ http://127.0.0.1:8765/pic_http/
 import httpx
 
 r = httpx.get(
-    "http://127.0.0.1:8765/api/qq/messages",
+    "http://127.0.0.1:8767/api/qq/messages",
     params={"since": 0, "limit": 50},
     headers={"X-Token": "GUI 里填的 Token"},
     timeout=10,
@@ -143,8 +143,8 @@ print(r.json())
 ### 4.4 公网访问
 
 - 机器人监听 `0.0.0.0` 或只给反代 `127.0.0.1`
-- Nginx 反代 8765
-- Cloudflare Tunnel `service: http://127.0.0.1:8765`（或指向 Nginx）
+- Nginx 反代 8767
+- Cloudflare Tunnel `service: http://127.0.0.1:8767`（或指向 Nginx）
 
 ---
 
@@ -153,7 +153,7 @@ print(r.json())
 ### 5.1 结构
 
 ```
-A（内网 bot）192.168.1.23:8765
+A（内网 bot）192.168.1.23:8767
         │ 内网 HTTP + Token
         ▼
 B（服务器）other_qq_pic_sent/
@@ -169,7 +169,7 @@ Cloudflare Tunnel → https://pic.qingchengsep.top
 
 | 端口 | 位置 | 用途 |
 |---|---|---|
-| `8765` | A | 机器人内置 API |
+| `8767` | A | 机器人内置 API |
 | `18765` | B | 中继内部 API（只监听 127.0.0.1） |
 | `8080` | B | 网页（Cloudflare 指向它） |
 
@@ -183,7 +183,7 @@ GUI → QQ 转述 → 图片/视频转本地链接：
 | 启用网站 API | ✅ |
 | **网站出站方式** | **内网其他设备出站** |
 | 监听地址 | `0.0.0.0`（选中 relay 会自动切） |
-| 端口 | `8765` |
+| 端口 | `8767` |
 | 公网地址 | `https://pic.qingchengsep.top` |
 | Token | 长随机串（B 要用） |
 
@@ -193,14 +193,14 @@ A 防火墙只放行 B：
 
 ```powershell
 New-NetFirewallRule -DisplayName "QSP from B" `
-  -Direction Inbound -Protocol TCP -LocalPort 8765 `
+  -Direction Inbound -Protocol TCP -LocalPort 8767 `
   -RemoteAddress 192.168.1.50 -Action Allow
 ```
 
 B 上验证：
 
 ```bash
-curl http://192.168.1.23:8765/health
+curl http://192.168.1.23:8767/health
 ```
 
 ### 5.3 B 配置 relay.json
@@ -214,7 +214,7 @@ cp relay.example.json relay.json
 
 ```json
 {
-  "upstream_base": "http://192.168.1.23:8765",
+  "upstream_base": "http://192.168.1.23:8767",
   "upstream_token": "A 的 Token",
   "listen_host": "127.0.0.1",
   "listen_port": 18765,
@@ -320,7 +320,7 @@ Windows 任务计划：
 frp / Tailscale / WireGuard：
 
 ```
-A:8765  →  B:127.0.0.1:18764
+A:8767  →  B:127.0.0.1:18764
 ```
 
 `relay.json`：
@@ -550,7 +550,7 @@ GET /api/messages?since=0&limit=50
 
 | 项目 | 做法 |
 |---|---|
-| A 的 8765 | 只放行 B 的 IP |
+| A 的 8767 | 只放行 B 的 IP |
 | B 的 8080/18765 | 只监听 127.0.0.1，公网只走 Cloudflare |
 | Token | 至少 32 位随机 |
 | 默认访问 | `require_login=false`：知道域名就能看；不想公开就开登录 |
@@ -627,7 +627,7 @@ GUI → QQ 转述 → 图片/视频转本地链接
   启用网站 API      ✅（要网站）
   网站出站方式      此设备 / 内网其他设备
   监听地址          127.0.0.1 / 0.0.0.0
-  端口              8765
+  端口              8767
   公网地址          https://pic.qingchengsep.top
   Token             长随机串
 保存 → 断开 QQ → 重新连接
@@ -650,7 +650,7 @@ python3 webapp.py --config relay.json
 ### 验证
 
 ```bash
-curl http://A:8765/health
+curl http://A:8767/health
 curl http://127.0.0.1:18765/health
 curl http://127.0.0.1:8080/health
 ```
