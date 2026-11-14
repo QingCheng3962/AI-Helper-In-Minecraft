@@ -2,10 +2,11 @@
 
 # AI Helper In Minecraft
 
-**当前版本：v0.3.6**（语义化版本；历史版本编号已统一改写，对照表见[更新日志](#更新日志)）
+**当前版本：v0.3.7**（语义化版本；历史版本编号已统一改写，对照表见[更新日志](#更新日志)）
 
 一个"无客户端"的 Minecraft AI 玩家：不需要打开游戏本体，用 GUI 控制 mineflayer 引擎进入服务器，由大模型驱动它在游戏内与人聊天互动。
 
+- **一键安装包**：下载 `AIHelper-Setup-v*.exe`，选目录安装即可（内置 Python / Node 运行时与全部依赖，无需另装环境）；详见 [[installer/README.md](installer/README.md)]。
 - 入口为 Python GUI：**新版 CustomTkinter 界面**（设置 / 点歌 / 工具 / 日志 / 关于，`python main.py`）+ 原 tkinter 全功能界面（`python main.py --legacy`，多标签页：设置 / AI 配置 / 玩家配置 / 文档转书 / 点歌 / 杂项 / 玩家资料库 / QQ 转述 / 重连·踢出 / 界面美化 / 日志），后台由 Node.js（mineflayer）负责连接与协议。
 - 支持 **离线 / LittleSkin / 正版(微软账号)** 三种登录方式。
 - 登录失效时自动重新登录（LittleSkin 自动打开浏览器 OAuth，完成后自动重连）。
@@ -47,10 +48,20 @@
 
 ## 更新日志
 
+> 安装包与数据层改造见下方 v0.3.7 条目；v0.3.6 及更早历史在 [更新日志.md](更新日志.md)。
+
 > 新界面与点歌 Mod 的完整说明见下方 v0.3.6 条目；v0.3.5 及更早历史在 [更新日志.md](更新日志.md)。
 
 > 版本号统一为语义化写法（`MAJOR.MINOR.PATCH`）。**最新版本写在下面**；**v0.3.2 及更早的历史记录见 [更新日志.md](更新日志.md)**（含中文与英文历史）。
-> 当前版本 **`v0.3.6`**；Mod（`mc-song-mod/`）保持 `0.1.0`，jar 名不变。
+> 当前版本 **`v0.3.7`**；Mod（`mc-song-mod/`）保持 `0.1.0`，jar 名不变。
+
+### v0.3.7
+
+- **一键安装包（.exe）**：新增 `installer/`，用 Python 组装 payload + C#（csc）编译安装向导，产出**单个 exe**：选择安装路径、释放文件、建桌面/开始菜单快捷方式；自带 **Python 3.9 运行时 + 全部依赖 + Node 运行时 + 生产 node_modules**，目标机器**不用另装 Python / Node**。默认还把自带 NapCat 一起打进去（可选不装）。
+- **运行数据统一到 SQLite（`data.db`）**：好感度、写书进度、提示词模板、QQ 账号记录不再散落在 JSON 文件里；老文件第一次访问自动迁移并备份成 `<名字>.json.bak`。表：`affinity` / `kv` / `prompt_templates` / `qq_accounts` / `meta`；WAL + 单库锁 + 连接弱引用缓存。
+- 设置文件（`config.json` / `mcai_chat.json`）**仍是 JSON**：需要人手改、方便备份，且含 API Key，放 DB 反而不方便（要一起搬也可以，说一声）。
+- 安装包内置点歌 Mod 全部 15 个版本的 jar（`Mod/` 目录，按游戏版本挑）、ZMusic 服务端插件、文档与宣传页。
+- 回归：Python 156 项通过（好感度/配置持久化测试改成 SQLite 契约）；安装包静默安装 + 内置 Python 依赖导入自检通过。
 
 ### v0.3.6
 
@@ -63,7 +74,6 @@
 - **端口扫描**（新界面「工具」页）：常见端口 / 自定义范围 / 全端口，TCP 并发扫描后对开放端口做 **Minecraft Server List Ping**，能直接认出**版本号 / MOTD / 在线人数**，一键把端口填回设置。
 - **支持与工单 / 开发者博客**：新界面「关于」页与 README 增加 <https://support.qingchengsep.top>（工单）与 <https://qingchengsep.top>（开发者博客）入口。
 - 回归：新增 `tests/run_song_core_java.py`（51 项纯逻辑断言：倍速解析/聊天协议/LRC/MP3 帧索引，不需要 MC、网络或音频设备）；Python 156 项、Node 58 项照旧通过。
-
 ### v0.3.5
 
 - **会话/并发安全**：中继按上游实例 + 真实高水位重同步（#39）；Bot/QQ 引擎事件带代次，旧进程迟到事件不再污染新会话（#52）；ZMusic 请求/广播代次，`stop` / 退出 / 禁用使在途搜索失效（#41）；OAuth 回调增加 `state`、超时、单次处理与错误关闭（#48）。
@@ -162,7 +172,7 @@
 
 ## 环境要求
 
-- Python 3.9+（需 tkinter，Windows 官方 Python 自带；新界面还需 `customtkinter`）
+- 从源码跑：Python 3.9+（需 tkinter，Windows 官方 Python 自带；新界面还需 `customtkinter`）、Node.js 22+；用安装包则自带这些
 - Node.js **22+**（`mineflayer` / `minecraft-protocol` 要求 `node >= 22`，推荐 22 LTS 或更新）
 - 可联网（访问 LLM API、皮肤站 / 微软账号服务、目标服务器）
 
