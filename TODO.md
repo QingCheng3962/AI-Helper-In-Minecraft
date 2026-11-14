@@ -226,3 +226,6 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
   - 名单/加入不再往聊天刷「正在获取…」，状态只显示在界面
 - [x] 拖动进度条 Index out of bounds：解码坏帧自动跳帧重同步（最多 5 次），重采样加越界保护
 - [x] 测试：新增 tests/test_song_listen.py（活跃度判断 4 项），Python 160 项通过
+- [x] 点歌 HTTP API（不用聊天）：`/api/song/request|state|listeners`，复用图片服务端口+Token；
+  配置 `song.apiEnabled`；测试 tests/test_song_api.py（5 项）；文档 docs/点歌API.md（含命令/Mod 直连方案对比）
+- [ ] Mod 侧直连 API（`SongApiClient`：点歌/一起听名单走 HTTP，失败回退聊天）——服务端已就绪，待实现并重打 jar

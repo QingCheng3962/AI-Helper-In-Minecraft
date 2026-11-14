@@ -809,6 +809,9 @@ class SongConfig:
     # 公屏不再出现点歌消息、其他玩家的 Mod 不会跟着响；False = 老行为（公屏广播）。
     # 注：Mod 侧默认 onlyMySong=true，所以即使这里关了，也只有点歌的人会真的播放。
     privatePlay: bool = True
+    # 点歌 HTTP API（/api/song/*）：不用聊天也能点歌。
+    # 复用图片服务的端口/Token（qq.imageHttpPort / qq.webApiToken）；开启后服务会自动启动。
+    apiEnabled: bool = False
 
     def validate(self) -> None:
         self.trigger = str(self.trigger or '').strip() or '[点歌]'
@@ -822,6 +825,7 @@ class SongConfig:
         self.playText = str(self.playText or '').strip() or '{player} 点了一首 {music}'
         self.instantPlay = bool(self.instantPlay)
         self.privatePlay = bool(self.privatePlay)
+        self.apiEnabled = bool(self.apiEnabled)
 
     def default_reply(self) -> str:
         """默认回复文案（用 {url} 占位下载链接）。"""

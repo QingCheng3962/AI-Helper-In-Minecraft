@@ -217,6 +217,10 @@ class Controller:
         self._qq_nicknames: Dict[str, str] = {}
         self._load_qq_accounts()
         self._photo = PhotoServer()
+        # 点歌 HTTP API（/api/song/*）：Mod/网页/脚本可以不走聊天直接点歌
+        self._photo.song_request = self._api_song_request
+        self._photo.song_state = self._api_song_state
+        self._photo.song_listeners = self._api_song_listeners
         self._public_base_cache = ''
 
         self.log_saver = LogSaver(BASE_DIR)
@@ -3059,6 +3063,56 @@ class Controller:
     # ------------------------------------------------------------------
     # 点歌播放队列（机器人真队列）
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 点歌 HTTP API（/api/song/*）：不经过聊天，Mod/网页/脚本直接调用
+    # ------------------------------------------------------------------
+    def _api_song_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/song/request  {player, query, speed?}"""
+        payload = data if isinstance(data, dict) else {}
+        query = str(payload.get('query') or '').strip()
+        player = str(payload.get('player') or 'api').strip()[:16] or 'api'
+        if not query:
+            return {'ok': False, 'error': 'query 不能为空'}
+        speed = str(payload.get('speed') or '').strip()
+        if speed:
+            query = query + ' ' + speed
+        if not self.connected:
+            return {'ok': False, 'error': '机器人未连接服务器'}
+        try:
+            self.enqueue_song(query, player, 'api')
+        except Exception as exc:  # noqa: BLE001
+            return {'ok': False, 'error': str(exc)}
+        self._post_ui({'kind': 'log', 'level': 'song',
+                       'message': f'[点歌] API 点歌：{player} → {query}'})
+        return {'ok': True, 'query': query, 'player': player}
+
+    def _api_song_state(self) -> Dict[str, Any]:
+        current = self._song_current or {}
+        queue = []
+        for item in list(self._song_queue or [])[:20]:
+            queue.append({'title': item.get('title'), 'artist': item.get('artist'),
+                          'who': item.get('who')})
+        return {
+            'connected': bool(self.connected),
+            'current': ({'title': current.get('title'), 'artist': current.get('artist'),
+                         'who': current.get('who')} if current else None),
+            'queue': queue,
+            'now': time.time(),
+        }
+
+    def _api_song_listeners(self):
+        self._prune_listeners()
+        now = time.time()
+        out = []
+        for item in self._song_listeners.values():
+            if not self._listener_active(item, now):
+                continue
+            out.append({'player': item.get('who'),
+                        'title': item.get('title'),
+                        'artist': item.get('artist'),
+                        'elapsed': int(self._listener_elapsed(item, now))})
+        return out
+
     def song_state(self) -> Dict[str, Any]:
         """给 GUI 用：当前播放 + 队列快照。"""
         with self._song_lock:

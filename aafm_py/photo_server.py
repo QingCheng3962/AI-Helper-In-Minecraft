@@ -255,7 +255,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
     def _cors(self) -> None:
         origin = self.photo.cors_origin or '*'
         self.send_header('Access-Control-Allow-Origin', origin)
-        self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST')
         self.send_header('Access-Control-Allow-Headers',
                          'Authorization, X-Token, X-Api-Token, Content-Type')
         self.send_header('Access-Control-Max-Age', '86400')
@@ -366,6 +366,35 @@ class _PhotoHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # HTTP methods
     # ------------------------------------------------------------------
+    def do_POST(self):  # noqa: N802
+        path = self._path()
+        if path != '/api/song/request':
+            self.send_error(404, 'Not Found')
+            return
+        if not self._authorized():
+            self._json(401, {'ok': False, 'error': 'unauthorized'})
+            return
+        try:
+            length = int(self.headers.get('Content-Length') or '0')
+            if length <= 0 or length > 64 * 1024:
+                raise ValueError('bad length')
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode('utf-8', 'replace'))
+            if not isinstance(data, dict):
+                raise ValueError('bad json')
+        except (ValueError, OSError) as exc:
+            self._json(400, {'ok': False, 'error': str(exc)})
+            return
+        handler = self.photo.song_request
+        if handler is None:
+            self._json(503, {'ok': False, 'error': 'song api not ready'})
+            return
+        try:
+            result = handler(data)
+            self._json(200 if result.get('ok') else 400, result)
+        except Exception as exc:  # noqa: BLE001
+            self._json(500, {'ok': False, 'error': str(exc)})
+
     def do_OPTIONS(self):  # noqa: N802
         self.send_response(204)
         self.send_header('Content-Length', '0')
@@ -386,6 +415,23 @@ class _PhotoHandler(BaseHTTPRequestHandler):
 
         if path == '/health':
             self._json(200, {'ok': True, **self.photo.stats()})
+            return
+
+        # ---- 点歌 API（不经过聊天：Mod/网页/脚本可直接点歌、查状态、看一起听名单）----
+        if path == '/api/song/state':
+            if not self._authorized():
+                self._json(401, {'ok': False, 'error': 'unauthorized'})
+                return
+            data = self.photo.song_state() if self.photo.song_state else {}
+            self._json(200, {'ok': True, **(data or {})})
+            return
+
+        if path == '/api/song/listeners':
+            if not self._authorized():
+                self._json(401, {'ok': False, 'error': 'unauthorized'})
+                return
+            data = self.photo.song_listeners() if self.photo.song_listeners else []
+            self._json(200, {'ok': True, 'listeners': data})
             return
 
         if path not in ('/api/qq/messages', '/api/qq/images', '/api/qq/stream'):
@@ -462,6 +508,10 @@ class PhotoServer:
         self._seq = 0
         # 每次启动都换一个实例 ID：中继靠它识别「上游重启、ID 从 1 重新计数」。
         self.instance = uuid.uuid4().hex
+        #: 点歌 API 回调（由 Controller 注入；None = 未启用）
+        self.song_request = None
+        self.song_state = None
+        self.song_listeners = None
 
     @property
     def running(self) -> bool:
