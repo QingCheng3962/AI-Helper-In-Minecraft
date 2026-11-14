@@ -1256,7 +1256,7 @@ class CtkApp:
             return
         speed = (self.var_speed.get() or '1.0').strip()
         line = query + ('' if speed in ('', '1.0') else ' ' + speed)
-        if not self.controller.connected():
+        if not self.controller.connected:
             messagebox.showwarning(APP_TITLE, '还没连上服务器，先点「连接」。')
             return
         self.controller.send_chat(self._song_trigger() + line)
