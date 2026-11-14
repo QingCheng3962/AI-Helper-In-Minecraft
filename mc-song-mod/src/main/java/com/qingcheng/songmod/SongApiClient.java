@@ -113,7 +113,7 @@ public final class SongApiClient {
                 + (speedKey.isEmpty() ? "" : ",\"speed\":" + jsonQuote(speedKey))
                 + "}";
         String response = post(base, token, "/api/song/request", body, timeoutSeconds);
-        if (!response.contains("\"ok\":true")) {
+        if (!jsonTrue(response, "ok")) {
             String error = jsonString(response, "error");
             throw new ApiException(error == null ? "服务器点歌失败" : error);
         }
@@ -165,7 +165,7 @@ public final class SongApiClient {
         String body = "{\"player\":" + jsonQuote(player)
                 + ",\"target\":" + jsonQuote(target) + "}";
         String response = post(base, token, "/api/song/join", body, timeoutSeconds);
-        if (!response.contains("\"ok\":true")) {
+        if (!jsonTrue(response, "ok")) {
             String error = jsonString(response, "error");
             throw new ApiException(error == null ? "一起听失败" : error);
         }
@@ -342,6 +342,27 @@ public final class SongApiClient {
             }
         }
         return out.toString();
+    }
+
+    /** 宽松读取布尔字段：忽略冒号/逗号周围的空格与换行（服务端可能输出 {"ok": true}）。 */
+    static boolean jsonTrue(String json, String field) {
+        if (json == null) {
+            return false;
+        }
+        String key = "\"" + field + "\"";
+        int at = json.indexOf(key);
+        if (at < 0) {
+            return false;
+        }
+        int colon = json.indexOf(':', at + key.length());
+        if (colon < 0) {
+            return false;
+        }
+        int i = colon + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+        return json.regionMatches(true, i, "true", 0, 4);
     }
 
     static long jsonLong(String json, String field) {

@@ -261,7 +261,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Max-Age', '86400')
 
     def _json(self, code: int, obj: Any) -> None:
-        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        body = json.dumps(obj, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
