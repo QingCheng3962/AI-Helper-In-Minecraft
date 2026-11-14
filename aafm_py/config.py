@@ -1123,23 +1123,37 @@ class AppConfig:
 # Prompt template manager
 # ---------------------------------------------------------------------------
 class PromptTemplateManager:
-    """Manage named prompt templates, persisted as JSON."""
+    """Manage named prompt templates, persisted in SQLite (data.db).
+
+    v0.3.7 起模板不再写 mcai_prompt_templates.json；老文件会在第一次读取时自动迁移到
+    data.db 的 prompt_templates 表，并改名成 .json.bak。
+    """
+
+    @staticmethod
+    def _table():
+        # 延迟导入：config 在很早就会被 import，避免模块级循环依赖
+        from . import storage
+        return storage.NamedTable(PROMPT_TEMPLATES_FILE, 'prompt_templates')
 
     @staticmethod
     def _load() -> List[Dict[str, str]]:
-        if not os.path.exists(PROMPT_TEMPLATES_FILE):
-            return []
         try:
-            with open(PROMPT_TEMPLATES_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data if isinstance(data, list) else []
-        except Exception as e:
+            items = PromptTemplateManager._table().load_all()
+            return [{'name': name, 'prompt': prompt} for name, prompt in items.items()]
+        except Exception as e:  # noqa: BLE001
             print(f'[mcai] Failed to load prompt templates: {e}')
             return []
 
     @staticmethod
     def _save_list(templates: List[Dict[str, str]]) -> bool:
-        return save_json(PROMPT_TEMPLATES_FILE, templates)
+        try:
+            table = PromptTemplateManager._table()
+            table.replace_all({str(t.get('name')): str(t.get('prompt') or '')
+                               for t in templates if t.get('name')})
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f'[mcai] Failed to save prompt templates: {e}')
+            return False
 
     @classmethod
     def get_all(cls) -> List[Dict[str, str]]:

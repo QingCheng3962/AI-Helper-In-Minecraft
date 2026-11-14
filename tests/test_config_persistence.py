@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from aafm_py import storage
 from aafm_py.config import AiPlayerConfig, AppConfig, PromptTemplateManager
 from aafm_py.controller import Controller
 from aafm_py.gui import AiPlayerGUI
@@ -277,44 +278,48 @@ class RelatedPersistenceTests(unittest.TestCase):
         self.assertIs(controller._persist_config(cfg), True)
         controller._post_ui.assert_not_called()
 
-    def test_templates_save_update_and_delete_preserve_original_on_failure(self):
+    def test_templates_save_update_and_delete(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'templates.json'
             with patch('aafm_py.config.PROMPT_TEMPLATES_FILE', str(path)):
                 self.assertIs(PromptTemplateManager.save('test', 'original'), True)
-                original = path.read_bytes()
-                with patch('aafm_py.config.os.replace', side_effect=OSError), contextlib.redirect_stdout(io.StringIO()):
+                with patch('aafm_py.storage.NamedTable.replace_all', side_effect=OSError):
                     self.assertIs(PromptTemplateManager.save('test', 'edited'), False)
                     self.assertIs(PromptTemplateManager.delete('test'), False)
-                self.assertEqual(path.read_bytes(), original)
                 self.assertIs(PromptTemplateManager.save('test', 'edited'), True)
-                self.assertEqual(PromptTemplateManager.get_all(), [{'name': 'test', 'prompt': 'edited'}])
+                self.assertEqual(PromptTemplateManager.get_all(),
+                                 [{'name': 'test', 'prompt': 'edited'}])
                 self.assertIs(PromptTemplateManager.delete('test'), True)
                 self.assertEqual(PromptTemplateManager.get_all(), [])
+            storage.Database.close_all()
 
-    def test_progress_and_qq_records_keep_original_and_report_failed_writes(self):
+    def test_progress_and_qq_records_report_failed_writes(self):
         controller = Controller.__new__(Controller)
         controller._post_ui = Mock()
         controller._qq_nicknames = {'10001': 'fake account'}
         with tempfile.TemporaryDirectory() as folder:
+            self.addCleanup(storage.Database.close_all)
             for kind in ('progress', 'accounts'):
                 path = Path(folder) / (kind + '.json')
-                original = b'{"existing": "retained"}'
-                path.write_bytes(original)
+                if path.exists():
+                    path.unlink()
+                # 老 JSON 存在时会被迁移进 data.db（并改名成 .bak）
+                path.write_bytes(b'{"existing": "retained"}')
                 key = 'BOOK_PROGRESS_FILE' if kind == 'progress' else 'QQ_ACCOUNTS_FILE'
-                save = (lambda: controller.save_book_progress(startPage=12)) if kind == 'progress' else controller._save_qq_accounts
+                save = ((lambda: controller.save_book_progress(startPage=12))
+                        if kind == 'progress' else controller._save_qq_accounts)
                 with patch('aafm_py.controller.' + key, str(path)):
-                    with patch('aafm_py.config.os.replace', side_effect=OSError), contextlib.redirect_stdout(io.StringIO()):
+                    with patch('aafm_py.storage.KeyValueStore.set', side_effect=OSError), \
+                            patch('aafm_py.storage.NamedTable.replace_all', side_effect=OSError):
                         self.assertIs(save(), False)
-                    self.assertEqual(path.read_bytes(), original)
                     self.assertEqual(controller._post_ui.call_args.args[0]['level'], 'error')
                     self.assertIs(save(), True)
-                    data = json.loads(path.read_text(encoding='utf-8'))
                     if kind == 'progress':
-                        self.assertEqual(data, {'existing': 'retained', 'startPage': 12})
+                        self.assertEqual(controller.load_book_progress(),
+                                         {'existing': 'retained', 'startPage': 12})
                     else:
-                        self.assertEqual(data, controller._qq_nicknames)
-
-
-if __name__ == '__main__':
-    unittest.main()
+                        self.assertEqual(dict(controller._qq_accounts_table().load_all()),
+                                         controller._qq_nicknames)
+                    # 老 JSON 已经迁走备份，不会继续被当数据源
+                    self.assertFalse(path.exists())
+            storage.Database.close_all()

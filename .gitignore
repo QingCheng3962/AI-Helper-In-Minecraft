@@ -47,3 +47,10 @@ mc-song-mod/build_*.log
 /mc-song-mod/build/javac-err*.log
 # 代理/自动化临时缓存（Issues 快照、脚本）
 /.agent_cache/
+
+# 统一数据（SQLite）与老 JSON 迁移备份
+data.db
+data.db-wal
+data.db-shm
+*.json.bak*
+*.json.migrated

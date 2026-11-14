@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from aafm_py import storage
 from aafm_py.affinity import AffinityStore
 
 
@@ -17,8 +18,8 @@ class AffinitySaveTest(unittest.TestCase):
             store = AffinityStore(path)
             self.assertEqual(store.add('Alice', 1, daily_bonus=0), 1)
 
-            with patch('aafm_py.affinity.os.replace',
-                       side_effect=PermissionError('fixture')):
+            with patch.object(store._table, 'set',
+                              side_effect=PermissionError('fixture')):
                 self.assertIsNone(store.add('Alice', 2, daily_bonus=0))
                 self.assertEqual(store.score('Alice'), 1)
                 self.assertTrue(store.last_error)
@@ -30,6 +31,7 @@ class AffinitySaveTest(unittest.TestCase):
             self.assertEqual(store.add('Alice', 2, daily_bonus=0), 3)
             self.assertFalse(store.last_error)
             self.assertEqual(AffinityStore(path).score('Alice'), 3)
+            storage.Database.close_all()
 
 
 if __name__ == '__main__':

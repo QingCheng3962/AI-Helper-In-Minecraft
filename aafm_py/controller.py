@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from .ai_player import AiPlayer, _BRACKET_LITERAL, _compile_trigger, _split_top_level_commas
 from .affinity import AffinityStore
 from .dailydb import DailyDB
-from . import docbook
+from . import docbook, storage
 from .bot_engine import BotEngine, BASE_DIR, SendResult
 from .config import (AiPlayerConfig, AppConfig, BOOK_PROGRESS_FILE,
                      DEFAULT_BASE_URLS, load_auth_profile, save_json)
@@ -774,27 +774,33 @@ class Controller:
             'autoGetBook': bool(db.autoGetBook),
         }
 
+    def _book_progress_store(self) -> 'storage.KeyValueStore':
+        # 兼容：BOOK_PROGRESS_FILE 仍然作为迁移来源；数据本体在 data.db 的 kv 表
+        return storage.KeyValueStore(BOOK_PROGRESS_FILE, 'book_progress')
+
     def load_book_progress(self) -> Dict[str, Any]:
         try:
-            with open(BOOK_PROGRESS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
+            return self._book_progress_store().get() or {}
         except Exception:  # noqa: BLE001
             return {}
 
     def save_book_progress(self, **fields) -> bool:
         data = self.load_book_progress()
         data.update(fields)
-        ok = save_json(BOOK_PROGRESS_FILE, data)
+        try:
+            self._book_progress_store().set(data)
+            ok = True
+        except Exception:  # noqa: BLE001
+            ok = False
         if not ok:
             self._post_ui({'kind': 'log', 'level': 'error',
-                           'message': '[书与笔] 进度保存失败，保留原进度文件；重启续写前请核对游戏内书籍。'})
+                           'message': '[书与笔] 进度保存失败（data.db 写入失败）；续写前请核对游戏内书籍。'})
         return ok
 
     def clear_book_progress(self) -> None:
         try:
-            os.remove(BOOK_PROGRESS_FILE)
-        except OSError:
+            self._book_progress_store().delete()
+        except Exception:  # noqa: BLE001
             pass
 
     def _book_source_signature(self, path: str,
@@ -1232,20 +1238,26 @@ class Controller:
     def stop_qq(self) -> None:
         self._stop_qq()
 
+    def _qq_accounts_table(self) -> 'storage.NamedTable':
+        return storage.NamedTable(QQ_ACCOUNTS_FILE, 'qq_accounts', legacy_format='dict')
+
     def _load_qq_accounts(self) -> None:
         try:
-            with open(QQ_ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                self._qq_nicknames = {str(k): str(v) for k, v in data.items()}
+            self._qq_nicknames = {str(k): str(v)
+                                  for k, v in self._qq_accounts_table().load_all().items()}
         except Exception:  # noqa: BLE001
             self._qq_nicknames = {}
 
     def _save_qq_accounts(self) -> bool:
-        ok = save_json(QQ_ACCOUNTS_FILE, self._qq_nicknames)
+        try:
+            self._qq_accounts_table().replace_all(
+                {str(k): str(v) for k, v in self._qq_nicknames.items()})
+            ok = True
+        except Exception:  # noqa: BLE001
+            ok = False
         if not ok:
             self._post_ui({'kind': 'log', 'level': 'error',
-                           'message': 'QQ 账号记录保存失败，原文件已保留。'})
+                           'message': 'QQ 账号记录保存失败（data.db 写入失败）。'})
         return ok
 
     def list_qq_accounts(self) -> List[str]:
