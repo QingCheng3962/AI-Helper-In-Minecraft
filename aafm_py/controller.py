@@ -219,6 +219,7 @@ class Controller:
         self._photo = PhotoServer()
         # 点歌 HTTP API（/api/song/*）：Mod/网页/脚本可以不走聊天直接点歌
         self._photo.song_request = self._api_song_request
+        self._photo.song_join = self._api_song_join
         self._photo.song_state = self._api_song_state
         self._photo.song_listeners = self._api_song_listeners
         self._public_base_cache = ''
@@ -2824,13 +2825,11 @@ class Controller:
         except Exception:  # noqa: BLE001
             self.send_chat(line)
 
-    def _join_listen(self, who: str, target: str) -> bool:
-        """把 target 正在听的歌按估算进度私聊给 who（客户端从那里开始播）。"""
+    def _listen_join_info(self, target: str):
+        """target 正在播的歌的「一起听」信息（不在播返回 None）。"""
         item = self._listener_for(target)
         if not item or not item.get('url'):
-            self._send_song_line(who, '[点歌]一起听：' + str(target)
-                                 + ' 现在没在放歌（或已经放完了），等 TA 点一首再来吧')
-            return False
+            return None
         now = time.time()
         elapsed = max(0.0, now - float(item.get('posted_at') or now))
         duration = int(item.get('duration') or 0)
@@ -2839,10 +2838,30 @@ class Controller:
         title = str(item.get('title') or '')
         artist = str(item.get('artist') or '')
         label = (title + ' - ' + artist) if artist else title
-        enc = self._encode_url(item['url'])
-        sid = str(item.get('id') or '')
+        return {
+            'target': str(target),
+            'title': title,
+            'artist': artist,
+            'label': label,
+            'url': str(item.get('url')),
+            'song_id': str(item.get('id') or ''),
+            'at': int(elapsed),
+            'duration': duration or 180000,
+        }
+
+    def _join_listen(self, who: str, target: str) -> bool:
+        """把 target 正在听的歌按估算进度私聊给 who（客户端从那里开始播）。"""
+        info = self._listen_join_info(target)
+        if not info:
+            self._send_song_line(who, '[点歌]一起听：' + str(target)
+                                 + ' 现在没在放歌（或已经放完了），等 TA 点一首再来吧')
+            return False
+        label = info['label']
+        title = info['title']
+        enc = self._encode_url(info['url'])
+        sid = info['song_id']
         idtag = (' id:' + sid) if sid else ''
-        at = int(elapsed)
+        at = info['at']
         trigger = (self.config.song.trigger or '[点歌]').strip() or '[点歌]'
         name = self._msg_name(who)
         target_cmd = ('/msg ' + name + ' ') if name else ''
@@ -2854,15 +2873,37 @@ class Controller:
             line = trigger + title + ' | ' + enc
         sent_private = self._send_song_line(who, line, is_play_data=True)
         # 记成「who 也在听这首歌」：别人再对 who 点一起听时，进度按同一首歌估算
-        self._remember_listener({'who': who, 'title': item.get('title'),
-                                 'artist': item.get('artist'), 'url': item.get('url'),
-                                 'id': item.get('id')},
-                                now - elapsed, duration or 180000)
+        self._remember_listener({'who': who, 'title': title,
+                                 'artist': info['artist'], 'url': info['url'],
+                                 'id': sid},
+                                time.time() - at, info['duration'])
         self._post_ui({'kind': 'log', 'level': 'song',
                        'message': '[点歌] ' + str(who) + ' 一起听 ' + str(target) + ' 的《'
                                   + title + '》（从 ' + str(at) + 's 处加入'
                                   + ('，公屏' if not sent_private else '') + '）'})
         return True
+
+    def _api_song_join(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/song/join {player, target} → 返回可播放信息（不走聊天）。"""
+        payload = data if isinstance(data, dict) else {}
+        target = str(payload.get('target') or '').strip()
+        who = str(payload.get('player') or 'api').strip()[:16] or 'api'
+        if not target:
+            return {'ok': False, 'error': 'target 不能为空'}
+        if not self.connected:
+            return {'ok': False, 'error': '机器人未连接服务器'}
+        info = self._listen_join_info(target)
+        if not info:
+            return {'ok': False, 'error': str(target) + ' 现在没在放歌（或已放完）'}
+        # 记成 who 也在听（进度从此处估算）
+        self._remember_listener({'who': who, 'title': info['title'],
+                                 'artist': info['artist'], 'url': info['url'],
+                                 'id': info['song_id']},
+                                time.time() - info['at'], info['duration'])
+        self._post_ui({'kind': 'log', 'level': 'song',
+                       'message': '[点歌] API 一起听：' + who + ' → ' + target
+                                  + '（' + str(info['at']) + 's）'})
+        return {'ok': True, **info}
 
     @staticmethod
     def _parse_listen_command(after: str):
@@ -3564,12 +3605,59 @@ class Controller:
         # 「一起听」记账：这个玩家现在在听这首歌（别人点「一起听 他」时按这里的 posted_at 估算进度）
         try:
             self._remember_listener(entry, now, duration)
+            self._announce_song_entry(entry)
         except Exception:  # noqa: BLE001
             pass
         self._post_ui({'kind': 'log', 'level': 'song',
                        'message': f"[点歌] {'已私聊 ' + who if private else '已发公屏'}："
                                   f"{entry['title']} - {entry['artist']}"
                                   f"（{int(duration / 1000)}s，队列剩 {len(self._song_queue)} 首）"})
+
+    def _announce_song_entry(self, entry) -> None:
+        """公屏播报「谁点歌了」：可点击消息里的按钮调用客户端命令 /songmod join <玩家>，
+        由 Mod 走 HTTPS 网关 API 加入一起听（不需要在聊天里发任何指令）。
+
+        - 可点击消息用 /tellraw（需要机器人有 OP/命令权限）；
+        - 没权限时可在配置里把 announceStyle 改成 plain（只提示，装 Mod 的人到点歌台加入）。
+        """
+        song = self.config.song
+        if not bool(getattr(song, 'announceRequest', True)):
+            return
+        who = str((entry or {}).get('who') or '').strip()
+        title = str((entry or {}).get('title') or '').strip()
+        if not who or not title:
+            return
+        text = (str(getattr(song, 'announceText', '') or '{player} 点了一首《{title}》')
+                .replace('{player}', who)
+                .replace('{title}', title)
+                .replace('{artist}', str((entry or {}).get('artist') or '')))
+        style = str(getattr(song, 'announceStyle', 'click') or 'click').strip().lower()
+        if style == 'click':
+            command = '/songmod join ' + who.replace(' ', '_')
+            component = {
+                'text': '',
+                'extra': [
+                    {'text': '[点歌] ', 'color': 'aqua'},
+                    {'text': text, 'color': 'gray'},
+                    {'text': ' [点击一起听]', 'color': 'green', 'bold': True,
+                     'clickEvent': {'action': 'run_command', 'value': command},
+                     'hoverEvent': {'action': 'show_text',
+                                    'contents': {'text': '用点歌 Mod 加入一起听'
+                                                         '（HTTPS API，不发聊天）'}}},
+                ],
+            }
+            line = '/tellraw @a ' + json.dumps(component, ensure_ascii=False)
+            try:
+                if self._engine.say(line):
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+        # 纯文本兜底：不带需要点击的提示，装 Mod 的人到点歌台「一起听」页点
+        plain = '[点歌] ' + text + '（装 Mod 的可在点歌台「一起听」页加入）'
+        try:
+            self.send_chat(plain)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _maybe_relay_mc_to_qq(self, player: str, content: str) -> bool:
         """If an in-game message starts with the trigger, forward it to a QQ

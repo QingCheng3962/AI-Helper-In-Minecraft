@@ -85,6 +85,27 @@ public final class SongConfig {
 
     /** 是否启用「一起听」（界面上的页签与聊天指令）。 */
     public boolean listenTogetherEnabled = true;
+
+    // ------------------------------------------------------------------
+    // v0.3.6-26.11.14：点歌通道 / 连接模式
+    // ------------------------------------------------------------------
+
+    /**
+     * 使用模式：
+     * <ul>
+     *   <li>{@code server} —— 连服务器/机器人：点歌、一起听都走机器人（默认）；</li>
+     *   <li>{@code solo} —— 自用：完全不与服务器关联，本机搜歌播放，不发任何聊天、不请求机器人。</li>
+     * </ul>
+     */
+    public String mode = "server";
+    /** 机器人 HTTP API 基地址（可填 https://xxx），例如 https://song.example.com。 */
+    public String apiBase = "";
+    /** 机器人 HTTP API 的 Token（= 机器人 config.json 里的 qq.webApiToken）。 */
+    public String apiToken = "";
+    /** 是否优先走 HTTP API（点歌/一起听名单/加入）；失败自动回退聊天。 */
+    public boolean apiEnabled = false;
+    /** 机器人超时（秒）：等聊天直链、HTTP API 请求都用它。 */
+    public int botTimeoutSeconds = 30;
     /** 一起听名单自动刷新间隔（秒，0=只在打开界面时刷新）。 */
     public int listenRefreshSeconds = 15;
 
@@ -160,6 +181,13 @@ public final class SongConfig {
         lyricTitleStay = clamp(lyricTitleStay, 100, 10000);
         lyricTitleFadeOut = clamp(lyricTitleFadeOut, 0, 2000);
         listenRefreshSeconds = clamp(listenRefreshSeconds, 0, 600);
+        mode = "solo".equalsIgnoreCase(String.valueOf(mode)) ? "solo" : "server";
+        apiBase = apiBase == null ? "" : apiBase.trim();
+        while (apiBase.endsWith("/")) {
+            apiBase = apiBase.substring(0, apiBase.length() - 1);
+        }
+        apiToken = apiToken == null ? "" : apiToken.trim();
+        botTimeoutSeconds = clamp(botTimeoutSeconds, 5, 180);
     }
 
     private static int clamp(int value, int lo, int hi) {

@@ -28,8 +28,11 @@ public class SongModClient implements ClientModInitializer {
     /** 按键注册名（对应 lang 里的 key.songmod.open）。 */
     private static final String KEY_NAME = "key.songmod.open";
 
-    /** 等机器人响应的超时；等不到才本地兜底。 */
-    private static final long WAIT_MS = 30000L;
+    /** 等机器人响应的超时（可配置：SongConfig.botTimeoutSeconds）；等不到才本地兜底。 */
+    private static long botTimeoutMs() {
+        int seconds = config == null ? 30 : config.botTimeoutSeconds;
+        return Math.max(5, Math.min(180, seconds)) * 1000L;
+    }
 
     /** 等机器人回直链 / 一段时间内接受「给我的」播放数据。 */
     private static final long PENDING_WINDOW_MS = 60000L;
@@ -85,6 +88,27 @@ public class SongModClient implements ClientModInitializer {
         // 很多服务器把玩家聊天改格式后当「系统消息」重播：只走 GAME、不走 CHAT
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
                 onChat(message == null ? "" : message.getString(), false, ""));
+
+        // 客户端命令：被机器人可点击消息调用（`/songmod join <玩家>`），
+        // 走 HTTPS 网关 API 加入一起听，不往服务器发任何聊天。
+        try {
+            net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register(
+                    (dispatcher, registryAccess) -> dispatcher.register(
+                            net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal("songmod")
+                                    .then(net.fabricmc.fabric.api.client.command.v2.ClientCommands
+                                            .literal("join")
+                                            .then(net.fabricmc.fabric.api.client.command.v2.ClientCommands
+                                                    .argument("player", com.mojang.brigadier.arguments.StringArgumentType.word())
+                                                    .executes(ctx -> {
+                                                        String target = com.mojang.brigadier.arguments.StringArgumentType
+                                                                .getString(ctx, "player");
+                                                        float speed = config == null ? 1f : config.speed;
+                                                        requestJoin(target, speed);
+                                                        return 1;
+                                                    })))));
+        } catch (Throwable t) {
+            System.out.println("[songmod] 注册客户端命令失败（忽略）：" + t);
+        }
 
         openKey = createKeyMapping();
         if (openKey != null) {
@@ -196,6 +220,73 @@ public class SongModClient implements ClientModInitializer {
         }
     }
 
+    /** 当前玩家名（只在主线程调用）。 */
+    private static String myName() {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            return (mc != null && mc.player != null)
+                    ? mc.player.getName().getString() : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    public static boolean modeSolo() {
+        return config != null && "solo".equals(config.mode);
+    }
+
+    public static boolean apiEnabled() {
+        return config != null && config.apiEnabled
+                && config.apiBase != null && !config.apiBase.trim().isEmpty();
+    }
+
+    public static String modeLabel() {
+        return modeSolo() ? "自用" : "服务器";
+    }
+
+    public static void toggleMode() {
+        if (config == null) {
+            return;
+        }
+        config.mode = modeSolo() ? "server" : "solo";
+        config.save();
+        if (modeSolo()) {
+            SongState.listenersStatus = "自用模式：不连接服务器";
+        }
+        feedback("§b[点歌] §a模式：" + (modeSolo()
+                ? "自用（本机搜歌，不发聊天、不连服务器）"
+                : "服务器（点歌/一起听走机器人）"));
+    }
+
+    public static void setApiEnabled(boolean enabled) {
+        if (config != null) {
+            config.apiEnabled = enabled;
+            config.save();
+            feedback("§b[点歌] §aHTTP API：" + (enabled ? "开" : "关（只用聊天）"));
+        }
+    }
+
+    public static void setApiBase(String base) {
+        if (config != null) {
+            config.apiBase = base == null ? "" : base.trim();
+            config.save();
+        }
+    }
+
+    public static void setApiToken(String token) {
+        if (config != null) {
+            config.apiToken = token == null ? "" : token.trim();
+            config.save();
+        }
+    }
+
+    public static void setBotTimeout(int seconds) {
+        if (config != null) {
+            config.botTimeoutSeconds = Math.max(5, Math.min(180, seconds));
+            config.save();
+        }
+    }
+
     public static String neteaseCookie() {
         return (config == null || config.neteaseCookie == null) ? "" : config.neteaseCookie;
     }
@@ -218,17 +309,85 @@ public class SongModClient implements ClientModInitializer {
         }
     }
 
-    /** 界面点歌：带上当前倍速（1.0 不带）。 */
+    /** 界面点歌：自用=本地播放；开 API=走 HTTP；否则聊天（带当前倍速）。 */
     public static void requestSong(String query) {
         String q = query == null ? "" : query.trim();
         if (q.isEmpty()) {
             return;
         }
         float speed = config == null ? 1f : config.speed;
+        String note = Math.abs(speed - 1f) < 0.001f ? "" : "  [" + SongSpeed.label(speed) + "]";
+        if (modeSolo()) {
+            stoppedByUser = false;
+            int seq = PENDING.incrementAndGet();
+            SongState.addMyRequest(q + note);
+            feedback("§b[点歌] §7自用模式：本机搜索播放 §f" + q);
+            searchAndPlay(q, seq);
+            return;
+        }
+        if (apiEnabled()) {
+            final String base = config.apiBase;
+            final String token = config.apiToken;
+            final int timeout = config.botTimeoutSeconds;
+            final String playerName = myName();
+            final String apiQuery = q;
+            final float apiSpeed = speed;
+            final int seq = PENDING.incrementAndGet();
+            SongState.addMyRequest(q + note);
+            feedback("§b[点歌] §7正在通过 API 点歌：§f" + q);
+            POOL.submit(() -> {
+                try {
+                    boolean ok = SongApiClient.requestSong(base, token, playerName,
+                            apiQuery, apiSpeed, timeout);
+                    if (ok) {
+                        synchronized (SongModClient.class) {
+                            markMyRequest(apiQuery);
+                        }
+                        feedbackIfCurrent(seq, "§b[点歌] §a已通过 API 点歌：§f" + apiQuery + note);
+                        return;
+                    }
+                } catch (Throwable t) {
+                    System.out.println("[songmod] API 点歌失败，回退聊天：" + t);
+                }
+                if (!isCurrent(seq)) {
+                    return;
+                }
+                synchronized (SongModClient.class) {
+                    if (!isCurrent(seq)) {
+                        return;
+                    }
+                    feedbackIfCurrent(seq, "§b[点歌] §7API 不可用，改用聊天点歌…");
+                    chatRequestSong(apiQuery, apiSpeed, note);
+                }
+            });
+            return;
+        }
+        chatRequestSong(q, speed, note);
+    }
+
+    private static void chatRequestSong(String query, float speed, String note) {
         String suffix = Math.abs(speed - 1f) < 0.001f ? "" : " " + SongSpeed.key(speed);
-        sendChat(trigger() + q + suffix);
-        SongState.addMyRequest(q + (suffix.isEmpty() ? "" : "  [" + SongSpeed.label(speed) + "]"));
-        markMyRequest(q);
+        sendChat(trigger() + query + suffix);
+        SongState.addMyRequest(query + note);
+        markMyRequest(query);
+        stoppedByUser = false;
+        feedback("§b[点歌] §7正在点歌：§f" + query
+                + (suffix.isEmpty() ? "" : "  §b" + SongSpeed.label(speed)));
+        final String searchQuery = query;
+        final int seq = PENDING.incrementAndGet();
+        SCHED.schedule(() -> {
+            synchronized (SongModClient.class) {
+                if (!isCurrent(seq)) {
+                    return;
+                }
+                if (config.localFallback) {
+                    feedbackIfCurrent(seq, "§b[点歌] §7机器人没响应，本地兜底搜索…");
+                    searchAndPlay(searchQuery, seq);
+                } else {
+                    feedbackIfCurrent(seq, "§b[点歌] §c机器人不在线（或没登录网易云），点歌失败。");
+                }
+            }
+        }, botTimeoutMs(), TimeUnit.MILLISECONDS);
     }
 
     /** 界面停止。 */
@@ -236,25 +395,59 @@ public class SongModClient implements ClientModInitializer {
         sendChat(trigger() + stopWord());
     }
 
-    /** 界面刷新一起听名单。 */
+    /** 界面刷新一起听名单：自用=不连；API=HTTP；否则聊天（5 秒冷却）。 */
     public static void requestListenList() {
         if (config == null || !config.listenTogetherEnabled) {
             return;
         }
+        if (modeSolo()) {
+            SongState.listenersStatus = "自用模式：不连接服务器";
+            return;
+        }
         long now = System.currentTimeMillis();
         if (now - lastListenRefreshAt < 5000L) {
-            return;                     // 冷却中：静默忽略
+            return;
         }
+        lastListenRefreshAt = now;
+        SongState.listenersStatus = "正在刷新…";
+        if (apiEnabled()) {
+            final String base = config.apiBase;
+            final String token = config.apiToken;
+            final int timeout = config.botTimeoutSeconds;
+            POOL.submit(() -> {
+                try {
+                    List<SongProtocol.ListenEntry> list =
+                            SongApiClient.fetchListeners(base, token, timeout);
+                    synchronized (SongModClient.class) {
+                        SongState.setListeners(list);
+                        SongState.listenersStatus = list.isEmpty() ? "现在没有人在听歌" : "";
+                    }
+                } catch (Throwable t) {
+                    System.out.println("[songmod] API 名单失败，回退聊天：" + t);
+                    synchronized (SongModClient.class) {
+                        chatListenList();
+                    }
+                }
+            });
+            return;
+        }
+        chatListenList();
+    }
+
+    private static void chatListenList() {
         expectingListReply = true;
         SongState.listenersStatus = "正在刷新…";
-        lastListenRefreshAt = System.currentTimeMillis();
         sendChat(trigger() + SongProtocol.LISTEN_WORD);
     }
 
-    /** 界面加入一起听。 */
+    /** 界面加入一起听：自用=不连；API=HTTP 拿播放信息；否则聊天（5 秒冷却）。 */
     public static void requestJoin(String player, float speed) {
         String name = player == null ? "" : player.trim();
         if (name.isEmpty()) {
+            return;
+        }
+        if (modeSolo()) {
+            SongState.listenersStatus = "自用模式：不连接服务器";
             return;
         }
         long nowJoin = System.currentTimeMillis();
@@ -262,11 +455,62 @@ public class SongModClient implements ClientModInitializer {
             return;
         }
         lastListenJoinAt = nowJoin;
+        if (apiEnabled()) {
+            final String base = config.apiBase;
+            final String token = config.apiToken;
+            final int timeout = config.botTimeoutSeconds;
+            final String playerName = myName();
+            final String target = name;
+            final float joinSpeed = speed;
+            SongState.listenersStatus = "正在加入 " + target + " 的一起听…";
+            POOL.submit(() -> {
+                SongApiClient.JoinInfo info = null;
+                try {
+                    info = SongApiClient.joinListen(base, token, playerName, target, timeout);
+                } catch (Throwable t) {
+                    System.out.println("[songmod] API 一起听失败，回退聊天：" + t);
+                }
+                final SongApiClient.JoinInfo joinInfo = info;
+                Minecraft mc = Minecraft.getInstance();
+                if (mc == null) {
+                    return;
+                }
+                mc.execute(() -> {
+                    synchronized (SongModClient.class) {
+                        if (joinInfo != null && joinInfo.hasUrl()) {
+                            playApiJoin(joinInfo, joinSpeed);
+                        } else {
+                            SongState.listenersStatus = "API 不可用，改用聊天一起听…";
+                            chatJoin(target, joinSpeed);
+                        }
+                    }
+                });
+            });
+            return;
+        }
+        chatJoin(name, speed);
+    }
+
+    private static void playApiJoin(SongApiClient.JoinInfo info, float speed) {
+        int seq = PENDING.incrementAndGet();
+        long startMs = Math.max(0, info.atSeconds) * 1000L;
+        SongState.beginPlayback(info.label, info.songId, "一起听");
+        SongPlayer.setSpeed(config.speed);
+        feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + info.label
+                + (info.atSeconds > 0 ? " §7（一起听 " + formatTime(startMs) + " 处加入）" : ""));
+        SongPlayer.play(info.url, config.volume, startMs,
+                err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
+        loadLyrics(info.songId);
+        hintIfConfigured(seq);
+    }
+
+    private static void chatJoin(String name, float speed) {
         String suffix = speed > 0 && Math.abs(speed - 1f) >= 0.001f
                 ? " " + SongSpeed.key(speed) : "";
         expectingListenReply = true;
         expectingListenAt = System.currentTimeMillis();
         markMyRequest(SongProtocol.LISTEN_WORD + " " + name);
+        SongState.listenersStatus = "正在加入 " + name + " 的一起听…";
         sendChat(trigger() + SongProtocol.LISTEN_WORD + " " + name + suffix);
     }
 
@@ -486,6 +730,9 @@ public class SongModClient implements ClientModInitializer {
         if (message == null || config == null) {
             return;
         }
+        if (modeSolo()) {
+            return;                     // 自用模式：完全不参与服务器聊天
+        }
         String trigger = config.trigger;
         if (trigger == null || trigger.isEmpty()) {
             return;
@@ -638,7 +885,7 @@ public class SongModClient implements ClientModInitializer {
                     feedbackIfCurrent(seq, "§b[点歌] §c机器人不在线（或没登录网易云），点歌失败。");
                 }
             }
-        }, WAIT_MS, TimeUnit.MILLISECONDS);
+        }, botTimeoutMs(), TimeUnit.MILLISECONDS);
     }
 
     /** 处理机器人发来的播放数据（含「一起听」的起播位置）。 */

@@ -229,3 +229,12 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 点歌 HTTP API（不用聊天）：`/api/song/request|state|listeners`，复用图片服务端口+Token；
   配置 `song.apiEnabled`；测试 tests/test_song_api.py（5 项）；文档 docs/点歌API.md（含命令/Mod 直连方案对比）
 - [ ] Mod 侧直连 API（`SongApiClient`：点歌/一起听名单走 HTTP，失败回退聊天）——服务端已就绪，待实现并重打 jar
+- [x] Mod 直连 API（SongApiClient，纯 Java 标准库，http/https + Token）：
+  点歌/一起听名单/加入优先走 HTTPS，失败自动回退聊天；机器人端新增 POST /api/song/join
+- [x] Mod「我的」页可配：模式（服务器 / 自用：完全不连服务器）、API 开关、API 地址(https)、Token、机器人超时(5-180s)
+- [x] 客户端命令 /songmod join <玩家>（Fabric 客户端命令 API；26.x 用 ClientCommands，1.21.x 用 ClientCommandManager）
+- [x] 谁点歌了：机器人播出时公屏播报，可点击按钮（/tellraw + clickEvent → 客户端命令 → HTTPS API join）；
+  配置 song.announceRequest / announceStyle(click|plain) / announceText；无 OP 自动回退纯文本
+- [x] 一起听「只能点玩家后面的按钮」：名单每行右侧独立按钮，行本身不响应点击；自用模式隐藏/提示
+- [x] 测试：tests/test_song_announce.py（4 项）、tests/test_song_api.py 扩展 join；Python 全量 173 项通过
+- [x] 两代源码 Gradle 编译通过（1.21.11 / 26.2），全量 15 版本重打 jar

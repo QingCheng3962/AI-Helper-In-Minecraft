@@ -368,7 +368,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def do_POST(self):  # noqa: N802
         path = self._path()
-        if path != '/api/song/request':
+        if path not in ('/api/song/request', '/api/song/join'):
             self.send_error(404, 'Not Found')
             return
         if not self._authorized():
@@ -385,7 +385,8 @@ class _PhotoHandler(BaseHTTPRequestHandler):
         except (ValueError, OSError) as exc:
             self._json(400, {'ok': False, 'error': str(exc)})
             return
-        handler = self.photo.song_request
+        handler = (self.photo.song_join if path.endswith('/join')
+                   else self.photo.song_request)
         if handler is None:
             self._json(503, {'ok': False, 'error': 'song api not ready'})
             return
@@ -510,6 +511,7 @@ class PhotoServer:
         self.instance = uuid.uuid4().hex
         #: 点歌 API 回调（由 Controller 注入；None = 未启用）
         self.song_request = None
+        self.song_join = None
         self.song_state = None
         self.song_listeners = None
 

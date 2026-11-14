@@ -53,6 +53,12 @@ public class SongScreen extends Screen {
     private SongSlider volumeSlider;
     private EditBox cookieBox;
     private Button saveCookieBtn;
+    // ---- 连接模式 / API / 超时 ----
+    private Button modeBtn;
+    private Button apiToggleBtn;
+    private EditBox apiBaseBox;
+    private EditBox apiTokenBox;
+    private EditBox timeoutBox;
 
     private Button tabSongBtn;
     private Button tabListenBtn;
@@ -162,7 +168,46 @@ public class SongScreen extends Screen {
                     .bounds(px + pw - 84, py + 104 + i * 28, 68, 18).build());
         }
 
-        // ---- 我的页 ----
+        // ---- 我的页：模式 / API / 超时 / 音量 / Cookie ----
+        SongConfig cfgMine = SongModClient.settings();
+        modeBtn = addRenderableWidget(Button.builder(
+                Component.literal("模式：" + SongModClient.modeLabel()),
+                b -> {
+                    SongModClient.toggleMode();
+                    if (modeBtn != null) {
+                        modeBtn.setMessage(Component.literal("模式：" + SongModClient.modeLabel()));
+                    }
+                }).bounds(px + 16, py + 76, 130, 18).build());
+        apiToggleBtn = addRenderableWidget(Button.builder(
+                Component.literal(apiText(cfgMine)),
+                b -> {
+                    SongModClient.setApiEnabled(cfgMine == null ? false : !cfgMine.apiEnabled);
+                    apiToggleBtn.setMessage(Component.literal(apiText(SongModClient.settings())));
+                }).bounds(px + 152, py + 76, 130, 18).build());
+        apiBaseBox = new EditBox(this.font, px + 56, py + 100, cw - 72, 18,
+                Component.literal("https://你的域名（机器人点歌 API）"));
+        apiBaseBox.setMaxLength(200);
+        apiBaseBox.setValue(cfgMine == null ? "" : cfgMine.apiBase);
+        apiBaseBox.setResponder(text -> SongModClient.setApiBase(text));
+        addRenderableWidget(apiBaseBox);
+        apiTokenBox = new EditBox(this.font, px + 56, py + 124, cw - 72, 18,
+                Component.literal("API Token"));
+        apiTokenBox.setMaxLength(200);
+        apiTokenBox.setValue(cfgMine == null ? "" : cfgMine.apiToken);
+        apiTokenBox.setResponder(text -> SongModClient.setApiToken(text));
+        addRenderableWidget(apiTokenBox);
+        timeoutBox = new EditBox(this.font, px + 56, py + 148, 60, 18,
+                Component.literal("机器人超时"));
+        timeoutBox.setMaxLength(3);
+        timeoutBox.setValue(String.valueOf(cfgMine == null ? 30 : cfgMine.botTimeoutSeconds));
+        timeoutBox.setResponder(text -> {
+            try {
+                SongModClient.setBotTimeout(Integer.parseInt(text.trim()));
+            } catch (NumberFormatException ignored) {
+                // ignore
+            }
+        });
+        addRenderableWidget(timeoutBox);
         volumeSlider = new SongSlider(px + 56, py + ph - 92, cw - 40, 18,
                 SongModClient.settings() == null ? 0.8 : SongModClient.settings().volume,
                 (slider, value) -> SongModClient.setVolume((float) value));
@@ -194,6 +239,11 @@ public class SongScreen extends Screen {
         if (lyricBtn != null) lyricBtn.visible = song;
         if (refreshListenBtn != null) refreshListenBtn.visible = listen;
         if (joinBtns != null) for (Button b : joinBtns) if (b != null) b.visible = listen;
+        if (modeBtn != null) modeBtn.visible = mine;
+        if (apiToggleBtn != null) apiToggleBtn.visible = mine;
+        if (apiBaseBox != null) apiBaseBox.visible = mine;
+        if (apiTokenBox != null) apiTokenBox.visible = mine;
+        if (timeoutBox != null) timeoutBox.visible = mine;
         if (volumeSlider != null) volumeSlider.visible = mine;
         if (cookieBox != null) cookieBox.visible = mine;
         if (saveCookieBtn != null) saveCookieBtn.visible = mine;
@@ -232,6 +282,12 @@ public class SongScreen extends Screen {
         }
         if (lyricBtn != null) {
             lyricBtn.setMessage(Component.literal(SongModClient.lyricModeLabel()));
+        }
+        if (apiToggleBtn != null) {
+            apiToggleBtn.setMessage(Component.literal(apiText(SongModClient.settings())));
+        }
+        if (modeBtn != null) {
+            modeBtn.setMessage(Component.literal("模式：" + SongModClient.modeLabel()));
         }
         if (speedBtns != null && cfg != null) {
             for (int i = 0; i < speedBtns.length; i++) {
@@ -377,6 +433,9 @@ public class SongScreen extends Screen {
     private void drawMinePage(GuiGraphics gui, int px, int py, int pw, int ph) {
         gui.fill(px + 12, py + 52, px + pw - 12, py + ph - 110, 0x2210161F);
         gui.drawString(this.font, "我点过的歌", px + 16, py + 61, DIM);
+        gui.drawString(this.font, "API 地址", px + 16, py + 104, DIM);
+        gui.drawString(this.font, "Token", px + 16, py + 128, DIM);
+        gui.drawString(this.font, "超时(秒)", px + 16, py + 152, ACCENT2);
         List<String> my = SongState.myRequests();
         if (my.isEmpty()) {
             gui.drawCenteredString(this.font, "还没有点过歌", px + pw / 2, py + 110, DIM);
@@ -428,7 +487,7 @@ public class SongScreen extends Screen {
                             + refreshSeconds() + " 秒可刷新一次",
                     px + 16, py + ph - 16, DIM);
         } else {
-            gui.drawString(this.font, "§8这里只影响自己的客户端；Cookie 会写进 config/songmod.json",
+            gui.drawString(this.font, "§8点歌/一起听可走 HTTPS 网关（我的页配置），失败自动回退聊天",
                     px + 16, py + ph - 16, DIM);
         }
     }
@@ -436,6 +495,14 @@ public class SongScreen extends Screen {
     private int refreshSeconds() {
         SongConfig cfg = SongModClient.settings();
         return cfg == null ? 15 : cfg.listenRefreshSeconds;
+    }
+
+    private static String apiText(SongConfig cfg) {
+        if (cfg == null) {
+            return "API：关";
+        }
+        boolean on = cfg.apiEnabled && cfg.apiBase != null && !cfg.apiBase.trim().isEmpty();
+        return "HTTP API：" + (on ? "开" : "关");
     }
 
     private static String shorten(String text, int max) {
