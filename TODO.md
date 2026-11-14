@@ -238,3 +238,15 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 一起听「只能点玩家后面的按钮」：名单每行右侧独立按钮，行本身不响应点击；自用模式隐藏/提示
 - [x] 测试：tests/test_song_announce.py（4 项）、tests/test_song_api.py 扩展 join；Python 全量 173 项通过
 - [x] 两代源码 Gradle 编译通过（1.21.11 / 26.2），全量 15 版本重打 jar
+### v0.3.6-26.11.15-Fxied 补充（点歌架构改为服务端解析 + 进度条）
+
+- [x] 点歌改为 `mod → 机器人 HTTP API → 网易云 → API 返回播放数据 → Mod`：
+  - 服务端 `POST /api/song/request` 用**机器人自己的 Cookie** 搜索、取会员直链、取歌词（`netease.lyric`），
+    返回 `data{title,artist,label,url,id,duration,trial,at,lyrics}`；客户端不再搜歌/取链/查歌词
+  - Mod 点歌直接 POST API → 收到播放数据立刻播；不再发聊天、不再回退聊天；「停止」只停本地
+  - 一起听：页签切换不再自动请求，只有「刷新名单」发请求；加入仍走 `/api/song/join`（服务端返回进度+歌词）
+  - 客户端只配 API 地址/Token/超时/模式；Cookie、端口、触发词等都在机器人侧配置
+- [x] 进度条修复：拖动先记时间再判断（不再被 tick 拉回）、`duration>0` 即可拖、拖动后 1.2s 内不覆盖；
+  原位 seek 1.5s 未生效时自动按目标进度用直链重新起播（兼容解码器跳不过去的情况）
+- [x] 测试：tests/test_song_api.py 改为验证服务端解析返回播放数据/歌词（mock netease），全量 Python 169 项通过
+- [x] 全量 15 版本 jar 重打 + 安装包重打

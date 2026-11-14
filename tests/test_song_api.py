@@ -79,29 +79,46 @@ class SongApiTest(unittest.TestCase):
 
 
 class SongApiControllerTest(unittest.TestCase):
-    def test_api_request_rejects_when_offline(self):
+    @staticmethod
+    def _ctrl():
         from aafm_py.controller import Controller
         ctrl = object.__new__(Controller)
-        ctrl._connected = False
-        ctrl._engine = SimpleNamespace(running=False)
-        result = ctrl._api_song_request({'query': '孤勇者'})
-        self.assertFalse(result['ok'])
-        self.assertIn('未连接', result['error'])
-
-    def test_api_request_enqueues_when_online(self):
-        from aafm_py.controller import Controller
-        ctrl = object.__new__(Controller)
-        ctrl._connected = True
-        ctrl._engine = SimpleNamespace(running=True)
-        ctrl.enqueue_song = Mock()
+        ctrl.config = SimpleNamespace(
+            song=SimpleNamespace(neteaseCookie='MUSIC_U=abc'))
+        ctrl._song_seq = 0
+        ctrl._song_current = None
+        ctrl._remember_listener = Mock()
         ctrl._post_ui = Mock()
-        result = ctrl._api_song_request({'query': '孤勇者', 'player': 'Bob',
-                                         'speed': '1.5'})
+        ctrl._announce_song_entry = Mock()
+        ctrl.strip_speed_token = Controller.strip_speed_token.__get__(ctrl)
+        return ctrl
+
+    def test_api_request_resolves_with_server_cookie_and_returns_playback(self):
+        from unittest.mock import patch
+        ctrl = self._ctrl()
+        resolved = {'id': '123', 'title': '起风了', 'artists': ['冯沁苑'],
+                    'url': 'https://music.example/1.mp3', 'duration': 219000,
+                    'trial': 0}
+        with patch('aafm_py.netease.resolve', return_value=resolved) as resolve, \
+                patch('aafm_py.netease.lyric', return_value={'lrc': '[00:00.00]hi'}) as lyric:
+            result = ctrl._api_song_request({'query': '起风了 1.5', 'player': 'Bob'})
         self.assertTrue(result['ok'])
-        args = ctrl.enqueue_song.call_args[0]
-        self.assertEqual(args[0], '孤勇者 1.5')
-        self.assertEqual(args[1], 'Bob')
+        data = result['data']
+        self.assertEqual(data['title'], '起风了')
+        self.assertEqual(data['artist'], '冯沁苑')
+        self.assertEqual(data['url'], 'https://music.example/1.mp3')
+        self.assertEqual(data['duration'], 219000)
+        self.assertEqual(data['lyrics'], '[00:00.00]hi')
+        resolve.assert_called_once_with('起风了', 'MUSIC_U=abc')
+        lyric.assert_called_once_with('123', 'MUSIC_U=abc')
+        ctrl._remember_listener.assert_called_once()
 
-
+    def test_api_request_returns_error_when_not_found(self):
+        from unittest.mock import patch
+        ctrl = self._ctrl()
+        with patch('aafm_py.netease.resolve', return_value=None):
+            result = ctrl._api_song_request({'query': '不存在'})
+        self.assertFalse(result['ok'])
+        self.assertIn('没找到', result['error'])
 if __name__ == '__main__':
     unittest.main()

@@ -346,28 +346,28 @@ public class SongModClient implements ClientModInitializer {
             feedback("§b[点歌] §7正在通过 API 点歌：§f" + q);
             POOL.submit(() -> {
                 try {
-                    boolean ok = SongApiClient.requestSong(base, token, playerName,
-                            apiQuery, apiSpeed, timeout);
-                    if (ok) {
-                        synchronized (SongModClient.class) {
-                            markMyRequest(apiQuery);
+                    SongApiClient.Song song = SongApiClient.requestSong(base, token,
+                            playerName, apiQuery, apiSpeed, timeout);
+                    if (song != null && song.hasUrl()) {
+                        Minecraft mc = Minecraft.getInstance();
+                        if (mc != null) {
+                            mc.execute(() -> {
+                                synchronized (SongModClient.class) {
+                                    if (!isCurrent(seq)) {
+                                        return;
+                                    }
+                                    markMyRequest(apiQuery);
+                                    playApiSong(song);
+                                }
+                            });
                         }
-                        feedbackIfCurrent(seq, "§b[点歌] §a已通过 API 点歌：§f" + apiQuery + note);
                         return;
                     }
                 } catch (Throwable t) {
-                    System.out.println("[songmod] API 点歌失败，回退聊天：" + t);
+                    System.out.println("[songmod] 服务器 API 点歌失败：" + t);
                 }
-                if (!isCurrent(seq)) {
-                    return;
-                }
-                synchronized (SongModClient.class) {
-                    if (!isCurrent(seq)) {
-                        return;
-                    }
-                    feedbackIfCurrent(seq, "§b[点歌] §7API 不可用，改用聊天点歌…");
-                    chatRequestSong(apiQuery, apiSpeed, note);
-                }
+                feedbackIfCurrent(seq, "§b[点歌] §c服务器 API 点歌失败"
+                        + "（检查机器人「点歌」页的 Cookie / API 地址 / Token）");
             });
             return;
         }
@@ -400,8 +400,13 @@ public class SongModClient implements ClientModInitializer {
         }, botTimeoutMs(), TimeUnit.MILLISECONDS);
     }
 
-    /** 界面停止。 */
+    /** 界面停止：服务端/自用模式只停本地播放，不发任何聊天。 */
     public static void requestStop() {
+        if (modeSolo() || apiEnabled()) {
+            stopPlayback();
+            feedback("§b[点歌] §e已停止播放");
+            return;
+        }
         sendChat(trigger() + stopWord());
     }
 
@@ -810,6 +815,76 @@ SongState.listenersStatus = "正在加入 " + join.player + " 的一起听…";
         // 直链被服务器改坏的保险：用歌曲 id 自己取链
         feedback("§b[点歌] §7机器人直链不可用，改用歌曲 id 取链…");
         playById(playback.songId, startMs, seq);
+    }
+
+    // ---- 进度条跳转：原位 seek 优先，万一解码器跳不过去就按目标进度重新起播 ----
+    private static volatile long pendingSeekTarget = -1L;
+    private static volatile long pendingSeekAt = 0L;
+
+    /** 进度条拖动/点击后调用（targetMs 是目标毫秒）。 */
+    public static void requestSeek(long targetMs) {
+        pendingSeekTarget = Math.max(0L, targetMs);
+        pendingSeekAt = System.currentTimeMillis();
+        SongPlayer.seekTo(pendingSeekTarget);
+    }
+
+    /** 客户端每 tick 调一次：原位 seek 1.5 秒还没生效，就用当前直链从目标进度重新起播。 */
+    public static void tickSeekFallback() {
+        long target = pendingSeekTarget;
+        if (target < 0L) {
+            return;
+        }
+        if (System.currentTimeMillis() - pendingSeekAt < 1500L) {
+            return;
+        }
+        pendingSeekTarget = -1L;
+        long actual = SongPlayer.positionMs();
+        if (Math.abs(actual - target) < 3000L) {
+            return;                      // 已经跳过去了
+        }
+        String url = SongPlayer.currentUrl();
+        if (url == null || url.isEmpty()) {
+            return;
+        }
+        feedback("§b[点歌] §7进度跳转兼容模式：从 " + formatTime(target) + " 重新加载…");
+        SongPlayer.play(url, config == null ? 0.8f : config.volume, target,
+                err -> feedback("§b[点歌] §c播放失败：" + err));
+    }
+
+    /** 播放服务端 API 返回的歌曲（服务端已查好直链和歌词，客户端只管播）。 */
+    private static void playApiSong(SongApiClient.Song song) {
+        int seq = PENDING.incrementAndGet();
+        long startMs = Math.max(0, song.atSeconds) * 1000L;
+        SongState.beginPlayback(song.label, song.songId, "");
+        SongPlayer.setSpeed(config.speed);
+        feedbackIfCurrent(seq, "§b[点歌] §a正在播放：§f" + song.label
+                + (song.durationMs > 0 ? " §7(" + formatTime(song.durationMs) + ")" : ""));
+        SongPlayer.play(song.url, config.volume, startMs,
+                err -> feedbackIfCurrent(seq, "§b[点歌] §c播放失败：" + err));
+        loadLyricsFromText(song.songId, song.lyrics);
+        hintIfConfigured(seq);
+    }
+
+    /** 歌词优先用服务端返回的 LRC；没有才自己去抓（兼容旧服务端）。 */
+    private static void loadLyricsFromText(String songId, String lrc) {
+        if (lrc == null || lrc.trim().isEmpty()) {
+            loadLyrics(songId);
+            return;
+        }
+        if (config == null || !config.showLyrics || "off".equals(config.lyricMode)) {
+            return;
+        }
+        try {
+            SongLyrics.Lyrics lyrics = SongLyrics.parse(lrc);
+            if (lyrics != null && !lyrics.isEmpty()) {
+                SongState.setLyrics(lyrics);
+                SongState.lyricsStatus = "";
+                return;
+            }
+        } catch (Throwable ignored) {
+            // 解析失败就走网络兜底
+        }
+        loadLyrics(songId);
     }
 
     private static void playById(String id, long startMs, int seq) {

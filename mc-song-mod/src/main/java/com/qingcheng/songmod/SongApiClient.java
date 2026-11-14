@@ -33,6 +33,34 @@ public final class SongApiClient {
         }
     }
 
+    /** /api/song/request 返回的播放数据（服务端已查好直链/歌词）。 */
+    public static final class Song {
+        public final String title;
+        public final String artist;
+        public final String label;
+        public final String url;
+        public final String songId;
+        public final String lyrics;
+        public final long durationMs;
+        public final int atSeconds;
+
+        Song(String title, String artist, String label, String url, String songId,
+             String lyrics, long durationMs, int atSeconds) {
+            this.title = title == null ? "" : title;
+            this.artist = artist == null ? "" : artist;
+            this.label = label == null ? "" : label;
+            this.url = url == null ? "" : url;
+            this.songId = songId == null ? "" : songId;
+            this.lyrics = lyrics == null ? "" : lyrics;
+            this.durationMs = durationMs;
+            this.atSeconds = atSeconds;
+        }
+
+        public boolean hasUrl() {
+            return !url.isEmpty();
+        }
+    }
+
     /** /api/song/join 的返回。 */
     public static final class JoinInfo {
         public final String url;
@@ -57,15 +85,36 @@ public final class SongApiClient {
         }
     }
 
-    public static boolean requestSong(String base, String token, String player,
-                                      String query, float speed, int timeoutSeconds) {
+    /**
+     * 点歌：把歌名发给服务端，服务端用**机器人自己的网易云 Cookie**搜索、取直链、取歌词，
+     * 再把完整播放数据返回。客户端拿到就能直接播。
+     */
+    public static Song requestSong(String base, String token, String player,
+                                   String query, float speed, int timeoutSeconds)
+            throws ApiException {
         String speedKey = Math.abs(speed - 1f) < 0.001f ? "" : SongSpeed.key(speed);
         String body = "{\"player\":" + jsonQuote(player)
                 + ",\"query\":" + jsonQuote(query)
                 + (speedKey.isEmpty() ? "" : ",\"speed\":" + jsonQuote(speedKey))
                 + "}";
         String response = post(base, token, "/api/song/request", body, timeoutSeconds);
-        return response.contains("\"ok\":true");
+        if (!response.contains("\"ok\":true")) {
+            String error = jsonString(response, "error");
+            throw new ApiException(error == null ? "服务器点歌失败" : error);
+        }
+        String data = jsonObject(response, "data");
+        if (data == null) {
+            throw new ApiException("服务器没有返回播放数据");
+        }
+        return new Song(
+                jsonString(data, "title"),
+                jsonString(data, "artist"),
+                jsonString(data, "label"),
+                jsonString(data, "url"),
+                jsonString(data, "id"),
+                jsonString(data, "lyrics"),
+                jsonLong(data, "duration"),
+                (int) Math.max(0, jsonLong(data, "at")));
     }
 
     public static List<SongProtocol.ListenEntry> fetchListeners(String base, String token,
@@ -306,6 +355,46 @@ public final class SongApiClient {
         } catch (NumberFormatException e) {
             return -1L;
         }
+    }
+
+    /** 取对象字段的原文（花括号之间）。 */
+    static String jsonObject(String json, String field) {
+        if (json == null) {
+            return null;
+        }
+        String key = "\"" + field + "\"";
+        int at = json.indexOf(key);
+        if (at < 0) {
+            return null;
+        }
+        int start = json.indexOf('{', at);
+        if (start < 0) {
+            return null;
+        }
+        int depth = 0;
+        boolean inString = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inString) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return json.substring(start, i + 1);
+                }
+            }
+        }
+        return null;
     }
 
     /** 取数组字段的原文（方括号之间）。 */

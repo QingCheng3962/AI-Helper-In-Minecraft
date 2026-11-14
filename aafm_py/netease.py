@@ -338,6 +338,21 @@ def check_login(cookie: str = '') -> Dict[str, Any]:
     return res
 
 
+def lyric(song_id: str, cookie: str = '') -> Optional[Dict[str, Any]]:
+    """取歌词（LRC 原文），返回 {'lrc','translated'}；取不到返回 None。"""
+    sid = str(song_id or '').strip()
+    if not sid:
+        return None
+    data = _get_json(BASE + '/api/song/lyric?os=pc&id=' + sid + '&lv=-1&kv=-1&tv=-1', cookie)
+    if not data:
+        return None
+    lrc = ((data.get('lrc') or {}).get('lyric') or '')
+    translated = ((data.get('tlyric') or {}).get('lyric') or '')
+    if not lrc.strip():
+        return None
+    return {'lrc': lrc, 'translated': translated}
+
+
 def resolve(text: str, cookie: str = '') -> Optional[Dict[str, Any]]:
     """把「关键词 / 链接 / 歌曲id」解析成可播放信息。
 

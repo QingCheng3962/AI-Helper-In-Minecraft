@@ -3108,24 +3108,79 @@ class Controller:
     # 点歌 HTTP API（/api/song/*）：不经过聊天，Mod/网页/脚本直接调用
     # ------------------------------------------------------------------
     def _api_song_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """POST /api/song/request  {player, query, speed?}"""
+        """POST /api/song/request {player, query, speed?}
+
+        Mod/网页只把「点歌」发到这里，**服务端**负责：
+          1. 用机器人自己的网易云 Cookie 搜索/取直链（会员歌也能完整播）；
+          2. 取歌词（LRC）；
+          3. 记「谁在听什么」，供一起听使用；
+        然后把完整播放数据直接返回给客户端 —— 客户端不需要搜歌/取链/查歌词。
+        """
         payload = data if isinstance(data, dict) else {}
         query = str(payload.get('query') or '').strip()
         player = str(payload.get('player') or 'api').strip()[:16] or 'api'
         if not query:
             return {'ok': False, 'error': 'query 不能为空'}
-        speed = str(payload.get('speed') or '').strip()
-        if speed:
-            query = query + ' ' + speed
-        if not self.connected:
-            return {'ok': False, 'error': '机器人未连接服务器'}
+        # 倍速只是客户端的事：剥掉再搜
+        query, _speed = self.strip_speed_token(query)
+        if not query:
+            return {'ok': False, 'error': '歌名不能为空'}
+        cookie = str(getattr(self.config.song, 'neteaseCookie', '') or '')
         try:
-            self.enqueue_song(query, player, 'api')
+            from . import netease
+            info = netease.resolve(query, cookie)
         except Exception as exc:  # noqa: BLE001
-            return {'ok': False, 'error': str(exc)}
+            return {'ok': False, 'error': '网易云搜索失败：' + str(exc)}
+        if not info:
+            return {'ok': False, 'error': '没找到「' + query + '」'}
+        title = str(info.get('title') or query)
+        artists = info.get('artists') or []
+        artist = '/'.join([str(a) for a in artists]) if artists else '未知歌手'
+        url = str(info.get('url') or '')
+        if not url:
+            return {'ok': False, 'error': str(info.get('note') or '无法获取播放地址')}
+        song_id = str(info.get('id') or '')
+        duration = int(info.get('duration') or 0)
+        label = (title + ' - ' + artist) if artist else title
+        lyrics = ''
+        try:
+            from . import netease as _ne
+            lyric_info = _ne.lyric(song_id, cookie) if song_id else None
+            if lyric_info:
+                lyrics = str(lyric_info.get('lrc') or '')
+        except Exception:  # noqa: BLE001
+            lyrics = ''
+        now = time.time()
+        # 记「谁在听什么」：一起听靠这个
+        self._remember_listener({'who': player, 'title': title, 'artist': artist,
+                                 'url': url, 'id': song_id}, now, duration)
+        self._song_current = {
+            'seq': self._song_seq, 'who': player, 'source': 'api', 'query': query,
+            'title': title, 'artist': artist, 'url': url, 'id': song_id,
+            'duration': duration, 'trial': int(info.get('trial') or 0),
+            'added_at': now,
+        }
         self._post_ui({'kind': 'log', 'level': 'song',
-                       'message': f'[点歌] API 点歌：{player} → {query}'})
-        return {'ok': True, 'query': query, 'player': player}
+                       'message': f'[点歌] API 点歌：{player} → {title} - {artist}'
+                                  f'（{int(duration / 1000)}s）'})
+        try:
+            self._announce_song_entry({'who': player, 'title': title, 'artist': artist})
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            'ok': True,
+            'data': {
+                'title': title,
+                'artist': artist,
+                'label': label,
+                'url': url,
+                'id': song_id,
+                'duration': duration,
+                'trial': int(info.get('trial') or 0),
+                'at': 0,
+                'lyrics': lyrics,
+            },
+        }
 
     def _api_song_state(self) -> Dict[str, Any]:
         current = self._song_current or {}

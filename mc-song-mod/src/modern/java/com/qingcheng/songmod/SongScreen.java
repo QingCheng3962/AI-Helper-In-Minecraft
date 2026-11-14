@@ -11,9 +11,8 @@ import java.util.List;
 /**
  * 新版游戏内「点歌台」（Minecraft 26.x）。
  *
- * <p>布局按「宽松、不拥挤」重做（每个区块独占一行），并支持连接模式（服务器/自用）、
- * HTTP API、机器人超时配置。26.x 绘制走 extractRenderState 提取式渲染：
- * extractBackground 画面板（控件下面），extractRenderState 叠加文字（控件上面）。
+ * <p>布局宽松分层；点歌/一起听/加入都走服务端 HTTP API（客户端只管播），
+ * 页签切换不请求，只有「刷新名单」才拉列表。26.x 绘制走 extractRenderState 提取式渲染。
  */
 public class SongScreen extends Screen {
 
@@ -111,10 +110,8 @@ public class SongScreen extends Screen {
         int tabW = (pw - 70) / 3;
         tabSongBtn = addRenderableWidget(Button.builder(Component.literal("点歌"), b -> setTab(TAB_SONG))
                 .bounds(px + 12, tabY, tabW, 18).build());
-        tabListenBtn = addRenderableWidget(Button.builder(Component.literal("一起听"), b -> {
-            setTab(TAB_LISTEN);
-            SongModClient.requestListenList();
-        }).bounds(px + 18 + tabW, tabY, tabW, 18).build());
+        tabListenBtn = addRenderableWidget(Button.builder(Component.literal("一起听"),
+                b -> setTab(TAB_LISTEN)).bounds(px + 18 + tabW, tabY, tabW, 18).build());
         tabMineBtn = addRenderableWidget(Button.builder(Component.literal("我的"), b -> setTab(TAB_MINE))
                 .bounds(px + 24 + tabW * 2, tabY, tabW, 18).build());
         closeBtn = addRenderableWidget(Button.builder(Component.literal("×"), b -> this.onClose())
@@ -143,11 +140,14 @@ public class SongScreen extends Screen {
 
         progress = new SongSlider(px + 16, py + 108, cw, 18, 0.0,
                 (slider, value) -> {
-                    if (!SongPlayer.isSeekable()) {
-                        return;
-                    }
+                    // 先记时间再判断：否则拖动时 tick 会立刻把滑条拉回原位置（看起来就是"拖不动"）
                     lastProgressTouch = System.currentTimeMillis();
-                    SongPlayer.seekTo((long) (value * SongPlayer.durationMs()));
+                    long duration = SongPlayer.durationMs();
+                    if (duration <= 0L) {
+                        return;              // 还没加载完 / 流式播放，等有总时长再拖
+                    }
+                    long target = (long) (Math.max(0.0, Math.min(1.0, value)) * duration);
+                    SongModClient.requestSeek(target);
                 });
         addRenderableWidget(progress);
 
@@ -258,6 +258,11 @@ public class SongScreen extends Screen {
         } catch (Throwable ignored) {
             // 界面刷新出错不能崩客户端
         }
+        try {
+            SongModClient.tickSeekFallback();
+        } catch (Throwable ignored) {
+            // ignore
+        }
     }
 
     private void updateWidgets() {
@@ -265,17 +270,19 @@ public class SongScreen extends Screen {
         long duration = SongPlayer.durationMs();
         long position = SongPlayer.positionMs();
         if (progress != null) {
-            boolean seekable = SongPlayer.isSeekable();
+            // 只要拿到总时长就可拖（播放中/暂停/正在下载后段都行）；流式兜底没有时长则禁用
+            boolean seekable = duration > 0;
             progress.active = seekable;
-            if (seekable && duration > 0) {
-                if (System.currentTimeMillis() - lastProgressTouch > 600L) {
+            if (seekable) {
+                if (System.currentTimeMillis() - lastProgressTouch > 1200L) {
                     progress.setValueSilently(position / (double) duration);
                 }
                 progress.setLabel("  " + formatTime(position) + " / " + formatTime(duration)
                         + (SongPlayer.isPaused() ? "   (已暂停)" : ""));
             } else {
                 progress.setValueSilently(0.0);
-                progress.setLabel(playingStateLabel());
+                progress.setLabel(SongPlayer.isLoading()
+                        ? "  加载中…（下载完就能拖进度）" : "  流式播放，不能拖动");
             }
         }
         if (playPauseBtn != null) {

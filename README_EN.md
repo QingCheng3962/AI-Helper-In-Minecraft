@@ -37,9 +37,9 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 - **Installer (.exe) UI rebuilt**: branded dark header, flat modern buttons, custom progress bar, install log, version/feature summary; can launch the app right after install.
 - **Complete packaging (every last piece)**: `tests/`, `mc-song-mod/` source + build scripts, `mc-music-bridge/` source, `installer/` source, `docs/`, `promo/`, `AGENTS.md` — everything ships inside the exe; a fresh install is fully self-contained.
-- **Mod direct API / solo mode**: configurable HTTPS gateway URL + token + bot timeout; song requests, listener list and joining use HTTPS first (fallback to chat); solo mode never touches the server.
+- **Song requests resolved server-side**: `mod → bot HTTP API → NetEase → API returns playback data → mod`. The bot uses its own cookie to search, resolve VIP links and fetch lyrics, then returns complete playback data; the client never searches or resolves anything. Everything goes over HTTPS with no chat traffic; clients only configure API URL/token/timeout. Solo mode never touches the server.
 - **Who requested a song + click-to-listen**: the bot announces the requester and a clickable button → client command `/songmod join <player>` → `POST /api/song/join` with zero chat traffic; falls back to plain text when the bot has no OP.
-- **Song GUI fixes**: roomier layout, speed buttons 2.0→0.5, listener spam/ghost entries fixed, seek `Index out of bounds` fixed.
+- **Song GUI fixes**: roomier layout, speed buttons 2.0→0.5, listener spam/ghost entries fixed, seek `Index out of bounds` fixed, progress-bar dragging fixed (no snap-back, draggable once duration is known, automatic restart-from-position fallback when in-place seek does not take effect).
 - Regression: 169 Python tests, all 15 mod jars rebuilt, installer silent-install self-check passed.
 
 ### v0.3.6-26.11.14

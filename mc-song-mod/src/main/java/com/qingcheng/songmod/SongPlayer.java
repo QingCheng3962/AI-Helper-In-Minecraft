@@ -64,6 +64,9 @@ public final class SongPlayer {
 
     /** 播放一首歌，并从 {@code startMs} 处开始（「一起听」跟播用）。 */
     public static void play(String url, float vol, long startMs, Consumer<String> onError) {
+        if (url != null && !url.isEmpty()) {
+            lastUrl = url;
+        }
         float v = clamp01(vol);
         Session s;
         synchronized (LOCK) {
@@ -143,6 +146,8 @@ public final class SongPlayer {
         }
     }
 
+    private static volatile String lastUrl = "";
+
     public static void setSpeed(float value) {
         speed = SongSpeed.normalize(value);
     }
@@ -178,6 +183,11 @@ public final class SongPlayer {
     }
 
     /** 总时长（毫秒）；流式兜底或还没加载好时返回 0。 */
+    /** 最近一次播放的直链（进度条跳转失败时，客户端会用它按目标进度重新起播）。 */
+    public static String currentUrl() {
+        return lastUrl;
+    }
+
     public static long durationMs() {
         Session s = session;
         return s == null || s.track == null ? 0L : s.track.durationMs;
@@ -225,7 +235,10 @@ public final class SongPlayer {
         }
         s.track = track;
         s.positionMs = 0L;
-        if (s.initialSeekMs > 0L) {
+        // 下载期间用户可能已经拖过进度条：优先用用户拖的，其次才是点歌时的起始位置
+        if (s.seekMs >= 0L) {
+            s.positionMs = s.seekMs;
+        } else if (s.initialSeekMs > 0L) {
             s.seekMs = Math.max(0L, Math.min(track.durationMs - 1, s.initialSeekMs));
             s.positionMs = s.seekMs;
         }
