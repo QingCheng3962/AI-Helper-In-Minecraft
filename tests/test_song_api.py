@@ -63,6 +63,15 @@ class SongApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body['listeners'][0]['player'], 'Alice')
 
+    def test_response_is_compact_json(self):
+        # Mod 端解析依赖 {"ok":true}（无空格）——服务端必须输出紧凑 JSON
+        req = urllib.request.Request(self.base + '/api/song/ping',
+                                     headers={'X-Token': self.token})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode('utf-8')
+        self.assertIn('"ok":true', raw)
+        self.assertNotIn('"ok": true', raw)
+
     def test_request_requires_token(self):
         status, body = _request(self.base + '/api/song/request', '',
                                 {'query': '孤勇者'})
