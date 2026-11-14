@@ -3,7 +3,6 @@ package com.qingcheng.songmod;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.KeyMapping;
@@ -88,7 +87,7 @@ public class SongModClient implements ClientModInitializer {
 
         openKey = createKeyMapping();
         if (openKey != null) {
-            KeyBindingHelper.registerKeyBinding(openKey);
+            registerKeyBindingCompat(openKey);
             System.out.println("[songmod] 已注册按键 key.songmod.open（默认 K），可在「按键设置」里改");
         } else {
             System.out.println("[songmod] 按键注册失败：可在聊天里发 " + config.trigger + config.guiWord + " 打开界面");
@@ -164,7 +163,7 @@ public class SongModClient implements ClientModInitializer {
         }
         mc.execute(() -> {
             try {
-                mc.setScreenAndShow(new SongScreen());
+                openScreenCompat(mc, new SongScreen());
             } catch (Throwable ignored) {
                 // ignore
             }
@@ -329,6 +328,127 @@ public class SongModClient implements ClientModInitializer {
     // ------------------------------------------------------------------
     // 聊天处理
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // 26.1.x 与 26.2 的 API 差异：标题 / 动作条 / 聊天栏在 26.2 挪到了 Gui.hud，
+    // 26.1.x 还在 Gui 上；聊天方法名也从 addMessage 变成了 addClientSystemMessage。
+    // 全部用反射两条路试，保证一份源码同时能编过 26.1 ~ 26.2。
+    // ------------------------------------------------------------------
+
+    /** 26.2 返回 Gui.hud；26.1.x 没有 hud 字段，直接返回 Gui。 */
+    private static Object hudTarget(Minecraft mc) {
+        if (mc == null || mc.gui == null) {
+            return null;
+        }
+        Object gui = mc.gui;
+        try {
+            java.lang.reflect.Field field = gui.getClass().getField("hud");
+            Object hud = field.get(gui);
+            if (hud != null) {
+                return hud;
+            }
+        } catch (Throwable ignored) {
+            // 26.1.x 没有 hud 字段
+        }
+        return gui;
+    }
+
+    private static void showOverlay(Minecraft mc, Component text, boolean actionBar) {
+        Object target = hudTarget(mc);
+        if (target == null) {
+            return;
+        }
+        try {
+            target.getClass().getMethod("setOverlayMessage", Component.class, boolean.class)
+                    .invoke(target, text, actionBar);
+        } catch (Throwable ignored) {
+            // 没有就算了（不影响播放）
+        }
+    }
+
+    private static void showTitle(Minecraft mc, Component text, int fadeIn, int stay, int fadeOut) {
+        Object target = hudTarget(mc);
+        if (target == null) {
+            return;
+        }
+        try {
+            Class<?> type = target.getClass();
+            type.getMethod("setTimes", int.class, int.class, int.class)
+                    .invoke(target, fadeIn, stay, fadeOut);
+            type.getMethod("setTitle", Component.class).invoke(target, text);
+        } catch (Throwable ignored) {
+            // ignore
+        }
+    }
+
+    private static void addChat(Minecraft mc, Component text) {
+        Object target = hudTarget(mc);
+        if (target != null) {
+            try {
+                Object chat = target.getClass().getMethod("getChat").invoke(target);
+                try {
+                    chat.getClass().getMethod("addClientSystemMessage", Component.class)
+                            .invoke(chat, text);
+                    return;
+                } catch (Throwable ignored) {
+                    chat.getClass().getMethod("addMessage", Component.class).invoke(chat, text);
+                    return;
+                }
+            } catch (Throwable ignored) {
+                // 掉到下面用 Gui.getChat()
+            }
+        }
+        try {
+            Object chat = mc.gui.getClass().getMethod("getChat").invoke(mc.gui);
+            chat.getClass().getMethod("addMessage", Component.class).invoke(chat, text);
+        } catch (Throwable ignored) {
+            // ignore
+        }
+    }
+
+    /**
+     * 注册按键：26.x 的 Fabric API 换了模块/包名，反射两条路都试：
+     *  - 老：net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper#registerKeyBinding
+     *  - 新：net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper#registerKeyMapping
+     */
+    private static void registerKeyBindingCompat(KeyMapping key) {
+        String[][] candidates = {
+                {"net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper", "registerKeyBinding"},
+                {"net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper", "registerKeyMapping"},
+                {"net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper", "registerKeyBinding"},
+        };
+        for (String[] candidate : candidates) {
+            try {
+                Class<?> helper = Class.forName(candidate[0]);
+                java.lang.reflect.Method method = helper.getMethod(candidate[1], KeyMapping.class);
+                method.invoke(null, key);
+                System.out.println("[songmod] 按键已注册（" + candidate[0] + "#" + candidate[1] + "）");
+                return;
+            } catch (Throwable ignored) {
+                // 试下一条
+            }
+        }
+        System.out.println("[songmod] 按键注册失败（Fabric API 版本不支持），可在聊天里发 " + trigger() + "台 打开界面");
+    }
+
+    /** 26.2 用 setScreenAndShow，26.1.x 用 setScreen —— 反射两条路。 */
+    private static void openScreenCompat(Minecraft mc, net.minecraft.client.gui.screens.Screen screen) {
+        try {
+            mc.getClass().getMethod("setScreenAndShow",
+                            net.minecraft.client.gui.screens.Screen.class)
+                    .invoke(mc, screen);
+            return;
+        } catch (Throwable ignored) {
+            // 26.1.x
+        }
+        try {
+            mc.getClass().getMethod("setScreen",
+                            net.minecraft.client.gui.screens.Screen.class)
+                    .invoke(mc, screen);
+        } catch (Throwable ignored) {
+            // ignore
+        }
+    }
 
     private static String senderName(Object sender) {
         try {
@@ -675,8 +795,8 @@ public class SongModClient implements ClientModInitializer {
             }
             lastTitleLyric = text;
             try {
-                mc.gui.hud.setTimes(config.lyricTitleFadeIn, config.lyricTitleStay, config.lyricTitleFadeOut);
-                mc.gui.hud.setTitle(Component.literal(text));
+                showTitle(mc, Component.literal(text),
+                        config.lyricTitleFadeIn, config.lyricTitleStay, config.lyricTitleFadeOut);
             } catch (Throwable ignored) {
                 // ignore
             }
@@ -697,7 +817,7 @@ public class SongModClient implements ClientModInitializer {
         lastShownLyric = text;
         lastLyricShownAt = now;
         try {
-            mc.gui.hud.setOverlayMessage(Component.literal("§b♪ §f" + text), false);
+            showOverlay(mc, Component.literal("§b♪ §f" + text), false);
         } catch (Throwable ignored) {
             // ignore
         }
@@ -791,7 +911,7 @@ public class SongModClient implements ClientModInitializer {
                 }
                 try {
                     if (mc.gui != null) {
-                        mc.gui.hud.getChat().addClientSystemMessage(Component.literal(msg));
+                        addChat(mc, Component.literal(msg));
                     }
                 } catch (Throwable ignored) {
                     // ignore

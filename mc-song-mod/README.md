@@ -14,6 +14,18 @@
 > 为什么必须靠聊天？因为机器人是**普通玩家（客户端）**，服务端又动不了，**客户端不能给别的客户端发数据**；
 > 服务器会把公聊/私聊送给对应客户端，这是唯一能“送达”的通道。服务端**零改动**。
 
+## 构建
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\latest\jdk-25"
+cd mc-song-mod
+powershell -ExecutionPolicy Bypass -File build_all.ps1   # 15 个版本 -> dist/
+```
+
+> 如果 Gradle/Loom 因为环境限制（例如 Java 的 zipfs 把工作区判成只读）跑不起来，
+> 26.x 可以用不依赖 Gradle 的备用脚本（javac + zipfile，26.x 未混淆、不需要 remap）：
+> `python build_modern_local.py 26.1 26.1.1 26.1.2 26.2`。
+
 ## v0.3.6 新界面（1.21.x 与 26.x 都有）
 
 按 **K**（可在「按键设置 → 点歌 Mod」改）或聊天发 `[点歌]台` 打开新版「点歌台」：

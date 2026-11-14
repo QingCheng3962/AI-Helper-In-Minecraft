@@ -197,6 +197,7 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] 端口扫描：`aafm_py/portscan.py`（常见端口/自定义范围/全端口 + Minecraft status 识别版本/MOTD/人数），新界面「工具」页一键填端口
 - [x] 支持与工单 / 开发者博客链接：`aafm_py/links.py` + 新界面「关于」页 + README
 - [x] 回归：`tests/run_song_core_java.py`（51 项断言）；两代 Mod 源码 javac 类型检查通过
-- [ ] GitHub Issues 拉取与修复：当前环境无法访问 api.github.com（DNS 解析到非公网地址），需用户提供 issue 列表或手动关闭
-- [ ] 点歌 Mod 真实 jar 构建：沙箱内 Java zipfs 把工作区判只读导致 Gradle/Loom 失败，需在普通终端跑 `mc-song-mod/build_all.ps1`
+- [x] GitHub Issues：#39–#56 在 v0.3.5 已修复但未关闭，已逐条留言（修复位置 + 回归测试）并关闭；#58（询问为何不修 issue）已回复并关闭；当前 open issues = 0
+- [x] 点歌 Mod jar 构建：1.21.1~1.21.11（11 个）由 Gradle/Loom 构建；26.1/26.1.1/26.1.2/26.2（4 个）用 `mc-song-mod/build_modern_local.py`（javac + zipfile，绕过沙箱 zipfs 只读问题）构建；15 个产物全部校验通过（fabric.mod.json 版本/依赖/java、入口类、GUI 类、内嵌 JLayer、lang）
+  - 注意：26.1.1 / 26.2 的 Fabric API 聚合 jar 本机没缓存且下载超时，编译时借用了 26.1.2 的模块 jar；事件接口在 26.x 之间稳定，若实机出现事件不触发，用有网环境跑一次 Gradle 构建即可
 - [ ]（非必要）游戏画面渲染 / 群组服菜单选择 / 容器物品左右键交互
