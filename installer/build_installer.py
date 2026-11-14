@@ -36,7 +36,7 @@ CSC = Path(r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe')
 NODE_EXE = Path(r'C:\Program Files\nodejs\node.exe')
 NPM_CMD = Path(r'C:\Program Files\nodejs\npm.cmd')
 NAPCAT_DIR = ROOT / 'NapCat'
-MOD_VERSION = '0.3.7'
+MOD_VERSION = '0.3.6-26.11.14'
 MAGIC = b'AAFMINS1'
 FOOTER = 48
 

@@ -1125,7 +1125,7 @@ class AppConfig:
 class PromptTemplateManager:
     """Manage named prompt templates, persisted in SQLite (data.db).
 
-    v0.3.7 起模板不再写 mcai_prompt_templates.json；老文件会在第一次读取时自动迁移到
+    v0.3.6-26.11.14 起模板不再写 mcai_prompt_templates.json；老文件会在第一次读取时自动迁移到
     data.db 的 prompt_templates 表，并改名成 .json.bak。
     """
 
