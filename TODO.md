@@ -184,3 +184,90 @@ esolve() 在**请求失败**时抛 SearchUnavailable → GUI 显示「解析「X
 - [x] MC → QQ 支持 `@QQ号`：转述内容里的 `@123456789` 会变成 OneBot `at` 段，真正艾特群友（`qq_engine.js` 的 `sendGroup` 支持 `segments`）
 - [x] **Minecraft 聊天小票机**：新增 `aafm_py/receipt_printer.py`（ESC/POS + GBK + Windows winspool RAW，纯标准库），**杂项** 页可开关/选打印机/纸宽/每分钟上限/预览；只打印玩家聊天，效果相当于 `chat.log`（`[时:分:秒] <玩家> 内容`），不打印服务器消息/机器人/ActionBar，也没有标题/分隔线/切纸
 - [x] 版本号设为 **v0.3.4**（README / README_EN / package.json / package-lock / AGENTS）
+
+## 2026-11-14 v0.3.6
+
+- [x] 主界面迁移到 CustomTkinter（`aafm_py/gui_ctk.py`：设置/点歌/工具/日志/关于；`main.py` 默认新界面，`--legacy` 回旧界面）
+- [x] 点歌 Mod 播放引擎重写：整首下载 + MP3 帧索引（拖动进度 / 倍速重采样 / 暂停 / 精确进度；非 MP3 回流式）
+- [x] 点歌 Mod 新界面：点歌 / 一起听 / 我的 三页（进度条、倍速档位、播放控制、歌词模式、音量、Cookie）
+- [x] 26.x 版同款界面（`GuiGraphicsExtractor` 提取式渲染 + `setScreenAndShow` + `Hud` 聊天/动作条/标题）
+- [x] 一起听：机器人 `_song_listeners` 记账「谁在听什么/已播秒数」，`[点歌]一起听` 名单、`[点歌]一起听 玩家` 按估算进度跟播（`at:` 标记）
+- [x] 歌词：按歌曲 id 抓网易云 LRC（`SongLyrics`），动作条/标题/聊天三种显示 + `[点歌]歌词` 切换
+- [x] 倍速语法：`[点歌]歌名 1.5`（机器人搜索前剥离）、`[点歌]倍速 1.5`
+- [x] 端口扫描：`aafm_py/portscan.py`（常见端口/自定义范围/全端口 + Minecraft status 识别版本/MOTD/人数），新界面「工具」页一键填端口
+- [x] 支持与工单 / 开发者博客链接：`aafm_py/links.py` + 新界面「关于」页 + README
+- [x] 回归：`tests/run_song_core_java.py`（51 项断言）；两代 Mod 源码 javac 类型检查通过
+- [x] GitHub Issues：#39–#56 在 v0.3.5 已修复但未关闭，已逐条留言（修复位置 + 回归测试）并关闭；#58（询问为何不修 issue）已回复并关闭；当前 open issues = 0
+- [x] 点歌 Mod jar 构建：1.21.1~1.21.11（11 个）由 Gradle/Loom 构建；26.1/26.1.1/26.1.2/26.2（4 个）用 `mc-song-mod/build_modern_local.py`（javac + zipfile，绕过沙箱 zipfs 只读问题）构建；15 个产物全部校验通过（fabric.mod.json 版本/依赖/java、入口类、GUI 类、内嵌 JLayer、lang）
+  - 注意：26.1.1 / 26.2 的 Fabric API 聚合 jar 本机没缓存且下载超时，编译时借用了 26.1.2 的模块 jar；事件接口在 26.x 之间稳定，若实机出现事件不触发，用有网环境跑一次 Gradle 构建即可
+- [ ]（非必要）游戏画面渲染 / 群组服菜单选择 / 容器物品左右键交互
+## 2026-11-14 v0.3.6-26.11.14（数据层 + 安装包）
+
+- [x] 运行数据统一进 SQLite（`aafm_py/storage.py` → `data.db`）：好感度（原 affinity.json）、写书进度（book_progress.json）、提示词模板（mcai_prompt_templates.json）、QQ 账号记录（qq_accounts.json）
+  - 老 JSON 第一次访问自动导入，成功后改名 `<名字>.json.bak`（不删）
+  - 表：affinity / kv / prompt_templates / qq_accounts / meta；WAL + 单库一把锁；连接弱引用缓存（没人用自动关，Windows 下临时目录才能删干净）
+  - 迁移失败可重试（不会把 `_migrated` 提前置真导致丢数据）
+  - 设置文件（config.json / mcai_chat.json）仍保持 JSON：要人手改、带 API Key，放 DB 反而不好维护
+- [x] 一键安装包：`installer/`（C# 安装向导 + 启动器 + Python 构建脚本）
+  - 自带 Python 3.9 运行时 + requirements 全部依赖 + node.exe + 生产 node_modules；目标机无需另装环境
+  - 选安装目录 / 可选 NapCat / 建桌面与开始菜单快捷方式 / 静默安装 `/S /D=\path /NAPCAT=1`
+  - 内置 15 个点歌 Mod jar（Mod/）与服务端插件，安装不覆盖 data.db / config.json 等用户数据
+  - 自检：静默安装 + 内置 Python 导入全部 aafm_py 模块与第三方依赖通过
+- [x] 测试：156 项全部通过（test_affinity_save / test_config_persistence 改成 SQLite 契约）
+
+### v0.3.6-26.11.14 补充（点歌 Mod 修复）
+
+- [x] 点歌台界面重新排版：面板加大（400×300）、区块独占一行，文字不再互相压
+- [x] 倍速按钮顺序改为 2.0 / 1.5 / 1.0 / 0.75 / 0.5（左→右）
+- [x] 一起听刷屏修复：
+  - 机器人收到任何含「一起听名单」的消息（自己的回声/系统重播）直接忽略
+  - 一起听名单/加入冷却：列表 10s、加入 5s（机器人侧）+ 客户端 5s 静默冷却
+  - **只列正在播的玩家**（按歌曲时长判断活跃；没时长按 5 分钟封顶）
+  - 名单/加入不再往聊天刷「正在获取…」，状态只显示在界面
+- [x] 拖动进度条 Index out of bounds：解码坏帧自动跳帧重同步（最多 5 次），重采样加越界保护
+- [x] 测试：新增 tests/test_song_listen.py（活跃度判断 4 项），Python 160 项通过
+- [x] 点歌 HTTP API（不用聊天）：`/api/song/request|state|listeners`，复用图片服务端口+Token；
+  配置 `song.apiEnabled`；测试 tests/test_song_api.py（5 项）；文档 docs/点歌API.md（含命令/Mod 直连方案对比）
+- [ ] Mod 侧直连 API（`SongApiClient`：点歌/一起听名单走 HTTP，失败回退聊天）——服务端已就绪，待实现并重打 jar
+- [x] Mod 直连 API（SongApiClient，纯 Java 标准库，http/https + Token）：
+  点歌/一起听名单/加入优先走 HTTPS，失败自动回退聊天；机器人端新增 POST /api/song/join
+- [x] Mod「我的」页可配：模式（服务器 / 自用：完全不连服务器）、API 开关、API 地址(https)、Token、机器人超时(5-180s)
+- [x] 客户端命令 /songmod join <玩家>（Fabric 客户端命令 API；26.x 用 ClientCommands，1.21.x 用 ClientCommandManager）
+- [x] 谁点歌了：机器人播出时公屏播报，可点击按钮（/tellraw + clickEvent → 客户端命令 → HTTPS API join）；
+  配置 song.announceRequest / announceStyle(click|plain) / announceText；无 OP 自动回退纯文本
+- [x] 一起听「只能点玩家后面的按钮」：名单每行右侧独立按钮，行本身不响应点击；自用模式隐藏/提示
+- [x] 测试：tests/test_song_announce.py（4 项）、tests/test_song_api.py 扩展 join；Python 全量 173 项通过
+- [x] 两代源码 Gradle 编译通过（1.21.11 / 26.2），全量 15 版本重打 jar
+### v0.3.6-26.11.15-Fxied 补充（点歌架构改为服务端解析 + 进度条）
+
+- [x] 点歌改为 `mod → 机器人 HTTP API → 网易云 → API 返回播放数据 → Mod`：
+  - 服务端 `POST /api/song/request` 用**机器人自己的 Cookie** 搜索、取会员直链、取歌词（`netease.lyric`），
+    返回 `data{title,artist,label,url,id,duration,trial,at,lyrics}`；客户端不再搜歌/取链/查歌词
+  - Mod 点歌直接 POST API → 收到播放数据立刻播；不再发聊天、不再回退聊天；「停止」只停本地
+  - 一起听：页签切换不再自动请求，只有「刷新名单」发请求；加入仍走 `/api/song/join`（服务端返回进度+歌词）
+  - 客户端只配 API 地址/Token/超时/模式；Cookie、端口、触发词等都在机器人侧配置
+- [x] 进度条修复：拖动先记时间再判断（不再被 tick 拉回）、`duration>0` 即可拖、拖动后 1.2s 内不覆盖；
+  原位 seek 1.5s 未生效时自动按目标进度用直链重新起播（兼容解码器跳不过去的情况）
+- [x] 测试：tests/test_song_api.py 改为验证服务端解析返回播放数据/歌词（mock netease），全量 Python 169 项通过
+- [x] 全量 15 版本 jar 重打 + 安装包重打
+### v0.3.6-26.11.15-Fxied 补充（示例地址写死 + GUI 配置 + 端口 8767）
+
+- [x] Mod 点歌服务地址**写死**为示例站点 `https://cubexmusic.qingchengsep.top`（`SongApiClient.DEFAULT_BASE`）；
+  客户端不再显示/允许编辑 API 地址，只填 Token；改地址需改源码重新编译；也可把自己的机器人接入该站点
+- [x] 默认端口 8765 → **8767**（config `qq.imageHttpPort`），GUI 可改（CTk 与 tkinter「点歌」页都加「点歌服务（HTTP API）」配置区：
+  启用开关 / 端口 / Token / 播报谁点歌 / 播报方式 / 文案 / 网易云 Cookie，保存即生效）
+- [x] `Controller.start_song_api()`：保存配置立即启动/停止 HTTP 服务；连接服务器时也会按配置自动启动
+- [x] 文档：点歌API.md / README / README_EN 说明「地址写死为示例站点、改需重编译、端口 8767」
+- [x] 测试：Python 169 项通过；CTk 配置往返 smoke 通过；两代 Mod 编译通过；15 版本 jar 重打
+- [x] 玩家零配置：点歌地址 + **32 位内置握手 Token**（``SongApiClient.DEFAULT_TOKEN` = 服务端 `song.apiToken` 默认值`）；
+  客户端每次请求带 X-Token，服务端校验 401；新增 `GET /api/song/ping` 握手自检；
+  Mod「我的」页不再显示 Token/地址输入（只保留模式/超时/API 开关）
+- [x] AGENTS.md 开发守则：用户要求 push 时**直接用其本机 GitHub 账户**（凭据管理器），不询问/索要/打印 Token
+
+### v0.3.6-26.11.15（聊天点歌 + GUI 设置版）
+
+- [x] 回退到 v0.3.5 后重建：从备份恢复播放引擎/界面/歌词/一起听，点歌改回聊天（`[点歌]歌名`、`[点歌]一起听 玩家`）
+- [x] 全部删除 HTTP 网关 API（Mod 端地址/Token/请求逻辑、机器人 /api/song/* 与 GUI 点歌服务配置）
+- [x] Mod GUI 只做播放设置：进度条/倍速/暂停/停止/歌词方式/音量/Cookie；一起听页保留
+- [x] 保留 v0.3.6 修复：进度条拖动、坏帧重同步、一起听防刷屏、界面不拥挤、倍速顺序
+- [x] 版本号 v0.3.6-26.11.15；安装包重做（UI + 全量打包）；160 项 Python 测试通过

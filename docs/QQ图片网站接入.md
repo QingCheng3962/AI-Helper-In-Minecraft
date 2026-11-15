@@ -13,7 +13,7 @@
 ## 一、方案一：A 自己开（本地直接用）
 
 ```
-网站 / 浏览器 ──HTTP──▶ A:8765（机器人内置服务）
+网站 / 浏览器 ──HTTP──▶ A:8767（机器人内置服务）
 ```
 
 ### 1. 机器人配置
@@ -25,7 +25,7 @@ GUI → **QQ 转述 → 图片转本地链接**：
 | 启用网站 API | ✅ |
 | **网站出站方式** | **此设备出站** |
 | 监听地址 | `127.0.0.1` |
-| 端口 | `8765` |
+| 端口 | `8767` |
 | 公网地址 | `https://pic.qingchengsep.top`（没有公网留空） |
 | Token | 长随机串 |
 
@@ -37,7 +37,7 @@ GUI → **QQ 转述 → 图片转本地链接**：
 import httpx
 
 resp = httpx.get(
-    "http://127.0.0.1:8765/api/qq/messages",
+    "http://127.0.0.1:8767/api/qq/messages",
     params={"since": 0, "limit": 50},
     headers={"X-Token": "机器人里的 Token"},
     timeout=10,
@@ -57,20 +57,20 @@ const r = await fetch('/api/qq/messages?since=0&limit=50', {
 });
 ```
 
-图片：`<img src="http://127.0.0.1:8765/pic_http/xxx.jpg">`
+图片：`<img src="http://127.0.0.1:8767/pic_http/xxx.jpg">`
 
 ### 3. 要公网
 
 - 监听地址改 `0.0.0.0`（或只让反代访问 `127.0.0.1`）
-- 本机 Nginx 反代 8765
-- Cloudflare Tunnel 指向本机 Nginx 或 `http://127.0.0.1:8765`
+- 本机 Nginx 反代 8767
+- Cloudflare Tunnel 指向本机 Nginx 或 `http://127.0.0.1:8767`
 
 ---
 
 ## 二、方案二：A/B 分离（B 跑 `other_qq_pic_sent`）
 
 ```
-A（内网 bot）192.168.1.23:8765
+A（内网 bot）192.168.1.23:8767
         │ 内网 HTTP + Token
         ▼
 B（服务器）other_qq_pic_sent/
@@ -88,16 +88,16 @@ Cloudflare Tunnel → https://pic.qingchengsep.top
 | 启用网站 API | ✅ |
 | **网站出站方式** | **内网其他设备出站**（自动把监听地址设为 `0.0.0.0`） |
 | 监听地址 | `0.0.0.0` |
-| 端口 | `8765` |
+| 端口 | `8767` |
 | 公网地址 | `https://pic.qingchengsep.top` |
 | Token | 长随机串（B 要用） |
 
-保存 → 重连 QQ。A 的防火墙只放行 B 的 IP 到 8765。
+保存 → 重连 QQ。A 的防火墙只放行 B 的 IP 到 8767。
 
 B 上验证：
 
 ```bash
-curl http://192.168.1.23:8765/health
+curl http://192.168.1.23:8767/health
 ```
 
 ### 2. B 部署（Python 3.9+，无第三方依赖）
@@ -111,7 +111,7 @@ cp relay.example.json relay.json
 
 ```json
 {
-  "upstream_base": "http://192.168.1.23:8765",
+  "upstream_base": "http://192.168.1.23:8767",
   "upstream_token": "A 的 Token",
   "listen_host": "127.0.0.1",
   "listen_port": 18765,
@@ -185,7 +185,7 @@ ingress:
 
 ### 4. A/B 不在同一内网
 
-用 frp / Tailscale / WireGuard 把 A:8765 映射到 B 的 `127.0.0.1:18764`：
+用 frp / Tailscale / WireGuard 把 A:8767 映射到 B 的 `127.0.0.1:18764`：
 
 ```json
 "upstream_base": "http://127.0.0.1:18764",
@@ -353,7 +353,7 @@ poll();
 ## 七、常见问题
 
 **Q：B 的 `/health` 显示 `upstream_ok: false`？**
-A：B 访问不到 A。先在 B 上 `curl http://A:8765/health`，查 IP/端口/防火墙/Token。
+A：B 访问不到 A。先在 B 上 `curl http://A:8767/health`，查 IP/端口/防火墙/Token。
 
 **Q：开启了登录，提示未配置密码？**
 A：运行 `hash_password.py`，把输出填到 `web.password_hash`，重启 webapp。

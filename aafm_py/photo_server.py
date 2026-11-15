@@ -261,7 +261,7 @@ class _PhotoHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Max-Age', '86400')
 
     def _json(self, code: int, obj: Any) -> None:
-        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        body = json.dumps(obj, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -272,6 +272,16 @@ class _PhotoHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def _song_authorized(self) -> bool:
+        token = str(self.photo.song_token or '')
+        if not token:
+            return self._authorized()
+        supplied = (self.headers.get('X-Token')
+                    or self.headers.get('X-Api-Token') or '')
+        if not supplied:
+            supplied = (self._query().get('token') or [''])[0]
+        return _credential_equal(str(supplied), token)
 
     def _authorized(self) -> bool:
         token = str(self.photo.token or '')
@@ -462,6 +472,11 @@ class PhotoServer:
         self._seq = 0
         # 每次启动都换一个实例 ID：中继靠它识别「上游重启、ID 从 1 重新计数」。
         self.instance = uuid.uuid4().hex
+        #: 点歌 API 回调（由 Controller 注入；None = 未启用）
+        self.song_request = None
+        self.song_join = None
+        self.song_state = None
+        self.song_listeners = None
 
     @property
     def running(self) -> bool:

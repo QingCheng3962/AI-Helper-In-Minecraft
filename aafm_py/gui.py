@@ -22,7 +22,7 @@ from .config import (AiPlayerConfig, AppConfig, AUTH_PROFILE_FILE,
                      TEMPLATE_ASSISTANT, TEMPLATE_BUDDY, PromptTemplateManager,
                      load_auth_profile)
 from .controller import Controller, BASE_DIR
-from . import docbook
+from . import docbook, links, portscan
 
 TEMPLATE_BUILTINS = {
     '聊天搭子': TEMPLATE_BUDDY,
@@ -297,6 +297,15 @@ class AiPlayerGUI:
                         command=self._on_ai_enabled).pack(side='left', padx=4)
         ttk.Button(bar, text='重开上下文', command=self._on_clear_context).pack(side='left', padx=4)
         ttk.Button(bar, text='保存设置', command=self._on_save).pack(side='left', padx=4)
+
+        # 右侧：端口扫描 + 官方链接（和新的 CustomTkinter 界面保持一致）
+        ttk.Button(bar, text='开发者博客',
+                   command=lambda: self._open_link(links.BLOG_URL, '开发者博客')).pack(
+            side='right', padx=(4, 0))
+        ttk.Button(bar, text='支持与工单',
+                   command=lambda: self._open_link(links.SUPPORT_URL, '支持与工单')).pack(
+            side='right', padx=4)
+        ttk.Button(bar, text='端口扫描', command=self._on_port_scan).pack(side='right', padx=4)
 
     def _build_notebook(self) -> None:
         self.notebook = ttk.Notebook(self.root)
@@ -731,13 +740,12 @@ class AiPlayerGUI:
             row=6, column=0, columnspan=3, sticky='w', padx=4)
         play.columnconfigure(1, weight=1)
 
-        info = ttk.LabelFrame(sc.inner, text='说明 / 使用方法（服务端零改动）', padding=8)
+        info = ttk.LabelFrame(sc.inner, text='说明 / 使用方法', padding=8)
         info.pack(fill='x', pady=(8, 0))
         ttk.Label(info, justify='left', wraplength=780, foreground='#666666',
                   text=(
-                      '原理：机器人在「点歌」页登录网易云会员后，看到聊天里的 [点歌]歌名 就用会员账号'
-                      '解析出可播放直链并发到公屏，各客户端 Mod 直接播放 —— 相当于“全服点歌”，'
-                      '而**服务端不需要装任何插件**。\n'
+                      '原理：玩家在聊天里发 [点歌]歌名（或 [点歌]一起听 玩家），机器人用会员 Cookie 解析出\n'
+                      '可播放直链并\/msg 私聊回来，客户端 Mod 负责播放；GUI 只用来设置倍速\/歌词\/音量。\n'
                       '  1) 把点歌 Mod（songmod，Fabric 1.21.1~26.2）放进玩家的 mods/ 文件夹；\n'
                       '  2) 玩家在聊天里发 [点歌]告白气球，或直接用 Mod 里的「点歌台」界面；\n'
                       '     （玩家发 [点歌]help 机器人会私聊他全部用法：歌名/停止/台/help/登录）\n'
@@ -2013,9 +2021,9 @@ class AiPlayerGUI:
         ttk.Radiobutton(r4, text='内网其他设备出站（B 跑 other_qq_pic_sent）',
                         variable=self.var_qq_web_mode, value='relay',
                         command=self._on_qq_web_mode).pack(side='left', padx=(12, 0))
-        ttk.Label(img, text='A 自己开：网站/CF 直接连本机 127.0.0.1:8765；'
+        ttk.Label(img, text='A 自己开：网站/CF 直接连本机 127.0.0.1:8767；'
                             'B 转发：B 上运行 other_qq_pic_sent/relay.py，'
-                            'A 只需让 B 能访问 8765（监听地址 0.0.0.0）。',
+                            'A 只需让 B 能访问 8767（监听地址 0.0.0.0）。',
                   foreground='#888888', wraplength=780, justify='left').pack(anchor='w', padx=2, pady=(2, 0))
         ttk.Label(img, text='监听地址：127.0.0.1=只给本机反代；0.0.0.0=允许 B 机器经内网访问（需防火墙限制）。'
                             '公网地址留空=自动探测公网 IP，例 https://pic.qingchengsep.top。'
@@ -2832,7 +2840,7 @@ class AiPlayerGUI:
         qq.toolTrigger = self.var_qq_tool_trigger.get().strip() or '[AI工具]'
         qq.imageAsLink = self.var_qq_image_link.get()
         qq.imageHttpHost = (self.var_qq_img_host.get() or '0.0.0.0').strip()
-        qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8765)
+        qq.imageHttpPort = self._parse_int(self.var_qq_img_port.get(), 8767)
         qq.imagePublicBase = self.var_qq_img_base.get().strip()
         qq.webApiEnabled = bool(self.var_qq_web_api.get())
         qq.webApiToken = self.var_qq_web_token.get().strip()
@@ -2963,6 +2971,137 @@ class AiPlayerGUI:
         misc.validate()
 
         return self._save_configs(cfg, ai)
+
+    # ------------------------------------------------------------------
+    # 端口扫描 + 官方链接（v0.3.6-26.11.14 起，和 CustomTkinter 界面同步）
+    # ------------------------------------------------------------------
+    def _open_link(self, url: str, name: str = '') -> None:
+        if links.open_url(url):
+            self._append_log('已打开' + (name or '链接') + '：' + url, 'info')
+        else:
+            messagebox.showwarning('aafm', '打开浏览器失败，请手动访问：\n' + url)
+
+    def _on_port_scan(self) -> None:
+        """端口扫描小窗：常见端口 / 自定义范围 / 全端口，能识别 MC 版本与 MOTD。"""
+        win = tk.Toplevel(self.root)
+        win.title('端口扫描（找服务器真正的端口）')
+        win.geometry('660x500')
+        win.transient(self.root)
+
+        host_var = tk.StringVar(value=(self.var_host.get().strip() or ''))
+        mode_var = tk.StringVar(value='常见端口')
+        start_var = tk.StringVar(value='25500')
+        end_var = tk.StringVar(value='25600')
+        state = {'stop': False, 'rows': []}
+
+        top = ttk.Frame(win, padding=8)
+        top.pack(fill='x')
+        ttk.Label(top, text='地址').grid(row=0, column=0, sticky='w', padx=4, pady=4)
+        ttk.Entry(top, textvariable=host_var, width=26).grid(
+            row=0, column=1, sticky='we', padx=4, pady=4)
+        ttk.Label(top, text='模式').grid(row=0, column=2, sticky='w', padx=4, pady=4)
+        ttk.Combobox(top, textvariable=mode_var, width=14, state='readonly',
+                     values=['常见端口', '自定义范围', '全端口(慢)']).grid(
+            row=0, column=3, sticky='w', padx=4, pady=4)
+        ttk.Label(top, text='范围').grid(row=0, column=4, sticky='w', padx=(12, 2), pady=4)
+        ttk.Entry(top, textvariable=start_var, width=7).grid(
+            row=0, column=5, sticky='w', padx=2, pady=4)
+        ttk.Entry(top, textvariable=end_var, width=7).grid(
+            row=0, column=6, sticky='w', padx=2, pady=4)
+        top.columnconfigure(1, weight=1)
+
+        bar = ttk.Frame(win, padding=(8, 0))
+        bar.pack(fill='x')
+        status = ttk.Label(bar, text='点「开始扫描」：先扫端口，再对开放端口识别 Minecraft。')
+        status.pack(side='left', padx=4)
+        text = tk.Text(win, height=18, wrap='none')
+        scroll = ttk.Scrollbar(win, orient='vertical', command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.pack(side='left', fill='both', expand=True, padx=(8, 0), pady=8)
+        scroll.pack(side='right', fill='y', pady=8, padx=(0, 8))
+
+        def append(line: str) -> None:
+            text.configure(state='normal')
+            text.insert('end', line + '\n')
+            text.configure(state='disabled')
+            text.see('end')
+
+        def fill_port() -> None:
+            rows = state.get('rows') or []
+            if not rows:
+                messagebox.showinfo('aafm', '还没扫到 Minecraft 端口', parent=win)
+                return
+            port = str(rows[0]['port'])
+            self.var_port.set(port)
+            self._append_log('端口扫描：已把端口 ' + port + ' 填到设置里', 'info')
+            messagebox.showinfo('aafm', '已把端口 ' + port + ' 填到设置页', parent=win)
+
+        def stop() -> None:
+            state['stop'] = True
+            status.config(text='正在停止…')
+
+        def start() -> None:
+            host = host_var.get().strip()
+            if not host:
+                messagebox.showwarning('aafm', '先填服务器地址', parent=win)
+                return
+            if state.get('thread') and state['thread'].is_alive():
+                return
+            state['stop'] = False
+            state['rows'] = []
+            text.configure(state='normal')
+            text.delete('1.0', 'end')
+            text.configure(state='disabled')
+            mode = mode_var.get()
+            try:
+                lo = int(start_var.get().strip())
+                hi = int(end_var.get().strip())
+            except ValueError:
+                lo, hi = 25500, 25600
+            status.config(text='正在扫描 ' + host + ' …')
+
+            def work() -> None:
+                started = time.time()
+                try:
+                    if mode == '自定义范围':
+                        ports = list(range(max(1, lo), min(65535, hi) + 1))
+                    elif mode.startswith('全端口'):
+                        ports = list(range(1, 65536))
+                    else:
+                        ports = list(portscan.COMMON_PORTS)
+                    open_ports = portscan.scan(
+                        host, ports, timeout=0.35, workers=64,
+                        should_stop=lambda: state['stop'])
+                    win.after(0, lambda: status.config(
+                        text='开放端口 %d 个，正在识别 Minecraft…' % len(open_ports)))
+                    rows = []
+                    for port in open_ports:
+                        if state['stop']:
+                            break
+                        info = portscan.minecraft_status(host, port, timeout=2.0)
+                        if info:
+                            rows.append({'port': port, 'info': info})
+                            line = '%-6s  [MC]  %-12s %s/%s  %s' % (
+                                port, info.get('version') or '?',
+                                info.get('online'), info.get('max'),
+                                (info.get('motd') or '').replace('\n', ' ')[:60])
+                        else:
+                            line = '%-6s  端口开放（不是 MC 或未响应 status）' % port
+                        win.after(0, lambda l=line: append(l))
+                    state['rows'] = rows
+                    elapsed = time.time() - started
+                    win.after(0, lambda: status.config(
+                        text='扫描完成：%d 个开放端口，其中 %d 个是 Minecraft（%.1fs）'
+                             % (len(open_ports), len(rows), elapsed)))
+                except Exception as e:  # noqa: BLE001
+                    win.after(0, lambda: status.config(text='扫描出错：' + str(e)))
+
+            state['thread'] = threading.Thread(target=work, daemon=True)
+            state['thread'].start()
+
+        ttk.Button(bar, text='开始扫描', command=start).pack(side='right', padx=4)
+        ttk.Button(bar, text='停止', command=stop).pack(side='right', padx=4)
+        ttk.Button(bar, text='把 MC 端口填到设置', command=fill_port).pack(side='right', padx=4)
 
     def _on_save(self):
         if not self._gather_config():

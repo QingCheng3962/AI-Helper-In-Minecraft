@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Helper In Minecraft · 宣传片</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#03060a;overflow:hidden;
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,-apple-system,sans-serif;
+    color:#e8eef4;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  #viewport{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden}
+  #stage{width:1920px;height:1080px;position:relative;overflow:hidden;flex:none;
+    background:
+      radial-gradient(1400px 900px at 6% -12%,rgba(52,211,153,.18) 0%,transparent 55%),
+      radial-gradient(1200px 800px at 104% 108%,rgba(56,189,248,.16) 0%,transparent 55%),
+      radial-gradient(900px 700px at 60% 120%,rgba(167,139,250,.10) 0%,transparent 60%),
+      linear-gradient(165deg,#05090e 0%,#04070b 55%,#03060a 100%)}
+
+  /* ============ 背景装饰 ============ */
+  .bg-grid{position:absolute;inset:-12%;
+    background-image:linear-gradient(rgba(148,197,170,.055) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(148,197,170,.055) 1px,transparent 1px);
+    background-size:80px 80px;
+    -webkit-mask-image:radial-gradient(circle at 50% 42%,#000 0%,transparent 74%);
+            mask-image:radial-gradient(circle at 50% 42%,#000 0%,transparent 74%);
+    animation:gridmove 20s linear infinite}
+  @keyframes gridmove{to{background-position:80px 80px,80px 80px}}
+  .beam{position:absolute;top:-40%;left:-30%;width:80%;height:160%;
+    background:linear-gradient(105deg,transparent 42%,rgba(126,231,199,.055) 50%,transparent 58%);
+    transform:rotate(8deg);animation:beam 16s ease-in-out infinite}
+  @keyframes beam{0%,100%{transform:translateX(-12%) rotate(8deg)}50%{transform:translateX(45%) rotate(8deg)}}
+  .glow{position:absolute;border-radius:50%;filter:blur(110px);opacity:.45;animation:float 22s ease-in-out infinite}
+  .g1{width:780px;height:780px;left:-240px;top:-260px;background:#127a52}
+  .g2{width:720px;height:720px;right:-260px;bottom:-300px;background:#124a7a;animation-delay:-9s}
+  @keyframes float{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(56px,44px,0) scale(1.09)}}
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(circle at 50% 50%,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+  /* ============ HUD ============ */
+  #hud{position:absolute;left:0;right:0;top:0;height:92px;display:flex;align-items:center;
+    justify-content:space-between;padding:0 140px;z-index:20;pointer-events:none}
+  .brand{display:flex;align-items:center;gap:14px;font-size:20px;letter-spacing:.22em;color:#9fb3ad;font-weight:700}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:#34d399;box-shadow:0 0 14px #34d399;
+    animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+  .cnt{font-family:Consolas,monospace;font-size:20px;color:#6b7c88;letter-spacing:.1em}
+  .cnt b{color:#34d399;font-size:24px}
+  .hairline{position:absolute;left:140px;right:140px;top:92px;height:1px;
+    background:linear-gradient(90deg,rgba(52,211,153,.5),rgba(56,189,248,.16) 45%,transparent 85%)}
+
+  /* ============ 场景 ============ */
+  .scene{position:absolute;inset:0;padding:140px 140px 110px;display:flex;flex-direction:column;
+    justify-content:center;opacity:0;transform:scale(.988);pointer-events:none;
+    transition:opacity .5s ease,transform .7s cubic-bezier(.2,.7,.25,1)}
+  .scene.active{opacity:1;transform:none}
+  .ghost{position:absolute;right:110px;top:96px;font-size:300px;font-weight:900;line-height:1;
+    color:rgba(255,255,255,.035);letter-spacing:-.05em;font-family:Consolas,monospace;pointer-events:none}
+
+  .anim{opacity:0;transform:translateY(30px) scale(.975);filter:blur(5px)}
+  .scene.active .anim{animation:pop .62s cubic-bezier(.16,.9,.3,1) forwards;animation-delay:var(--d,0s)}
+  @keyframes pop{
+    0%{opacity:0;transform:translateY(30px) scale(.975);filter:blur(5px)}
+    55%{opacity:1;filter:blur(0)}
+    100%{opacity:1;transform:none;filter:blur(0)}
+  }
+
+  /* ============ 文字系统 ============ */
+  .kicker{display:flex;align-items:center;gap:18px;font-size:23px;font-weight:800;
+    letter-spacing:.2em;color:#5eead4;text-transform:uppercase}
+  .kicker b{font-family:Consolas,monospace;color:#2dd4bf;opacity:.75;font-weight:700}
+  .kicker::after{content:"";flex:none;width:90px;height:1px;
+    background:linear-gradient(90deg,rgba(94,234,212,.6),transparent)}
+  .h2{font-size:76px;line-height:1.12;font-weight:900;letter-spacing:-.025em;margin:24px 0 18px;max-width:1560px}
+  .h2 em{font-style:normal;background:linear-gradient(96deg,#6ee7b7,#38bdf8 55%,#a78bfa);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:31px;line-height:1.6;color:#9aaab6;max-width:1480px}
+  .dim{color:#78868f}
+
+  .title{font-size:158px;font-weight:900;line-height:.94;letter-spacing:-.04em;margin:30px 0 26px;
+    background:linear-gradient(100deg,#f7fbff 0%,#a7f3d0 34%,#6ee7f9 62%,#c4b5fd 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 24px 60px rgba(52,211,153,.16))}
+  .lead{font-size:42px;line-height:1.45;color:#d6e2df;font-weight:700}
+  .lead small{display:block;margin-top:14px;font-size:28px;font-weight:400;color:#8a99a4;letter-spacing:.02em}
+
+  .pill{align-self:flex-start;display:inline-flex;align-items:center;gap:12px;font-size:21px;
+    letter-spacing:.12em;color:#a9d8c8;border:1px solid rgba(52,211,153,.32);
+    background:linear-gradient(180deg,rgba(52,211,153,.14),rgba(52,211,153,.04));
+    padding:12px 24px;border-radius:999px;font-weight:700}
+
+  .chips{display:flex;gap:14px;flex-wrap:wrap}
+  .chips span{font-size:24px;color:#c6d8d2;border:1px solid rgba(255,255,255,.11);
+    background:rgba(255,255,255,.04);padding:13px 24px;border-radius:13px;font-weight:600}
+
+  /* ============ 数据条 ============ */
+  .stats{display:flex;gap:70px;margin-top:62px;align-items:flex-end}
+  .stat b{display:block;font-size:64px;font-weight:900;letter-spacing:-.03em;
+    background:linear-gradient(180deg,#f2fbf7,#6ee7b7);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat span{display:block;margin-top:6px;font-size:22px;color:#7f8f99;letter-spacing:.14em}
+  .stat i{display:block;width:56px;height:2px;margin-bottom:18px;
+    background:linear-gradient(90deg,#34d399,transparent)}
+
+  /* ============ 场景 2 痛点 ============ */
+  .pains{list-style:none;margin-top:38px;display:flex;flex-direction:column;gap:24px;max-width:1560px}
+  .pains li{display:flex;align-items:center;gap:26px;font-size:42px;font-weight:800;color:#e4edf3;
+    padding:26px 32px;border-radius:20px;background:linear-gradient(90deg,rgba(255,255,255,.045),transparent 65%);
+    border-left:2px solid rgba(248,113,113,.55)}
+  .pains b{width:56px;height:56px;flex:none;border-radius:16px;display:grid;place-items:center;font-size:30px;
+    color:#fca5a5;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.35)}
+  .pains em{font-style:normal;font-size:23px;font-weight:400;color:#8a99a4;margin-left:8px}
+
+  /* ============ 卡片 ============ */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:52px}
+  .cards.four{grid-template-columns:repeat(4,1fr)}
+  .cards.two{grid-template-columns:repeat(2,1fr)}
+  .cardx{position:relative;padding:38px 34px 40px;border-radius:24px;overflow:hidden;
+    background:linear-gradient(180deg,rgba(255,255,255,.062),rgba(255,255,255,.014));
+    border:1px solid rgba(255,255,255,.085);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 34px 70px rgba(0,0,0,.42)}
+  .cardx::after{content:"";position:absolute;inset:0;border-radius:24px;pointer-events:none;
+    background:linear-gradient(120deg,transparent 38%,rgba(126,231,199,.10) 50%,transparent 62%);
+    transform:translateX(-130%);animation:sheen 4.2s ease-in-out infinite}
+  @keyframes sheen{45%,100%{transform:translateX(130%)}}
+  .cardx .num{font-family:Consolas,monospace;font-size:20px;font-weight:700;letter-spacing:.18em;color:#2dd4bf;opacity:.9}
+  .cardx h3{font-size:36px;margin:14px 0 14px;font-weight:900;letter-spacing:-.01em}
+  .cardx p{font-size:23px;line-height:1.66;color:#9fadb7}
+  .cardx .ico{width:58px;height:58px;border-radius:17px;display:grid;place-items:center;font-size:26px;
+    font-weight:900;color:#04120c;background:linear-gradient(135deg,#6ee7b7,#38bdf8);margin-bottom:18px}
+
+  /* ============ 架构 ============ */
+  .arch{display:grid;grid-template-columns:1fr 128px 1fr 128px 1fr;align-items:stretch;margin-top:46px}
+  .node{padding:30px 28px;border-radius:22px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.012));
+    border:1px solid rgba(255,255,255,.09);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+  .node .ntag{font-family:Consolas,monospace;font-size:17px;letter-spacing:.1em;color:#5eead4;margin-bottom:12px}
+  .node h4{font-size:30px;font-weight:900;margin-bottom:12px}
+  .node p{font-size:21px;line-height:1.6;color:#93a1ab}
+  .alink{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    color:#5eead4;font-size:32px}
+  .alink span{font-size:15px;letter-spacing:.12em;color:#6f7f89;text-align:center;line-height:1.3}
+  .svc{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+  .svc span{font-size:19px;color:#8fa6b0;border:1px dashed rgba(255,255,255,.16);
+    padding:10px 18px;border-radius:11px;font-family:Consolas,"Microsoft YaHei",monospace}
+
+  /* ============ 聊天 ============ */
+  .cols{display:grid;grid-template-columns:1.35fr .95fr;gap:44px;margin-top:40px;align-items:start}
+  .chat{border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);
+    background:rgba(6,11,16,.82);box-shadow:0 40px 90px rgba(0,0,0,.55)}
+  .chead{display:flex;align-items:center;gap:12px;padding:16px 26px;font-size:19px;letter-spacing:.12em;
+    color:#7f8f99;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.025)}
+  .chead .cdot{width:9px;height:9px;border-radius:50%;background:#34d399;box-shadow:0 0 10px #34d399}
+  .chat .body{padding:14px 26px 20px}
+  .chat .line{display:flex;gap:14px;padding:13px 0;align-items:flex-start}
+  .av{width:38px;height:38px;flex:none;border-radius:11px;display:grid;place-items:center;
+    font-size:17px;font-weight:900;color:#04120c;background:linear-gradient(135deg,#94a3b8,#cbd5e1)}
+  .av.bot{background:linear-gradient(135deg,#6ee7b7,#38bdf8)}
+  .line .txt{font-size:24px;line-height:1.5;color:#d5dfe6;
+    font-family:"Microsoft YaHei",Consolas,monospace}
+  .line .who{display:block;font-size:18px;color:#7f8f99;margin-bottom:4px;letter-spacing:.06em}
+  .line .who.bot{color:#5eead4}
+  .side h3{font-size:29px;font-weight:900;margin-bottom:20px}
+  .side ul{list-style:none;display:flex;flex-direction:column;gap:16px}
+  .side li{font-size:21px;line-height:1.55;color:#93a1ab;padding-left:20px;position:relative}
+  .side li::before{content:"";position:absolute;left:0;top:9px;width:8px;height:8px;border-radius:50%;
+    background:#34d399;box-shadow:0 0 10px rgba(52,211,153,.7)}
+  .side li b{display:block;color:#e2edf3;font-size:22px;margin-bottom:3px;font-weight:800}
+
+  /* ============ 流程 ============ */
+  .flow{display:grid;grid-template-columns:1fr 54px 1fr 54px 1fr 54px 1fr;align-items:stretch;margin-top:48px}
+  .step{padding:30px 26px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.012));
+    border:1px solid rgba(255,255,255,.09);min-width:0}
+  .step .ico{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:23px;font-weight:900;
+    color:#04120c;background:linear-gradient(135deg,#6ee7b7,#38bdf8)}
+  .step h4{font-size:29px;margin:16px 0 8px;font-weight:900}
+  .step p{font-size:21px;color:#93a1ab;line-height:1.5}
+  .arrow{display:grid;place-items:center;color:#34d399;font-size:30px}
+  .arrow span{display:block;animation:slide 1.5s ease-in-out infinite}
+  @keyframes slide{0%,100%{transform:translateX(-4px);opacity:.5}50%{transform:translateX(5px);opacity:1}}
+
+  /* ============ 结尾 ============ */
+  .url{font-size:66px;font-weight:900;letter-spacing:-.03em;line-height:1.2;
+    background:linear-gradient(96deg,#a7f3d0,#67e8f9 45%,#c4b5fd);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .footnote{position:absolute;left:140px;bottom:74px;font-size:19px;color:#5d6b75;letter-spacing:.16em;
+    font-family:Consolas,monospace}
+
+  /* ============ UI ============ */
+  #ui{position:absolute;inset:0;pointer-events:none;transition:opacity .4s ease;z-index:20}
+  #ui.hide{opacity:0}
+  .dots{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);display:flex;gap:10px}
+  .dots i{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.2);transition:.35s}
+  .dots i.on{background:#34d399;width:26px;border-radius:5px;box-shadow:0 0 12px rgba(52,211,153,.6)}
+  .hint{position:absolute;right:140px;bottom:28px;font-size:16px;color:#4e5b64;font-family:Consolas,monospace}
+  #bar{position:absolute;left:0;bottom:0;height:2px;width:0;z-index:21;
+    background:linear-gradient(90deg,#34d399,#38bdf8,#a78bfa)}
+  #paused{position:absolute;right:140px;top:34px;font-family:Consolas,monospace;font-size:16px;
+    letter-spacing:.2em;color:#34d399;opacity:0;transition:.25s;z-index:22}
+  #paused.on{opacity:1}
+  body.clean #ui, body.clean #bar, body.clean #paused{display:none}
+</style>
+</head>
+<body>
+<div id="viewport">
+  <div id="stage">
+    <div class="bg-grid"></div>
+    <div class="beam"></div>
+    <div class="glow g1"></div>
+    <div class="glow g2"></div>
+    <div class="vignette"></div>
+
+    <div id="hud">
+      <div class="brand"><span class="dot"></span>AI HELPER · MINECRAFT</div>
+      <div class="cnt"><b id="cur">01</b> / <span id="tot">12</span></div>
+    </div>
+    <div class="hairline"></div>
+
+    <!-- 01 片头 -->
+    <section class="scene" data-scene="1">
+      <div class="ghost">01</div>
+      <div class="pill anim" style="--d:.05s">Fabric 1.21.1 – 26.2 &nbsp;·&nbsp; Apache-2.0 &nbsp;·&nbsp; v0.3.1</div>
+      <h1 class="title anim" style="--d:.15s">AI Helper<br>In Minecraft</h1>
+      <p class="lead anim" style="--d:.42s">一个不用打开游戏就能上线的 Minecraft AI 玩家
+        <small>GUI 点一下 → 机器人进服 → 会聊天 · 会点歌 · 会记好感度 · 服务端零插件</small></p>
+      <div class="stats anim" style="--d:.72s">
+        <div class="stat"><i></i><b>15</b><span>游戏版本</span></div>
+        <div class="stat"><i></i><b>0</b><span>服务端插件</span></div>
+        <div class="stat"><i></i><b>7</b><span>功能标签页</span></div>
+        <div class="stat"><i></i><b>3</b><span>登录方式</span></div>
+      </div>
+    </section>
+
+    <!-- 02 痛点 -->
+    <section class="scene" data-scene="2">
+      <div class="ghost">02</div>
+      <div class="kicker anim"><b>01</b>痛点</div>
+      <h2 class="h2 anim" style="--d:.1s">想在服里加个 <em>AI 玩家</em>，<br>通常卡在这三件事</h2>
+      <ul class="pains">
+        <li class="anim" style="--d:.3s"><b>✕</b>服务器不让装插件<em>没有权限，也不想动服务端</em></li>
+        <li class="anim" style="--d:.5s"><b>✕</b>开游戏挂后台<em>卡顿、掉线、还烧显卡</em></li>
+        <li class="anim" style="--d:.7s"><b>✕</b>现成的机器人只会复读<em>不会聊天，更不会陪人玩</em></li>
+      </ul>
+      <p class="sub anim" style="--d:.95s;margin-top:44px">所以这个项目换了个思路 —— <span class="dim">机器人不进游戏本体，而是「模拟一个玩家」连进去。</span></p>
+    </section>
+
+    <!-- 03 方案 -->
+    <section class="scene" data-scene="3">
+      <div class="ghost">03</div>
+      <div class="kicker anim"><b>02</b>解决方案</div>
+      <h2 class="h2 anim" style="--d:.1s">纯客户端机器人，<em>服务端一个插件都不用装</em></h2>
+      <div class="cards">
+        <div class="cardx anim" style="--d:.28s">
+          <div class="ico">1</div>
+          <div class="num">NO GAME CLIENT</div>
+          <h3>不用打开游戏</h3>
+          <p>Python 图形界面控制 Node.js（mineflayer）无头进服。MC 本体不用装、不用开，电脑也不用来回切窗口。</p>
+        </div>
+        <div class="cardx anim" style="--d:.44s">
+          <div class="ico">2</div>
+          <div class="num">ANY SERVER</div>
+          <h3>任意服务器可用</h3>
+          <p>对服务器来说它就是一个普通玩家：不用服主配合、不用改配置、不用申请权限，换个 IP 就能用。</p>
+        </div>
+        <div class="cardx anim" style="--d:.6s">
+          <div class="ico">3</div>
+          <div class="num">LLM DRIVEN</div>
+          <h3>大模型驱动</h3>
+          <p>OpenAI 兼容端点（也支持 Anthropic）。系统提示词、人格模板、上下文窗口、触发词、冷却都能调。</p>
+        </div>
+      </div>
+      <div class="chips anim" style="--d:.8s;margin-top:40px">
+        <span>离线 / LittleSkin / 微软正版</span>
+        <span>掉线自动重登 · 被踢自动重连</span>
+        <span>踢出后自动执行 /lobby</span>
+      </div>
+    </section>
+
+    <!-- 04 架构 -->
+    <section class="scene" data-scene="4">
+      <div class="ghost">04</div>
+      <div class="kicker anim"><b>03</b>它是怎么跑起来的</div>
+      <h2 class="h2 anim" style="--d:.1s">三层结构，<em>互不粘连</em></h2>
+      <div class="arch">
+        <div class="node anim" style="--d:.25s">
+          <div class="ntag">Python · tkinter</div>
+          <h4>控制台 GUI</h4>
+          <p>设置 / AI 配置 / 玩家配置 / 文档转书 / 点歌 / 杂项 / QQ 转述 / 重连·踢出 / 界面美化 / 日志</p>
+        </div>
+        <div class="alink anim" style="--d:.4s"><span>配置 · 会话</span>⇄</div>
+        <div class="node anim" style="--d:.45s">
+          <div class="ntag">Node.js · mineflayer</div>
+          <h4>无头客户端</h4>
+          <p>协议层连接服务器：登录、收发聊天、写书与笔、自动答题、自动进食</p>
+        </div>
+        <div class="alink anim" style="--d:.6s"><span>Minecraft</span>→</div>
+        <div class="node anim" style="--d:.65s">
+          <div class="ntag">任何 1.21+ 服务器</div>
+          <h4>游戏服务器</h4>
+          <p>服务端零改动，不装插件、不改配置，机器人对服务器就是一个普通玩家</p>
+        </div>
+      </div>
+      <div class="svc anim" style="--d:.85s">
+        <span>LLM API · OpenAI 兼容 / Anthropic</span>
+        <span>网易云音乐</span>
+        <span>bilibili 视频推荐</span>
+        <span>OneBot 11 QQ 网关</span>
+      </div>
+    </section>
+
+    <!-- 05 聊天 -->
+    <section class="scene" data-scene="5">
+      <div class="ghost">05</div>
+      <div class="kicker anim"><b>04</b>核心能力</div>
+      <h2 class="h2 anim" style="--d:.1s">不是复读机，是<em>有设定的 AI 玩家</em></h2>
+      <div class="cols">
+        <div class="chat anim" style="--d:.2s">
+          <div class="chead"><span class="cdot"></span>服务器聊天</div>
+          <div class="body">
+            <div class="line anim"><span class="av">S</span><div><span class="who">Steve</span><span class="txt">[bot] 晚上好！今天挖到好多钻石</span></div></div>
+            <div class="line anim"><span class="av bot">B</span><div><span class="who bot">[bot]</span><span class="txt">晚上好 Steve！手气不错，要不要我陪你去要塞把末影龙收了？</span></div></div>
+            <div class="line anim"><span class="av">A</span><div><span class="who">Alex</span><span class="txt">[bot] 帮我看看今天的幸运值</span></div></div>
+            <div class="line anim"><span class="av bot">B</span><div><span class="who bot">[bot]</span><span class="txt">今日幸运值 64 / 100 —— 宜挖矿，忌空手进下界</span></div></div>
+            <div class="line anim"><span class="av">S</span><div><span class="who">Steve</span><span class="txt">[bot] 点歌 起风了</span></div></div>
+          </div>
+        </div>
+        <div class="side anim" style="--d:.35s">
+          <h3>被调成你想要的性格</h3>
+          <ul>
+            <li><b>人格与提示词</b>系统提示词 + 多套模板，换个人设就是另一个角色</li>
+            <li><b>上下文窗口</b>记住最近若干条对话，接得上上下句</li>
+            <li><b>触发词</b>[bot]、@bot 等可自定义，支持正则与多条并列</li>
+            <li><b>冷却与黑名单</b>每个玩家独立冷却，防刷屏；一键屏蔽</li>
+            <li><b>文生图</b>需要时把生成的图片链接发到聊天</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 点歌 -->
+    <section class="scene" data-scene="6">
+      <div class="ghost">06</div>
+      <div class="kicker anim"><b>05</b>游戏内点歌</div>
+      <h2 class="h2 anim" style="--d:.1s">公屏一句话，<em>只有你听得见</em></h2>
+      <div class="flow">
+        <div class="step anim" style="--d:.25s"><div class="ico">1</div><h4>你发一句</h4><p>[点歌] 起风了</p></div>
+        <div class="arrow anim"><span>&#8594;</span></div>
+        <div class="step anim" style="--d:.35s"><div class="ico">2</div><h4>机器人解析</h4><p>会员账号搜歌、取播放直链</p></div>
+        <div class="arrow anim"><span>&#8594;</span></div>
+        <div class="step anim" style="--d:.5s"><div class="ico">3</div><h4>私聊回你</h4><p>链接只发给点歌的人，不打扰别人</p></div>
+        <div class="arrow anim"><span>&#8594;</span></div>
+        <div class="step anim" style="--d:.65s"><div class="ico">4</div><h4>本机播放</h4><p>Fabric 客户端 Mod 收到链接即播</p></div>
+      </div>
+      <div class="chips anim" style="--d:.9s;margin-top:38px">
+        <span>谁点谁听</span><span>服务端不用装插件</span><span>同一首直接复用直链</span>
+        <span>机器人不在线可本地兜底搜索</span><span>[点歌]停止 只停自己的</span>
+      </div>
+    </section>
+
+    <!-- 07 日常三件套 -->
+    <section class="scene" data-scene="7">
+      <div class="ghost">07</div>
+      <div class="kicker anim"><b>06</b>把人留在服里</div>
+      <h2 class="h2 anim" style="--d:.1s">好感度 · 签到 · 幸运值</h2>
+      <div class="cards">
+        <div class="cardx anim" style="--d:.25s">
+          <div class="num">AFFINITY</div>
+          <h3>好感度</h3>
+          <p>聊天 +1（5 分钟冷却）、点歌成功 +2（1 分钟冷却）、每天首次互动再 +1。<br>六级：陌生人 → 脸熟 → 熟人 → 朋友 → 好朋友 → 挚友，随时查自己或别人的分数。</p>
+        </div>
+        <div class="cardx anim" style="--d:.4s">
+          <div class="num">CHECK-IN</div>
+          <h3>每日签到</h3>
+          <p>金币随机 + 连签加成，还能给物品奖励；奖励用两行命令发放，命令与文案都能改。<br>连签天数、累计次数长期保存，重启不丢。</p>
+        </div>
+        <div class="cardx anim" style="--d:.55s">
+          <div class="num">LUCKY</div>
+          <h3>今日幸运值</h3>
+          <p>每天第一次被问到时随机定下来，当天不再变化。<br>值写进本地 SQLite，关掉程序、重启电脑也还是同一个数字。</p>
+        </div>
+      </div>
+      <p class="sub anim" style="--d:.75s;margin-top:34px">每日数据统一走 <span class="dim">daily.db</span>：跨天自动备份旧库、重建新库，签到记录和连签连续不断。</p>
+    </section>
+
+    <!-- 08 社区功能 -->
+    <section class="scene" data-scene="8">
+      <div class="ghost">08</div>
+      <div class="kicker anim"><b>07</b>活跃气氛</div>
+      <h2 class="h2 anim" style="--d:.1s">推荐视频、群发通知，<em>服主的手</em></h2>
+      <div class="cards two">
+        <div class="cardx anim" style="--d:.25s">
+          <div class="num">BILIBILI</div>
+          <h3>视频推荐</h3>
+          <p>发一句提示词，公屏推一批 B 站视频：标题 + 备注 + <b style="color:#e4edf3">可点击链接</b>。<br>
+          来源五选一：番剧追番榜 / 首页推荐 / 首页热门 / 全站排行 / 我的收藏夹（填 Cookie 后可下拉选夹子，随机翻页抽）。
+          全服共用冷却，冷却过后再点自动换一批新的。</p>
+        </div>
+        <div class="cardx anim" style="--d:.42s">
+          <div class="num">BROADCAST</div>
+          <h3>群发私聊</h3>
+          <p>开活动、发公告时一个个私聊过去，每个玩家之间有间隔（默认 0.5 秒），不会被当成刷屏踢下线。<br>
+          也能随时私聊单个人，或者给所有在线玩家来一句「今晚 8 点开黑」。</p>
+        </div>
+      </div>
+      <div class="chips anim" style="--d:.6s;margin-top:34px">
+        <span>每日幸运值</span><span>视频推荐</span><span>签到</span><span>帮助</span><span>好感度</span>
+        <span class="dim" style="border-style:dashed">以上全部认自定义提示词，不是 [点歌]</span>
+      </div>
+    </section>
+
+    <!-- 09 QQ -->
+    <section class="scene" data-scene="9">
+      <div class="ghost">09</div>
+      <div class="kicker anim"><b>08</b>跨平台</div>
+      <h2 class="h2 anim" style="--d:.1s">QQ 群 <em>⇄</em> 服务器公屏，双向打通</h2>
+      <div class="arch" style="grid-template-columns:1fr 150px 1fr">
+        <div class="node anim" style="--d:.25s">
+          <div class="ntag">QQ 群</div>
+          <h4>群里说的话</h4>
+          <p style="font-family:Consolas,'Microsoft YaHei',monospace;color:#c3d2dc">[群名][昵称]：这周六开黑吗<br>[图片] / [表情] 自动占位<br>可选图片存本地并以链接发出</p>
+        </div>
+        <div class="alink anim" style="--d:.45s"><span>OneBot 11</span>⇄<span>正 / 反向</span></div>
+        <div class="node anim" style="--d:.5s">
+          <div class="ntag">Minecraft</div>
+          <h4>服里看到的</h4>
+          <p style="font-family:Consolas,'Microsoft YaHei',monospace;color:#c3d2dc">&amp;7&amp;o[群名][昵称]：这周六开黑吗<br>[sentQ] 内容 → 发到群里<br>公屏回执：转述成功 / 失败</p>
+        </div>
+      </div>
+      <div class="chips anim" style="--d:.7s;margin-top:36px">
+        <span>NapCat / SnowLuma / Lagrange</span><span>[sentQ:群号] 临时指定群</span>
+        <span>冷却 · 去颜色码 · 非法字符替换</span><span>账号安全：疑似风控停止重连</span>
+      </div>
+    </section>
+
+    <!-- 10 工程细节 -->
+    <section class="scene" data-scene="10">
+      <div class="ghost">10</div>
+      <div class="kicker anim"><b>09</b>细节都做完了</div>
+      <h2 class="h2 anim" style="--d:.1s">长期挂着也<em>不用人管</em></h2>
+      <div class="cards four" style="grid-template-columns:repeat(2,1fr)">
+        <div class="cardx anim" style="--d:.22s">
+          <div class="num">AUTO</div><h3>掉线自愈</h3>
+          <p>连接意外结束按设定延迟自动重连，次数可限；被踢出重连成功后自动执行 /lobby。外置登录 5xx / 超时按指数退避重试，提示最多每 60 秒一条。</p>
+        </div>
+        <div class="cardx anim" style="--d:.36s">
+          <div class="num">BOOK</div><h3>文档转书</h3>
+          <p>把 .docx / .doc / .txt 按书页宽度自动换行、按行数翻页，在游戏里写进书与笔；支持署名成书、记录进度、续写、暂停停止。</p>
+        </div>
+        <div class="cardx anim" style="--d:.5s">
+          <div class="num">LOG</div><h3>日志按天存</h3>
+          <p>公屏、私聊、公告、ActionBar 与程序日志全部入内存，跨天或关闭时写成 logs/yyyy_mm_dd_第N次.txt，事后可查。</p>
+        </div>
+        <div class="cardx anim" style="--d:.64s">
+          <div class="num">EXTRA</div><h3>还带这些小工具</h3>
+          <p>自动答题、自动进食（旧项目保留）；本地图片 HTTP 服务；低血量自动喊话；界面可换背景图与字体主题。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 版本 -->
+    <section class="scene" data-scene="11">
+      <div class="ghost">11</div>
+      <div class="kicker anim"><b>10</b>客户端 Mod</div>
+      <h2 class="h2 anim" style="--d:.1s">一份源码，<em>15 个</em>游戏版本</h2>
+      <div class="chips anim" style="--d:.25s;margin-top:44px">
+        <span style="font-family:Consolas,monospace">1.21.1</span>
+        <span style="font-family:Consolas,monospace">1.21.3</span>
+        <span style="font-family:Consolas,monospace">1.21.4</span>
+        <span style="font-family:Consolas,monospace">1.21.5</span>
+        <span style="font-family:Consolas,monospace">1.21.6</span>
+        <span style="font-family:Consolas,monospace">1.21.8</span>
+        <span style="font-family:Consolas,monospace">1.21.9</span>
+        <span style="font-family:Consolas,monospace">1.21.11</span>
+        <span style="font-family:Consolas,monospace">26.1</span>
+        <span style="font-family:Consolas,monospace">26.1.2</span>
+        <span style="font-family:Consolas,monospace;color:#04120c;background:linear-gradient(135deg,#6ee7b7,#a7f3d0);border-color:transparent;font-weight:900">26.2</span>
+      </div>
+      <p class="sub anim" style="--d:.45s;margin-top:34px">
+        共用一套业务代码，1.21.x 走 mojmap + 重映射 Loom（带游戏内「点歌台」界面），26.x 走未混淆 + Java 25（无界面）。
+        <span class="dim">构建脚本一条命令全量出包。</span></p>
+      <div class="chips anim" style="--d:.6s;margin-top:30px">
+        <span style="font-family:Consolas,monospace;font-size:21px">gradle build -Pmcver=1.21.11</span>
+        <span style="font-family:Consolas,monospace;font-size:21px">build_all.ps1 → dist/Song_0.1.0_&lt;游戏版本&gt;.jar</span>
+      </div>
+      <div class="chips anim" style="--d:.75s;margin-top:22px">
+        <span>需要 Fabric API</span><span>Java 21 / 26.x 用 25</span><span>ZMusic 服务端插件可选</span>
+      </div>
+    </section>
+
+    <!-- 12 结尾 -->
+    <section class="scene" data-scene="12">
+      <div class="ghost">12</div>
+      <div class="kicker anim"><b>11</b>开源 · Apache-2.0</div>
+      <h2 class="h2 anim" style="--d:.1s">代码就在这，<em>拿去用</em></h2>
+      <div class="url anim" style="--d:.3s">github.com/QingCheng3962/<br>AI-Helper-In-Minecraft</div>
+      <p class="sub anim" style="--d:.5s;margin-top:26px">
+        欢迎 Issue / PR / Star —— Bug 反馈、功能建议、文档修正、多版本兼容测试都算贡献。</p>
+      <div class="chips anim" style="--d:.68s;margin-top:40px">
+        <span>Star</span><span>Fork</span><span>Issue</span><span>PR</span>
+      </div>
+      <div class="footnote anim" style="--d:.85s">AI HELPER IN MINECRAFT · v0.3.1 · MOD 0.1.0 · APACHE-2.0</div>
+    </section>
+
+    <div id="ui">
+      <div class="dots" id="dots"></div>
+      <div class="hint">空格 播放/暂停 · ← → 切换 · R 重播 · F 全屏 · H 隐藏</div>
+    </div>
+    <div id="paused">PAUSED</div>
+    <div id="bar"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
+  var bar = document.getElementById('bar');
+  var dots = document.getElementById('dots');
+  var ui = document.getElementById('ui');
+  var pausedTag = document.getElementById('paused');
+  var stage = document.getElementById('stage');
+  var curEl = document.getElementById('cur');
+  document.getElementById('tot').textContent = String(scenes.length).padStart(2, '0');
+
+  /* ============================================================
+     逐条弹出：把 chips / stats 里的子项、侧栏列表拆成独立条目
+     ============================================================ */
+  scenes.forEach(function(sc){
+    sc.querySelectorAll('.chips, .stats').forEach(function(group){
+      group.classList.remove('anim');
+      Array.prototype.forEach.call(group.children, function(ch){ ch.classList.add('anim'); });
+    });
+    Array.prototype.forEach.call(sc.querySelectorAll('.side li, .svc span'), function(el){
+      el.classList.add('anim');
+    });
+  });
+
+  /* ============================================================
+     自动排期：每个条目按顺序出现，页面时长按条目数自动拉长
+     BASE   第一条出现的时间（秒）
+     SPREAD 所有条目排完所需的时间窗
+     PACE   相邻条目最长间隔（越小越紧凑，越大越"一条一条"）
+     HOLD   最后一条出现后停留多久
+     ============================================================ */
+  var BASE = 0.15, SPREAD = 4.6, PACE = 0.9, HOLD = 3.0;
+  var DUR = [];
+
+  scenes.forEach(function(sc, i){
+    var items = Array.prototype.slice.call(sc.querySelectorAll('.anim'));
+    var weights = items.map(function(el){ return el.closest('.chat') ? 2 : 1; });
+    var total = weights.reduce(function(a, b){ return a + b; }, 0) || 1;
+    var cum = 0, last = BASE;
+    items.forEach(function(el, k){
+      var d = BASE + SPREAD * (cum / total);
+      if (k > 0) d = Math.min(d, last + PACE);
+      el.style.setProperty('--d', d.toFixed(3) + 's');
+      cum += weights[k];
+      last = d;
+    });
+    DUR[i] = Math.round((last + 0.75 + HOLD) * 10) / 10;
+  });
+  console.log('总时长约 ' + DUR.reduce(function(a, b){ return a + b; }, 0).toFixed(1) + 's', DUR);
+
+  var idx = 0, playing = true, start = 0, elapsed = 0;
+
+  scenes.forEach(function(s, i){
+    var d = document.createElement('i');
+    if (i === 0) d.className = 'on';
+    dots.appendChild(d);
+  });
+  var dotEls = Array.prototype.slice.call(dots.children);
+
+  function show(i){
+    scenes.forEach(function(s, k){ s.classList.toggle('active', k === i); });
+    dotEls.forEach(function(d, k){ d.classList.toggle('on', k === i); });
+    curEl.textContent = String(i + 1).padStart(2, '0');
+  }
+
+  function goto(i, autoplay){
+    idx = (i + scenes.length) % scenes.length;
+    elapsed = 0;
+    start = performance.now();
+    if (autoplay !== undefined) setPlaying(autoplay);
+    show(idx);
+    bar.style.width = '0%';
+  }
+
+  function setPlaying(p){
+    if (p === playing) return;
+    if (p) start = performance.now() - elapsed * 1000;
+    playing = p;
+    pausedTag.classList.toggle('on', !playing);
+  }
+
+  function frame(now){
+    if (playing){
+      elapsed = (now - start) / 1000;
+      bar.style.width = Math.min(100, elapsed / DUR[idx] * 100) + '%';
+      if (elapsed >= DUR[idx]){
+        if (idx === scenes.length - 1){ setPlaying(false); bar.style.width = '100%'; }
+        else goto(idx + 1);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function fit(){
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+
+  document.addEventListener('keydown', function(e){
+    var k = e.key;
+    if (k === ' ' || k === 'Spacebar'){ e.preventDefault(); setPlaying(!playing); }
+    else if (k === 'ArrowRight'){ goto(idx + 1, true); }
+    else if (k === 'ArrowLeft'){ goto(idx - 1, playing); }
+    else if (k === 'r' || k === 'R'){ goto(0, true); }
+    else if (k === 'f' || k === 'F'){
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+    else if (k === 'h' || k === 'H'){ ui.classList.toggle('hide'); }
+    else if (k === 'Home'){ goto(0, true); }
+  });
+
+  document.addEventListener('click', function(e){
+    if (e.clientX > window.innerWidth / 2) goto(idx + 1, playing);
+    else goto(idx - 1, playing);
+  });
+
+  var idle;
+  function poke(){
+    ui.classList.remove('hide');
+    clearTimeout(idle);
+    idle = setTimeout(function(){ ui.classList.add('hide'); }, 2500);
+  }
+  window.addEventListener('mousemove', poke);
+  poke();
+
+  var qs = new URLSearchParams(location.search);
+  if (qs.has('clean')) document.body.classList.add('clean');
+  var forced = parseInt(qs.get('scene'), 10);
+  if (!isNaN(forced) && forced >= 1 && forced <= scenes.length){
+    goto(forced - 1, false);
+  } else {
+    goto(0, true);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.5** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.6-26.11.15** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,8 +31,31 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> All version labels follow Semantic Versioning (`MAJOR.MINOR.PATCH`). **The latest release is below**; **historical entries (v0.3.2 and earlier) live in [更新日志.md](更新日志.md)** (Chinese, with an English appendix).
-> Current version: **`v0.3.5`**; the client mod stays at `0.1.0` (jar names unchanged).
+> Only v0.3.6-26.11.15 / v0.3.6-26.11.14 / v0.3.6 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
+
+### v0.3.6-26.11.15
+
+- **Chat-based song requests restored**: `[点歌]song`, `[点歌]一起听 player`, speed/stop/lyrics commands; the bot resolves the stream link and /msg's it to the requester (private per-player playback).
+- **HTTP gateway API removed**: the mod no longer configures addresses/tokens and the bot no longer serves `/api/song/*` (no external gateway cost).
+- **Mod GUI settings**: draggable progress bar, speed 0.5–2.0, pause/resume, stop, lyric mode (action bar/title/chat/off), volume, own NetEase cookie (local fallback), listener page.
+- **Fixes**: seek crash (bad-frame resync), slider not draggable (no snap-back + restart-from-position fallback), listener spam, roomier song GUI, speed order 2.0→0.5.
+- **Installer**: new UI + full packaging (15 mod jars, server plugin, sources, tests, docs; NapCat optional).
+- Regression: 160 Python tests pass.
+
+### v0.3.6-26.11.14
+
+- **Both GUIs now expose the full feature set**: the CustomTkinter UI gained every tab (AI / player config, doc-to-book, player roster, QQ relay, reconnect, misc, port scan, logs, about; theme switch). The original tkinter UI also received port scanning plus support-ticket / dev-blog buttons, and both share the same `data.db`.
+- **One-click Windows installer** (`installer/`): a C# setup wizard wrapped in a single `.exe` — pick an install folder, extract, create desktop/Start-menu shortcuts. It bundles the Python 3.9 runtime with every pip dependency, the Node runtime and production `node_modules`, so the target machine needs **no Python/Node installed**. NapCat is bundled by default and optional at install time.
+- **Runtime data in SQLite** (`data.db`): affinity, book-write progress, prompt templates and QQ account records (tables `affinity`/`kv`/`prompt_templates`/`qq_accounts`/`meta`; WAL + single lock). Old JSON files are auto-migrated on first access and backed up as `<name>.json.bak`.
+- Settings (`config.json` / `mcai_chat.json`) intentionally stay JSON (hand-editable, contain API keys).
+- The installer also ships all 15 song-Mod jars (`Mod/`), the ZMusic server plugin, docs and the promo page.
+- Regression: Python 156 tests pass; installer silent-install + bundled-Python import self-check passes.
+
+### v0.3.6
+
+- New CustomTkinter GUI (Settings / Songs / Tools / Logs / About) as the default entry; `python main.py --legacy` keeps the original tkinter UI.
+- Song Mod: brand-new in-game GUI (draggable progress, speed 0.5–2.0, listen-together, in-game lyrics) for both 1.21.x and 26.x.
+- Port scanning with Minecraft Server List Ping; support-ticket / dev-blog links.
 
 ### v0.3.5
 
@@ -42,36 +65,6 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Spreadsheet safety**: XLSX column insertion rewrites formula references (#42); player names/descriptions/aliases are prefixed with `'` to block formula injection (#54).
 - **Process/credentials**: shutdown stops the receipt worker and drops queued tickets (#46); AutoEat uses generations so old timers cannot touch a new session (#47); browser launch uses `execFile` and only allows `http/https` (#55); the relay only sends its token to the upstream origin and strips it on cross-origin redirects (#56).
 - Regression tests: Python 156, Node 58, and Java song-mod 15+15+8 scenarios pass; the ZMusic plugin builds successfully.
-
-### v0.3.4
-
-- **Configurable QQ group tool prefix**: default `[AI工具]`, editable in the GUI (`qq.toolTrigger`); supports `[AI工具]在线玩家`, `[AI工具]视频`, `[AI工具]音乐 <name>`, separate from the AI chat trigger. The old `[AI]在线玩家` is no longer a tool command.
-- **MC → QQ `@QQ number`**: writing `@123456789` in a relayed in-game message now becomes a real OneBot `at` segment in the QQ group instead of plain text.
-- **Minecraft chat receipt printer**: a new toggle in **Misc** prints **only player chat** to a Windows thermal receipt printer, effectively printing `chat.log` (ESC/POS + GBK). No server messages, bot lines, ActionBar, header, separator or cut; queued in the background, 58/80mm, per-minute cap, skip `/` commands, preview-only mode. Config keys: `misc.mcChatPrint*`.
-- Regression tests added for tool commands, `@QQ number` at segments, and receipt layout/preview/queue; Python 126 tests and Node 8 tests pass.
-
-### v0.3.3
-
-- **QQ group online players**: `[AI]在线玩家` replied with the online list (from v0.3.4 the tool prefix is configurable `[AI工具]`).
-- **Fixed emoticon codes being swallowed by media URLs**: a space is always inserted after `[图片]`/`[视频]` links, and the final MC text gets a URL-boundary pass so `...gif[哭]` cannot break the server's `URI.create()` / system-chat packet (thanks to [@FurryAoao](https://github.com/FurryAoao) for [#38](https://github.com/QingCheng3962/AI-Helper-In-Minecraft/issues/38)).
-- **QQ text can no longer spoof colour codes or media placeholders**: `&c` / `§c` are neutralised; literal `[图片]`/`[视频]` in user text no longer consumes real media links (private-use markers in the engine).
-- **Range support** for media: A/B/Web servers return `206` / `Content-Range` / `Accept-Ranges`, so `<video>` seeking works and iOS/Safari is happier.
-- **Media size / disk protection**: per-file limit (default 100 MB) and low-disk pause threshold (default 200 MB), with skip + notice.
-- **Automatic cleanup**: `pic_http/` is cleaned at most hourly by keep-days (default 7) and total-size cap (default 2 GB, 0 = unlimited), including stale `.part` files; the B relay also prunes old messages/media.
-- **`.mp4` video support**: QQ videos (`.mp4` / `.m4v` / `.mov`) are downloaded like images, relayed as `[视频] link`, returned in the website API's `videos` field, and played with `<video>`; original video names are preserved when enabled.
-- **Relay syncs videos**: `other_qq_pic_sent/relay.py` downloads/stores/serves videos, upgrades old SQLite databases with a `videos` column, and serves `/filename.mp4`; the web app CSP allows `media-src 'self'`.
-- Regression tests added for link spacing, emoticon/URL separation, `.mp4` save/serve, Range, media limits/cleanup, video serialization, relay mp4 sync and the online-player command.
-
-### v0.3.3-beta
-
-- **Website integration (QQ → website)**: `qq.webApiEnabled` / `qq.webApiToken`; built-in endpoints `/api/qq/messages`, `/api/qq/images`, `/api/qq/stream` (SSE), `/health` with token auth and CORS.
-- **Pure-image messages are no longer dropped**: `qq_engine.js` resolves images first and forwards them as `[图片]`.
-- **Images saved once**: the website API and the MC chat link share `_prepare_qq_images()`; images are still saved when MC is offline.
-- **GUI egress mode**: **This device** (A serves the website directly) or **another LAN device** (B runs the Python relay; selecting it switches the bind address to `0.0.0.0`).
-- **Python relay** (`other_qq_pic_sent/relay.py`, stdlib only): polls A, downloads images, stores messages in SQLite with local increasing IDs, fingerprint dedup, handles A restarting and resetting IDs.
-- **Python web app** (`other_qq_pic_sent/webapp.py`, stdlib only): public no-login gallery by default (optional `require_login` with PBKDF2/session/CSRF/rate limit), read-only API; image URLs are `https://domain/filename` (old `/pic_http/filename` also works).
-- Deployment templates: `docs/deploy/nginx-pic.conf`, `docs/deploy/cloudflared-pic.yml`, `other_qq_pic_sent/qq-relay.service`.
-- Docs: [`docs/QQ图片网站接入.md`](docs/QQ图片网站接入.md) and [QSP usage guide](<how to use QSP(QQ sent picture to minecraft).md>).
 
 ## Project Layout
 
