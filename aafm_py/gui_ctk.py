@@ -228,6 +228,43 @@ class CtkApp:
 
     # ---------------------------- 工具 ----------------------------
     def _build_tools_tab(self, tab) -> None:
+        # ---- 问答（聊天抢答）：题库 quiz.db + 答题记录 ----
+        qa = self._section(tab, '问答（聊天抢答）：<触发词>出题 / <触发词>答题记录 / <触发词>答案')
+        self.var_qa_enabled = ctk.BooleanVar(value=False)
+        self.var_qa_interval = ctk.StringVar(value='360')
+        self.var_qa_timeout = ctk.StringVar(value='60')
+        self.var_qa_askperday = ctk.StringVar(value='3')
+        self.var_qa_threshold = ctk.StringVar(value='0.8')
+        self.var_qa_wrong = ctk.StringVar(value='{player} 答案错误')
+        self.var_qa_correct = ctk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
+        self.var_qa_timeoutmsg = ctk.StringVar(value='【问答】本题超时，答案是：{answer}')
+        self._check(qa, '启用问答（定时出题；玩家可用 <触发词>出题 自主提问）', self.var_qa_enabled)
+        self._field(qa, '自动出题间隔(秒)', self.var_qa_interval, 90)
+        self._field(qa, '答题超时(秒)', self.var_qa_timeout, 90)
+        self._field(qa, '每人每日提问次数(0=不限)', self.var_qa_askperday, 90)
+        self._field(qa, '模糊匹配阈值(0-1)', self.var_qa_threshold, 90)
+        self._field(qa, '答错文案', self.var_qa_wrong, 360)
+        self._field(qa, '答对文案', self.var_qa_correct, 360)
+        self._field(qa, '超时文案', self.var_qa_timeoutmsg, 360)
+        ctk.CTkLabel(qa, text='答对奖励命令（每行一条，支持 {player}，例如 /pay {player} 100）',
+                     text_color='#90a4ae').pack(anchor='w', padx=16, pady=(4, 0))
+        self.qa_rewards_box = ctk.CTkTextbox(qa, height=90)
+        self.qa_rewards_box.pack(fill='x', padx=12, pady=(2, 6))
+        qa_bar = ctk.CTkFrame(qa)
+        qa_bar.pack(fill='x', padx=12, pady=(0, 6))
+        for text, handler in (('保存问答设置', self._save_qa),
+                              ('立即出题', self._on_qa_ask),
+                              ('导入题库JSON…', self._on_qa_import),
+                              ('导出题库JSON…', self._on_qa_export),
+                              ('刷新统计', self._refresh_qa)):
+            ctk.CTkButton(qa_bar, text=text, width=130, command=handler).pack(
+                side='left', padx=4, pady=4)
+        self.qa_info = ctk.CTkLabel(qa, text='题库：-', text_color='#90a4ae', anchor='w')
+        self.qa_info.pack(anchor='w', padx=16, pady=(0, 6))
+
+    # ------------------------------------------------------------------
+    # 问答（杂项页）
+    # ------------------------------------------------------------------
         scan = ctk.CTkFrame(tab)
         scan.pack(fill='x', padx=8, pady=8)
         ctk.CTkLabel(scan, text='端口扫描', anchor='w',
@@ -323,43 +360,6 @@ class CtkApp:
         self._check(misc, '仅生成预览不真打印（dry-run）', self.var_receipt_dryrun)
 
 
-        # ---- 问答（聊天抢答）：题库 quiz.db + 答题记录 ----
-        qa = self._section(tab, '问答（聊天抢答）：<触发词>出题 / <触发词>答题记录 / <触发词>答案')
-        self.var_qa_enabled = ctk.BooleanVar(value=False)
-        self.var_qa_interval = ctk.StringVar(value='360')
-        self.var_qa_timeout = ctk.StringVar(value='60')
-        self.var_qa_askperday = ctk.StringVar(value='3')
-        self.var_qa_threshold = ctk.StringVar(value='0.8')
-        self.var_qa_wrong = ctk.StringVar(value='{player} 答案错误')
-        self.var_qa_correct = ctk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
-        self.var_qa_timeoutmsg = ctk.StringVar(value='【问答】本题超时，答案是：{answer}')
-        self._check(qa, '启用问答（定时出题；玩家可用 <触发词>出题 自主提问）', self.var_qa_enabled)
-        self._field(qa, '自动出题间隔(秒)', self.var_qa_interval, 90)
-        self._field(qa, '答题超时(秒)', self.var_qa_timeout, 90)
-        self._field(qa, '每人每日提问次数(0=不限)', self.var_qa_askperday, 90)
-        self._field(qa, '模糊匹配阈值(0-1)', self.var_qa_threshold, 90)
-        self._field(qa, '答错文案', self.var_qa_wrong, 360)
-        self._field(qa, '答对文案', self.var_qa_correct, 360)
-        self._field(qa, '超时文案', self.var_qa_timeoutmsg, 360)
-        ctk.CTkLabel(qa, text='答对奖励命令（每行一条，支持 {player}，例如 /pay {player} 100）',
-                     text_color='#90a4ae').pack(anchor='w', padx=16, pady=(4, 0))
-        self.qa_rewards_box = ctk.CTkTextbox(qa, height=90)
-        self.qa_rewards_box.pack(fill='x', padx=12, pady=(2, 6))
-        qa_bar = ctk.CTkFrame(qa)
-        qa_bar.pack(fill='x', padx=12, pady=(0, 6))
-        for text, handler in (('保存问答设置', self._save_qa),
-                              ('立即出题', self._on_qa_ask),
-                              ('导入题库JSON…', self._on_qa_import),
-                              ('导出题库JSON…', self._on_qa_export),
-                              ('刷新统计', self._refresh_qa)):
-            ctk.CTkButton(qa_bar, text=text, width=130, command=handler).pack(
-                side='left', padx=4, pady=4)
-        self.qa_info = ctk.CTkLabel(qa, text='题库：-', text_color='#90a4ae', anchor='w')
-        self.qa_info.pack(anchor='w', padx=16, pady=(0, 6))
-
-    # ------------------------------------------------------------------
-    # 问答（杂项页）
-    # ------------------------------------------------------------------
     def _save_qa(self) -> None:
         cfg = self.controller.config
         qa = cfg.qa

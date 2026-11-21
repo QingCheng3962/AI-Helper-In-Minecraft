@@ -873,6 +873,46 @@ class AiPlayerGUI:
         sc = ScrollFrame(host)
         sc.pack(fill='both', expand=True)
 
+        # ---------------- 问答（聊天抢答） ----------------
+        qa = ttk.LabelFrame(sc.inner, text='问答（聊天抢答）：<触发词>出题 / <触发词>答题记录 / <触发词>答案', padding=8)
+        qa.pack(fill='x', pady=(8, 0))
+        self.var_qa_enabled = tk.BooleanVar(value=False)
+        row = ttk.Frame(qa)
+        row.pack(fill='x', pady=2)
+        ttk.Checkbutton(row, text='启用问答（定时出题；玩家可 <触发词>出题 自主提问）',
+                        variable=self.var_qa_enabled).pack(side='left', padx=4)
+        self.var_qa_interval = tk.StringVar(value='360')
+        self.var_qa_timeout = tk.StringVar(value='60')
+        self.var_qa_askperday = tk.StringVar(value='3')
+        self.var_qa_threshold = tk.StringVar(value='0.8')
+        for label, var, width in (('自动间隔(秒)', self.var_qa_interval, 7),
+                                  ('超时(秒)', self.var_qa_timeout, 6),
+                                  ('每日提问', self.var_qa_askperday, 5),
+                                  ('模糊阈值', self.var_qa_threshold, 5)):
+            ttk.Label(row, text=label).pack(side='left', padx=(10, 2))
+            ttk.Entry(row, textvariable=var, width=width).pack(side='left')
+        self.var_qa_wrong = tk.StringVar(value='{player} 答案错误')
+        self.var_qa_correct = tk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
+        self.var_qa_timeoutmsg = tk.StringVar(value='【问答】本题超时，答案是：{answer}')
+        self._entry(qa, 0, '答错文案', self.var_qa_wrong, hint='支持 {player}')
+        self._entry(qa, 1, '答对文案', self.var_qa_correct, hint='支持 {player} {answer}')
+        self._entry(qa, 2, '超时文案', self.var_qa_timeoutmsg, hint='支持 {answer}')
+        ttk.Label(qa, text='答对奖励命令（每行一条，支持 {player}，如 /pay {player} 100、/give {player} diamond 1）',
+                  foreground='#888888', wraplength=780, justify='left').grid(
+            row=3, column=0, columnspan=3, sticky='w', padx=4)
+        self.qa_rewards_box = tk.Text(qa, height=5, wrap='none')
+        self.qa_rewards_box.grid(row=4, column=0, columnspan=3, sticky='we', padx=4, pady=2)
+        bar = ttk.Frame(qa)
+        bar.grid(row=5, column=0, columnspan=3, sticky='w', pady=(4, 0))
+        ttk.Button(bar, text='保存问答设置', command=self._on_save_qa).pack(side='left', padx=4)
+        ttk.Button(bar, text='立即出题', command=self._on_qa_ask).pack(side='left', padx=4)
+        ttk.Button(bar, text='导入题库JSON…', command=self._on_qa_import).pack(side='left', padx=4)
+        ttk.Button(bar, text='导出题库JSON…', command=self._on_qa_export).pack(side='left', padx=4)
+        ttk.Button(bar, text='刷新统计', command=self._refresh_qa).pack(side='left', padx=4)
+        self.qa_info = ttk.Label(qa, text='题库：-', foreground='#888888')
+        self.qa_info.grid(row=6, column=0, columnspan=3, sticky='w', padx=4, pady=(4, 0))
+        qa.columnconfigure(1, weight=1)
+
         # ---------------- 视频推荐 ----------------
         video = ttk.LabelFrame(
             sc.inner, text='视频推荐（玩家发 [触发词]视频推荐 → 公屏推一批 B 站视频）', padding=8)
@@ -1064,46 +1104,6 @@ class AiPlayerGUI:
 
         ttk.Button(sc.inner, text='端口扫描（找服务器真实端口）', command=self._on_port_scan).pack(
             anchor='w', padx=4, pady=(8, 0))
-
-        # ---------------- 问答（聊天抢答） ----------------
-        qa = ttk.LabelFrame(sc.inner, text='问答（聊天抢答）：<触发词>出题 / <触发词>答题记录 / <触发词>答案', padding=8)
-        qa.pack(fill='x', pady=(8, 0))
-        self.var_qa_enabled = tk.BooleanVar(value=False)
-        row = ttk.Frame(qa)
-        row.pack(fill='x', pady=2)
-        ttk.Checkbutton(row, text='启用问答（定时出题；玩家可 <触发词>出题 自主提问）',
-                        variable=self.var_qa_enabled).pack(side='left', padx=4)
-        self.var_qa_interval = tk.StringVar(value='360')
-        self.var_qa_timeout = tk.StringVar(value='60')
-        self.var_qa_askperday = tk.StringVar(value='3')
-        self.var_qa_threshold = tk.StringVar(value='0.8')
-        for label, var, width in (('自动间隔(秒)', self.var_qa_interval, 7),
-                                  ('超时(秒)', self.var_qa_timeout, 6),
-                                  ('每日提问', self.var_qa_askperday, 5),
-                                  ('模糊阈值', self.var_qa_threshold, 5)):
-            ttk.Label(row, text=label).pack(side='left', padx=(10, 2))
-            ttk.Entry(row, textvariable=var, width=width).pack(side='left')
-        self.var_qa_wrong = tk.StringVar(value='{player} 答案错误')
-        self.var_qa_correct = tk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
-        self.var_qa_timeoutmsg = tk.StringVar(value='【问答】本题超时，答案是：{answer}')
-        self._entry(qa, 0, '答错文案', self.var_qa_wrong, hint='支持 {player}')
-        self._entry(qa, 1, '答对文案', self.var_qa_correct, hint='支持 {player} {answer}')
-        self._entry(qa, 2, '超时文案', self.var_qa_timeoutmsg, hint='支持 {answer}')
-        ttk.Label(qa, text='答对奖励命令（每行一条，支持 {player}，如 /pay {player} 100、/give {player} diamond 1）',
-                  foreground='#888888', wraplength=780, justify='left').grid(
-            row=3, column=0, columnspan=3, sticky='w', padx=4)
-        self.qa_rewards_box = tk.Text(qa, height=5, wrap='none')
-        self.qa_rewards_box.grid(row=4, column=0, columnspan=3, sticky='we', padx=4, pady=2)
-        bar = ttk.Frame(qa)
-        bar.grid(row=5, column=0, columnspan=3, sticky='w', pady=(4, 0))
-        ttk.Button(bar, text='保存问答设置', command=self._on_save_qa).pack(side='left', padx=4)
-        ttk.Button(bar, text='立即出题', command=self._on_qa_ask).pack(side='left', padx=4)
-        ttk.Button(bar, text='导入题库JSON…', command=self._on_qa_import).pack(side='left', padx=4)
-        ttk.Button(bar, text='导出题库JSON…', command=self._on_qa_export).pack(side='left', padx=4)
-        ttk.Button(bar, text='刷新统计', command=self._refresh_qa).pack(side='left', padx=4)
-        self.qa_info = ttk.Label(qa, text='题库：-', foreground='#888888')
-        self.qa_info.grid(row=6, column=0, columnspan=3, sticky='w', padx=4, pady=(4, 0))
-        qa.columnconfigure(1, weight=1)
 
         # ---------------- Minecraft 聊天小票机 ----------------
         rp = ttk.LabelFrame(
