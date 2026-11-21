@@ -894,24 +894,27 @@ class AiPlayerGUI:
         self.var_qa_wrong = tk.StringVar(value='{player} 答案错误')
         self.var_qa_correct = tk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
         self.var_qa_timeoutmsg = tk.StringVar(value='【问答】本题超时，答案是：{answer}')
-        self._entry(qa, 0, '答错文案', self.var_qa_wrong, hint='支持 {player}')
-        self._entry(qa, 1, '答对文案', self.var_qa_correct, hint='支持 {player} {answer}')
-        self._entry(qa, 2, '超时文案', self.var_qa_timeoutmsg, hint='支持 {answer}')
+        qa_form = ttk.Frame(qa)
+        qa_form.pack(fill='x', padx=4, pady=(6, 0))
+        self._entry(qa_form, 0, '答错文案', self.var_qa_wrong, hint='支持 {player}')
+        self._entry(qa_form, 1, '答对文案', self.var_qa_correct, hint='支持 {player} {answer}')
+        self._entry(qa_form, 2, '超时文案', self.var_qa_timeoutmsg, hint='支持 {answer}')
+        qa_form.columnconfigure(1, weight=1)
         ttk.Label(qa, text='答对奖励命令（每行一条，支持 {player}，如 /pay {player} 100、/give {player} diamond 1）',
-                  foreground='#888888', wraplength=780, justify='left').grid(
-            row=3, column=0, columnspan=3, sticky='w', padx=4)
+                  foreground='#888888', wraplength=780, justify='left').pack(
+            anchor='w', padx=4, pady=(6, 0))
         self.qa_rewards_box = tk.Text(qa, height=5, wrap='none')
-        self.qa_rewards_box.grid(row=4, column=0, columnspan=3, sticky='we', padx=4, pady=2)
+        self.qa_rewards_box.pack(fill='x', padx=4, pady=2)
         bar = ttk.Frame(qa)
-        bar.grid(row=5, column=0, columnspan=3, sticky='w', pady=(4, 0))
+        bar.pack(fill='x', pady=(4, 0))
         ttk.Button(bar, text='保存问答设置', command=self._on_save_qa).pack(side='left', padx=4)
         ttk.Button(bar, text='立即出题', command=self._on_qa_ask).pack(side='left', padx=4)
         ttk.Button(bar, text='导入题库JSON…', command=self._on_qa_import).pack(side='left', padx=4)
         ttk.Button(bar, text='导出题库JSON…', command=self._on_qa_export).pack(side='left', padx=4)
         ttk.Button(bar, text='刷新统计', command=self._refresh_qa).pack(side='left', padx=4)
         self.qa_info = ttk.Label(qa, text='题库：-', foreground='#888888')
-        self.qa_info.grid(row=6, column=0, columnspan=3, sticky='w', padx=4, pady=(4, 0))
-        qa.columnconfigure(1, weight=1)
+        self.qa_info.pack(anchor='w', padx=4, pady=(4, 0))
+
 
         # ---------------- 视频推荐 ----------------
         video = ttk.LabelFrame(
@@ -1335,6 +1338,69 @@ class AiPlayerGUI:
     # ------------------------------------------------------------------
     # Tab: 玩家资料库
     # ------------------------------------------------------------------
+    # ---------------- 问答（杂项页） ----------------
+    def _on_save_qa(self) -> None:
+        cfg = self.controller.config
+        qa = cfg.qa
+        qa.enabled = bool(self.var_qa_enabled.get())
+        qa.intervalSeconds = self._parse_int(self.var_qa_interval.get(), 360)
+        qa.timeoutSeconds = self._parse_int(self.var_qa_timeout.get(), 60)
+        qa.askPerDay = self._parse_int(self.var_qa_askperday.get(), 3)
+        try:
+            qa.fuzzyThreshold = float(self.var_qa_threshold.get())
+        except (TypeError, ValueError):
+            qa.fuzzyThreshold = 0.8
+        qa.wrongMessage = self.var_qa_wrong.get()
+        qa.correctMessage = self.var_qa_correct.get()
+        qa.timeoutMessage = self.var_qa_timeoutmsg.get()
+        qa.rewards = [line.strip() for line in
+                      (self.qa_rewards_box.get('1.0', 'end') or '').splitlines()
+                      if line.strip()]
+        qa.validate()
+        cfg.validate()
+        if not cfg.save():
+            self._append_log('问答设置保存失败（磁盘/权限？）。', 'error')
+            return
+        self._refresh_qa()
+        self._append_log('问答设置已保存。', 'info')
+
+    def _on_qa_ask(self) -> None:
+        status = self.controller.quiz.ask_public(manual=True)
+        self._append_log('问答出题：' + status, 'info' if status == 'ok' else 'warn')
+        self._refresh_qa()
+
+    def _on_qa_import(self) -> None:
+        path = filedialog.askopenfilename(title='导入题库 JSON',
+                                          filetypes=[('JSON', '*.json'), ('所有文件', '*.*')])
+        if not path:
+            return
+        try:
+            added = self.controller.quiz_store.import_json(Path(path))
+            self._append_log('题库已导入 %d 题。' % added, 'info')
+            self._refresh_qa()
+        except Exception as exc:
+            messagebox.showerror('aafm', '导入失败：\n' + str(exc))
+
+    def _on_qa_export(self) -> None:
+        path = filedialog.asksaveasfilename(title='导出题库 JSON', defaultextension='.json',
+                                            filetypes=[('JSON', '*.json')])
+        if not path:
+            return
+        try:
+            count = self.controller.quiz_store.export_json(Path(path))
+            self._append_log('题库已导出 %d 题：%s' % (count, path), 'info')
+        except Exception as exc:
+            messagebox.showerror('aafm', '导出失败：\n' + str(exc))
+
+    def _refresh_qa(self) -> None:
+        try:
+            count = self.controller.quiz_store.count()
+            current = self.controller.quiz.current
+            title = current.get('q') if current else '（当前没有题目）'
+            self.qa_info.config(text='题库：%d 题 ｜ 当前：%s' % (count, title))
+        except Exception:
+            pass
+
     def _build_roster_tab(self) -> None:
         host = ttk.Frame(self.notebook, padding=(8, 8))
         self.notebook.add(host, text=' 玩家资料库 ')

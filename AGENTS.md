@@ -72,8 +72,10 @@ powershell -ExecutionPolicy Bypass -File build_all.ps1
 
 ## 六、界面与工具（v0.3.6 起）
 
+- **tkinter 是最主要的界面，必须先把 tkinter 做完、验证能用，再去做 CustomTkinter**（用户明确要求；
+  实现顺序固定：tkinter 先行，CTk 后跟；两套功能保持一致）。
 - **两套界面功能保持一致**：新功能要么两套都加，要么在 CTk 里做并在 tkinter 里留入口；别让 exe 装完还要 --legacy 才有功能。
-- 主界面默认是 **CustomTkinter**（`aafm_py/gui_ctk.py`，`python main.py`）；原 tkinter 全功能界面用 `python main.py --legacy`。
+- 主界面默认入口是 **CustomTkinter**（`aafm_py/gui_ctk.py`，`python main.py`，需要 `pip install customtkinter`）；**功能最全、最主要维护的是原 tkinter 界面**（`python main.py --legacy`，内置 Python 运行时自带依赖）。
   改界面时**两个入口都要能跑**：新界面缺的功能可以在旧界面里找，但不要删掉旧界面。
 - 端口扫描在 `aafm_py/portscan.py`（纯标准库）；改扫描逻辑后至少手动跑一次 `python -m aafm_py.portscan <host>`。
 - 对外链接统一走 `aafm_py/links.py`（支持与工单 support.qingchengsep.top / 开发者博客 qingchengsep.top），别把 URL 散落在界面代码里。
