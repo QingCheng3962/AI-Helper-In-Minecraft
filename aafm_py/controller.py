@@ -2959,7 +2959,7 @@ class Controller:
         text = (content or raw or '').strip()
         if not text:
             return False
-        cfg = self.config.quiz
+        cfg = self.config.qa
         stripped = None
         for pattern in self._quiz_trigger_patterns():
             try:
