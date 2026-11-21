@@ -87,6 +87,9 @@ class AiWorkTests(unittest.TestCase):
         player, _, _, _ = self.make_player(provider)
         c = Controller.__new__(Controller)
         c.ai_player = player
+        c.quiz = Mock()
+        if hasattr(c.quiz, 'tick') is False:
+            c.quiz.tick = Mock()
         c._running, c._qq = True, SimpleNamespace(running=False)
         c._bot_events, c._qq_events = queue.Queue(), queue.Queue()
         c._reconnect_at = c._lobby_at = None
@@ -94,7 +97,7 @@ class AiWorkTests(unittest.TestCase):
                      '_maybe_auto_lobby', '_maybe_online_check', '_maybe_daily_rotate', '_song_tick'):
             setattr(c, name, Mock())
         for name in ('_check_reconnect_triggers', '_maybe_relay_mc_to_qq',
-                     '_maybe_bot_command', '_maybe_song_reply'):
+                     '_maybe_bot_command', '_maybe_song_reply', '_maybe_quiz_chat'):
             setattr(c, name, Mock(return_value=False))
         original = c._process_bot_event
         processed = threading.Event()

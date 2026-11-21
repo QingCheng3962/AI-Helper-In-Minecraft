@@ -217,6 +217,20 @@ class Controller:
         self._qq_nicknames: Dict[str, str] = {}
         self._load_qq_accounts()
         self._photo = PhotoServer()
+        # ---- 问答（聊天抢答）：SQLite 题库/记录 + 出题状态机 ----
+        from .quiz import QuizStore, QuizEngine
+        self.quiz_store = QuizStore(Path(BASE_DIR) / 'quiz.db') if 'Path' in globals() else QuizStore(__import__('pathlib').Path(BASE_DIR) / 'quiz.db')
+        self.quiz = QuizEngine(
+            self.quiz_store,
+            lambda: self.config.qa,
+            send_chat=self.send_chat,
+            send_private=self._quiz_private,
+            send_actionbar=None,
+            send_title=None,
+            run_commands=self._quiz_reward_commands,
+            post_log=lambda m: self._post_ui({'kind': 'log', 'level': 'quiz',
+                                              'message': '[问答] ' + str(m)}),
+        )
         # 点歌 HTTP API（/api/song/*）：Mod/网页/脚本可以不走聊天直接点歌
         self._public_base_cache = ''
 
@@ -2896,6 +2910,90 @@ class Controller:
             return '', speed
         return player, speed
 
+    # ------------------------------------------------------------------
+    # 问答（聊天抢答）：<触发词>出题 / <触发词>答题记录 / <触发词>答案
+    # ------------------------------------------------------------------
+    def _quiz_private(self, player: str, text: str) -> None:
+        name = self._msg_name(player)
+        if not name:
+            return
+        line = _mc_clip(str(text or ''), 200)
+        if not line:
+            return
+        cmd = '/msg ' + name + ' ' + line
+        try:
+            self._remember_sent(cmd)
+            self._engine.say(cmd)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _quiz_reward_commands(self, player: str, commands) -> None:
+        for raw_cmd in list(commands or []):
+            text = str(raw_cmd or '').replace('{player}', player).strip()
+            if not text:
+                continue
+            if not text.startswith('/'):
+                text = '/' + text
+            if _mc_len(text) > 250:
+                text = _mc_clip(text, 250)
+            try:
+                self._engine.say(text)
+                self._post_ui({'kind': 'log', 'level': 'quiz',
+                               'message': '[问答] 奖励命令：' + text})
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.3)
+
+    def _quiz_trigger_patterns(self):
+        try:
+            from .ai_player import _compile_trigger, _split_top_level_commas
+            regex = str(getattr(self.ai_config, 'triggerRegex', '') or '')
+            return [_compile_trigger(part) for part in _split_top_level_commas(regex)]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _maybe_quiz_chat(self, player: str, content: str, raw: str = '') -> bool:
+        """抢答/出题/记录。返回 True 表示这条消息已被问答处理。"""
+        if self._is_self_name(player):
+            return False
+        text = (content or raw or '').strip()
+        if not text:
+            return False
+        cfg = self.config.quiz
+        stripped = None
+        for pattern in self._quiz_trigger_patterns():
+            try:
+                m = pattern.search(text)
+            except Exception:  # noqa: BLE001
+                m = None
+            if m:
+                stripped = text[m.end():].strip()
+                break
+        if stripped is not None:
+            low = stripped.replace(' ', '').lower()
+            if low in ('出题', '问题', '来一题', '来道题', '题目'):
+                self.quiz.ask_manual(player)
+                return True
+            if low in ('答题记录', '问答记录', '我的记录', '记录', '统计'):
+                self._quiz_private(player, self.quiz.stats_text(player))
+                return True
+            if not stripped:
+                return False
+            if cfg.enabled and self.quiz.current is not None:
+                self.quiz.handle_answer(player, stripped)
+                return True
+            return False
+        # 没有触发词：只有「完全答对」才当抢答（避免正常聊天被判错刷屏）
+        if cfg.enabled and self.quiz.current is not None and 0 < len(text) <= 40:
+            question = self.quiz.current
+            try:
+                if self.quiz._matches(question, text):
+                    self.quiz.handle_answer(player, text)
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        return False
+
     def _maybe_song_reply(self, player: str, content: str, raw: str = '') -> bool:
         """看到聊天里的「点歌」触发词：
         ① 日志页记一条歌曲日志；
@@ -3958,6 +4056,10 @@ class Controller:
                 self._maybe_auto_lobby()
                 self._maybe_online_check()
                 self._maybe_daily_rotate()
+                try:
+                    self.quiz.tick()
+                except Exception:  # noqa: BLE001
+                    pass
                 self._maybe_media_cleanup()
                 try:
                     self._song_tick()
@@ -4010,6 +4112,8 @@ class Controller:
             if not private and self._maybe_relay_mc_to_qq(player, content):
                 return
             if self._maybe_bot_command(player, content, raw):
+                return
+            if self._maybe_quiz_chat(player, content, raw):
                 return
             if not private and self._maybe_song_reply(player, content, raw):
                 return

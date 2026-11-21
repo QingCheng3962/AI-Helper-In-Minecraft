@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.6-26.11.15** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.7** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,9 +31,9 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> Only v0.3.6-26.11.15 / v0.3.6-26.11.14 / v0.3.6 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
+> Only v0.3.7 / v0.3.6-26.11.14 / v0.3.6 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
 
-### v0.3.6-26.11.15
+### v0.3.7
 
 - **Chat-based song requests restored**: `[点歌]song`, `[点歌]一起听 player`, speed/stop/lyrics commands; the bot resolves the stream link and /msg's it to the requester (private per-player playback).
 - **HTTP gateway API removed**: the mod no longer configures addresses/tokens and the bot no longer serves `/api/song/*` (no external gateway cost).

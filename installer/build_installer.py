@@ -36,7 +36,7 @@ CSC = Path(r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe')
 NODE_EXE = Path(r'C:\Program Files\nodejs\node.exe')
 NPM_CMD = Path(r'C:\Program Files\nodejs\npm.cmd')
 NAPCAT_DIR = ROOT / 'NapCat'
-MOD_VERSION = '0.3.6-26.11.15'
+MOD_VERSION = '0.3.7'
 MAGIC = b'AAFMINS1'
 FOOTER = 48
 
@@ -57,6 +57,7 @@ ROOT_FILES = [
     '3rdparty_auth.js', 'msa_auth.js', 'utils.js', 'logger.js', 'verify.js', 'app.js',
     'package.json', 'package-lock.json', 'requirements.txt', 'README.md', 'README_EN.md',
     'HELP.md', '更新日志.md', 'TODO.md', 'LICENSE', '.env.example', 'AGENTS.md',
+    'questions.example.json',
 ]
 
 #: 要带上的目录（相对路径）

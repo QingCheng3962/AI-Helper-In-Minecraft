@@ -58,3 +58,7 @@ data.db-shm
 /dist/installer/
 /build/installer/
 /installer/build_*.log
+
+# 问答题库/记录（运行时数据）
+quiz.db
+quiz.db-*

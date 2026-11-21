@@ -447,6 +447,41 @@ class QuizConfig:
 
 
 @dataclass
+class QaConfig:
+    """聊天抢答（【问答】）：SQLite 题库 + 答题记录 + 自定义奖励命令。"""
+    enabled: bool = False
+    intervalSeconds: int = 360
+    timeoutSeconds: int = 60
+    askPerDay: int = 3
+    broadcastMode: str = 'chat'
+    promptTemplate: str = '【问答】{question}'
+    wrongMessage: str = '{player} 答案错误'
+    correctMessage: str = '【问答】{player} 答对了（答案：{answer}）'
+    timeoutMessage: str = '【问答】本题超时，答案是：{answer}'
+    askLimitMessage: str = '今天已经问过 {limit} 次了，明天再来吧'
+    statsTemplate: str = '你已答对 {correct} 题 / 共 {total} 次，今日提问 {asked}/{limit} 次'
+    fuzzyEnabled: bool = True
+    fuzzyThreshold: float = 0.8
+    wrongPublicOnce: bool = True
+    rewards: List[str] = field(default_factory=lambda: ['/pay {player} 100'])
+
+    def validate(self) -> None:
+        self.intervalSeconds = _clamp_int(self.intervalSeconds, 10, 86400)
+        self.timeoutSeconds = _clamp_int(self.timeoutSeconds, 5, 3600)
+        self.askPerDay = _clamp_int(self.askPerDay, 0, 1000)
+        mode = str(self.broadcastMode or 'chat').strip().lower()
+        self.broadcastMode = mode if mode in ('chat', 'actionbar', 'title', 'both') else 'chat'
+        self.promptTemplate = str(self.promptTemplate or '').strip() or '【问答】{question}'
+        self.wrongMessage = str(self.wrongMessage or '').strip() or '{player} 答案错误'
+        self.correctMessage = str(self.correctMessage or '').strip() or '【问答】{player} 答对了（答案：{answer}）'
+        self.timeoutMessage = str(self.timeoutMessage or '').strip() or '【问答】本题超时，答案是：{answer}'
+        self.askLimitMessage = str(self.askLimitMessage or '').strip() or '今天已经问过 {limit} 次了，明天再来吧'
+        self.statsTemplate = str(self.statsTemplate or '').strip()
+        self.fuzzyThreshold = max(0.0, min(1.0, float(self.fuzzyThreshold or 0.8)))
+        self.rewards = [str(x).strip() for x in (self.rewards or []) if str(x).strip()]
+
+
+@dataclass
 class AutoEatConfig:
     enabled: bool = True
 
@@ -1013,6 +1048,7 @@ class AppConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     quiz: QuizConfig = field(default_factory=QuizConfig)
+    qa: QaConfig = field(default_factory=QaConfig)
     autoeat: AutoEatConfig = field(default_factory=AutoEatConfig)
     healthAlert: HealthAlertConfig = field(default_factory=HealthAlertConfig)
     verify: VerifyConfig = field(default_factory=VerifyConfig)
@@ -1049,6 +1085,7 @@ class AppConfig:
         self.qq.validate()
         self.reconnect.validate()
         self.appearance.validate()
+        self.qa.validate()
         self.docBook.validate()
         self.song.validate()
         self.affinity.validate()

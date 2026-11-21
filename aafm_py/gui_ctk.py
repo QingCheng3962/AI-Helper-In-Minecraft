@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import re
 import threading
 import time
@@ -38,7 +39,7 @@ from .config import PromptTemplateManager
 from .controller import Controller
 
 APP_TITLE = 'aafm AI 玩家'
-VERSION = 'v0.3.6-26.11.15'
+VERSION = 'v0.3.7'
 
 LEVEL_COLORS = {
     'error': '#ff6b6b',
@@ -101,7 +102,7 @@ class CtkApp:
         self.tabs = ctk.CTkTabview(self.root)
         self.tabs.pack(fill='both', expand=True, padx=12, pady=(10, 12))
         for name in ('设置', 'AI 配置', '玩家配置', '点歌', '文档转书',
-                     '资料库', 'QQ 转述', '重连', '工具', '日志', '关于'):
+                     '资料库', 'QQ 转述', '重连', '杂项', '日志', '关于'):
             self.tabs.add(name)
         self._build_settings_tab(self.tabs.tab('设置'))
         self._build_ai_tab(self.tabs.tab('AI 配置'))
@@ -111,7 +112,7 @@ class CtkApp:
         self._build_roster_tab(self.tabs.tab('资料库'))
         self._build_qq_tab(self.tabs.tab('QQ 转述'))
         self._build_reconnect_tab(self.tabs.tab('重连'))
-        self._build_tools_tab(self.tabs.tab('工具'))
+        self._build_tools_tab(self.tabs.tab('杂项'))
         self._build_log_tab(self.tabs.tab('日志'))
         self._build_about_tab(self.tabs.tab('关于'))
 
@@ -139,7 +140,7 @@ class CtkApp:
                 row=index, column=1, padx=8, pady=6, sticky='w')
             if label == '端口':
                 ctk.CTkButton(frame, text='端口扫描', width=100,
-                              command=lambda: self.tabs.set('工具')).grid(
+                              command=lambda: self.tabs.set('杂项')).grid(
                     row=index, column=2, padx=8, pady=6, sticky='w')
 
         ctk.CTkLabel(frame, text='登录方式', width=90, anchor='e').grid(
@@ -320,6 +321,101 @@ class CtkApp:
         self._field(misc, '纸宽 (58/80)', self.var_receipt_paper, 90)
         self._field(misc, '每分钟上限', self.var_receipt_maxper, 90)
         self._check(misc, '仅生成预览不真打印（dry-run）', self.var_receipt_dryrun)
+
+
+        # ---- 问答（聊天抢答）：题库 quiz.db + 答题记录 ----
+        qa = self._section(tab, '问答（聊天抢答）：<触发词>出题 / <触发词>答题记录 / <触发词>答案')
+        self.var_qa_enabled = ctk.BooleanVar(value=False)
+        self.var_qa_interval = ctk.StringVar(value='360')
+        self.var_qa_timeout = ctk.StringVar(value='60')
+        self.var_qa_askperday = ctk.StringVar(value='3')
+        self.var_qa_threshold = ctk.StringVar(value='0.8')
+        self.var_qa_wrong = ctk.StringVar(value='{player} 答案错误')
+        self.var_qa_correct = ctk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
+        self.var_qa_timeoutmsg = ctk.StringVar(value='【问答】本题超时，答案是：{answer}')
+        self._check(qa, '启用问答（定时出题；玩家可用 <触发词>出题 自主提问）', self.var_qa_enabled)
+        self._field(qa, '自动出题间隔(秒)', self.var_qa_interval, 90)
+        self._field(qa, '答题超时(秒)', self.var_qa_timeout, 90)
+        self._field(qa, '每人每日提问次数(0=不限)', self.var_qa_askperday, 90)
+        self._field(qa, '模糊匹配阈值(0-1)', self.var_qa_threshold, 90)
+        self._field(qa, '答错文案', self.var_qa_wrong, 360)
+        self._field(qa, '答对文案', self.var_qa_correct, 360)
+        self._field(qa, '超时文案', self.var_qa_timeoutmsg, 360)
+        ctk.CTkLabel(qa, text='答对奖励命令（每行一条，支持 {player}，例如 /pay {player} 100）',
+                     text_color='#90a4ae').pack(anchor='w', padx=16, pady=(4, 0))
+        self.qa_rewards_box = ctk.CTkTextbox(qa, height=90)
+        self.qa_rewards_box.pack(fill='x', padx=12, pady=(2, 6))
+        qa_bar = ctk.CTkFrame(qa)
+        qa_bar.pack(fill='x', padx=12, pady=(0, 6))
+        for text, handler in (('保存问答设置', self._save_qa),
+                              ('立即出题', self._on_qa_ask),
+                              ('导入题库JSON…', self._on_qa_import),
+                              ('导出题库JSON…', self._on_qa_export),
+                              ('刷新统计', self._refresh_qa)):
+            ctk.CTkButton(qa_bar, text=text, width=130, command=handler).pack(
+                side='left', padx=4, pady=4)
+        self.qa_info = ctk.CTkLabel(qa, text='题库：-', text_color='#90a4ae', anchor='w')
+        self.qa_info.pack(anchor='w', padx=16, pady=(0, 6))
+
+    # ------------------------------------------------------------------
+    # 问答（杂项页）
+    # ------------------------------------------------------------------
+    def _save_qa(self) -> None:
+        cfg = self.controller.config
+        qa = cfg.qa
+        qa.enabled = bool(self.var_qa_enabled.get())
+        qa.intervalSeconds = self._as_int(self.var_qa_interval, 360)
+        qa.timeoutSeconds = self._as_int(self.var_qa_timeout, 60)
+        qa.askPerDay = self._as_int(self.var_qa_askperday, 3)
+        qa.fuzzyThreshold = self._as_float(self.var_qa_threshold, 0.8)
+        qa.wrongMessage = self.var_qa_wrong.get()
+        qa.correctMessage = self.var_qa_correct.get()
+        qa.timeoutMessage = self.var_qa_timeoutmsg.get()
+        qa.rewards = [line.strip() for line in
+                      (self.qa_rewards_box.get('1.0', 'end') or '').splitlines()
+                      if line.strip()]
+        qa.validate()
+        cfg.validate()
+        cfg.save()
+        self._refresh_qa()
+        self._append_log('问答设置已保存。', 'info')
+
+    def _on_qa_ask(self) -> None:
+        status = self.controller.quiz.ask_public(manual=True)
+        self._append_log('问答出题：' + status, 'info' if status == 'ok' else 'warn')
+        self._refresh_qa()
+
+    def _on_qa_import(self) -> None:
+        path = filedialog.askopenfilename(title='导入题库 JSON',
+                                          filetypes=[('JSON', '*.json'), ('所有文件', '*.*')])
+        if not path:
+            return
+        try:
+            added = self.controller.quiz_store.import_json(Path(path))
+            self._append_log('题库已导入 %d 题。' % added, 'info')
+            self._refresh_qa()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_TITLE, '导入失败：\n' + str(exc))
+
+    def _on_qa_export(self) -> None:
+        path = filedialog.asksaveasfilename(title='导出题库 JSON', defaultextension='.json',
+                                            filetypes=[('JSON', '*.json')])
+        if not path:
+            return
+        try:
+            count = self.controller.quiz_store.export_json(Path(path))
+            self._append_log('题库已导出 %d 题：%s' % (count, path), 'info')
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_TITLE, '导出失败：\n' + str(exc))
+
+    def _refresh_qa(self) -> None:
+        try:
+            count = self.controller.quiz_store.count()
+            current = self.controller.quiz.current
+            title = current.get('q') if current else '（当前没有题目）'
+            self.qa_info.configure(text='题库：%d 题 ｜ 当前：%s' % (count, title))
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------------------------- 日志 ----------------------------
     def _build_log_tab(self, tab) -> None:
@@ -1081,6 +1177,19 @@ class CtkApp:
         self.var_rc_autolobby_interval.set(str(rc.autoLobbyIntervalSeconds))
         self.var_rc_online.set(bool(rc.onlineCheckEnabled))
         self.var_rc_online_interval.set(str(rc.onlineCheckIntervalSeconds))
+        # --- 问答 ---
+        qa_cfg = cfg.qa
+        self.var_qa_enabled.set(bool(qa_cfg.enabled))
+        self.var_qa_interval.set(str(qa_cfg.intervalSeconds))
+        self.var_qa_timeout.set(str(qa_cfg.timeoutSeconds))
+        self.var_qa_askperday.set(str(qa_cfg.askPerDay))
+        self.var_qa_threshold.set(str(qa_cfg.fuzzyThreshold))
+        self.var_qa_wrong.set(qa_cfg.wrongMessage)
+        self.var_qa_correct.set(qa_cfg.correctMessage)
+        self.var_qa_timeoutmsg.set(qa_cfg.timeoutMessage)
+        self.qa_rewards_box.delete('1.0', 'end')
+        self.qa_rewards_box.insert('end', '\n'.join(qa_cfg.rewards or []))
+        self._refresh_qa()
         # --- 杂项 / 外观 ---
         misc = cfg.misc
         source_labels = {'anime': '番剧追番榜', 'home': 'B 站首页推荐',

@@ -1,0 +1,43 @@
+{
+  "questions": [
+    {
+      "type": "text",
+      "q": "中国的首都是哪里？",
+      "a": [
+        "北京",
+        "Beijing"
+      ],
+      "weight": 1
+    },
+    {
+      "type": "blank",
+      "q": "中国的首都是___，最大的城市是___",
+      "a": [
+        [
+          "北京",
+          "Beijing"
+        ],
+        [
+          "上海",
+          "Shanghai"
+        ]
+      ],
+      "weight": 1
+    },
+    {
+      "type": "choice",
+      "q": "太阳系最大的行星是？",
+      "options": [
+        "A. 地球",
+        "B. 木星",
+        "C. 火星",
+        "D. 土星"
+      ],
+      "a": "B",
+      "weight": 1,
+      "reward": [
+        "/pay {player} 200"
+      ]
+    }
+  ]
+}
