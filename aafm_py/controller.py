@@ -2987,10 +2987,19 @@ class Controller:
         if cfg.enabled and self.quiz.current is not None and 0 < len(text) <= 40:
             question = self.quiz.current
             try:
-                if self.quiz._matches(question, text):
-                    self.quiz.handle_answer(player, text)
-                    return True
-                if self._looks_like_quiz_attempt(question, text):
+                matched = self.quiz._matches(question, text)
+                looked = matched or self._looks_like_quiz_attempt(question, text)
+                try:
+                    self._post_ui({'kind': 'log', 'level': 'quiz',
+                                   'message': '[问答] 收到 ' + str(player) + ' 的「'
+                                              + text + '」→ '
+                                              + ('正确' if matched else
+                                                 ('按答题尝试处理' if looked else '忽略'))
+                                              + '（题型 ' + str(question.get('type')) + '，标准答案 '
+                                              + self.quiz.answer_text(question) + '）'})
+                except Exception:  # noqa: BLE001
+                    pass
+                if matched or looked:
                     self.quiz.handle_answer(player, text)
                     return True
             except Exception:  # noqa: BLE001

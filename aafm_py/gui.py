@@ -891,6 +891,9 @@ class AiPlayerGUI:
                                   ('模糊阈值', self.var_qa_threshold, 5)):
             ttk.Label(row, text=label).pack(side='left', padx=(10, 2))
             ttk.Entry(row, textvariable=var, width=width).pack(side='left')
+        self.var_qa_wrong_once = tk.BooleanVar(value=True)
+        ttk.Checkbutton(row, text='答错同一玩家每题只公屏一次',
+                        variable=self.var_qa_wrong_once).pack(side='left', padx=(12, 2))
         self.var_qa_wrong = tk.StringVar(value='{player} 答案错误')
         self.var_qa_correct = tk.StringVar(value='【问答】{player} 答对了（答案：{answer}）')
         self.var_qa_timeoutmsg = tk.StringVar(value='【问答】本题超时，答案是：{answer}')
@@ -1351,6 +1354,7 @@ class AiPlayerGUI:
         except (TypeError, ValueError):
             qa.fuzzyThreshold = 0.8
         qa.wrongMessage = self.var_qa_wrong.get()
+        qa.wrongPublicOnce = bool(self.var_qa_wrong_once.get())
         qa.correctMessage = self.var_qa_correct.get()
         qa.timeoutMessage = self.var_qa_timeoutmsg.get()
         qa.rewards = [line.strip() for line in
@@ -2666,6 +2670,7 @@ class AiPlayerGUI:
         self.var_qa_askperday.set(str(qa_cfg.askPerDay))
         self.var_qa_threshold.set(str(qa_cfg.fuzzyThreshold))
         self.var_qa_wrong.set(qa_cfg.wrongMessage)
+        self.var_qa_wrong_once.set(bool(getattr(qa_cfg, 'wrongPublicOnce', True)))
         self.var_qa_correct.set(qa_cfg.correctMessage)
         self.var_qa_timeoutmsg.set(qa_cfg.timeoutMessage)
         self.qa_rewards_box.delete('1.0', 'end')
