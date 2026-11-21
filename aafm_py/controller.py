@@ -2983,15 +2983,36 @@ class Controller:
                 self.quiz.handle_answer(player, stripped)
                 return True
             return False
-        # 没有触发词：只有「完全答对」才当抢答（避免正常聊天被判错刷屏）
+        # 没有触发词：题目进行中时，把「像答案」的短消息都当抢答（答错也能给反馈）
         if cfg.enabled and self.quiz.current is not None and 0 < len(text) <= 40:
             question = self.quiz.current
             try:
                 if self.quiz._matches(question, text):
                     self.quiz.handle_answer(player, text)
                     return True
+                if self._looks_like_quiz_attempt(question, text):
+                    self.quiz.handle_answer(player, text)
+                    return True
             except Exception:  # noqa: BLE001
                 pass
+        return False
+
+    @staticmethod
+    def _looks_like_quiz_attempt(question, text: str) -> bool:
+        """没有触发词时，判断这条聊天气泡是不是在答题（避免把正常聊天全判成答错）。"""
+        import re as _re
+        qtype = str((question or {}).get('type') or 'text')
+        t = str(text or '').strip()
+        if not t or len(t) > 40:
+            return False
+        if qtype == 'choice':
+            return bool(_re.fullmatch(r'[A-Za-z]\s*[.。、]?', t))
+        if qtype == 'blank':
+            answers = question.get('a')
+            blanks = answers if isinstance(answers, list) else [answers]
+            parts = [p for p in t.replace('，', ' ').replace(',', ' ').replace('、', ' ').split() if p]
+            return len(parts) == len(blanks)
+        # 纯问答：无触发词时只认「完全答对」，避免中文日常聊天被当成答错
         return False
 
     def _maybe_song_reply(self, player: str, content: str, raw: str = '') -> bool:

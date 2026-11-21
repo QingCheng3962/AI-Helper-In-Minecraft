@@ -33,10 +33,16 @@ class QuizChatHookTest(unittest.TestCase):
         self.assertTrue(c._maybe_quiz_chat('Alice', 'B'))
         c.quiz.handle_answer.assert_called_once_with('Alice', 'B')
 
-    def test_wrong_answer_does_not_go_to_ai_without_trigger(self):
+    def test_wrong_choice_answer_is_treated_as_attempt(self):
         c = self._ctrl()
-        self.assertFalse(c._maybe_quiz_chat('Alice', 'A'))
-        c.quiz.handle_answer.assert_not_called()
+        self.assertTrue(c._maybe_quiz_chat('Alice', 'A'))
+        c.quiz.handle_answer.assert_called_once_with('Alice', 'A')
+
+    def test_normal_chat_is_not_treated_as_answer(self):
+        c = self._ctrl()
+        c.quiz.current = {'type': 'text', 'q': '首都是', 'a': ['北京']}
+        c.quiz._matches = lambda q, text: False
+        self.assertFalse(c._maybe_quiz_chat('Alice', '今天服务器好卡啊'))
 
     def test_trigger_prefixed_answer_is_checked(self):
         c = self._ctrl()
