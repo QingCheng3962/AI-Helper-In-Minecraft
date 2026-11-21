@@ -31,9 +31,16 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> Only v0.3.7 / v0.3.6-26.11.14 / v0.3.6 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
+> Only v0.3.7 / v0.3.6 / v0.3.6-26.11.14 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
 
 ### v0.3.7
+
+- **Chat quiz**: timed questions (360s default), answer timeout, players request questions via `<trigger>出题` (daily limit, public broadcast), `<trigger>答题记录` for private stats; rewards = custom commands (`/pay {player} 100`, `/give ...`), configurable wrong-answer message.
+- **SQLite `quiz.db`** for questions (text / multi-blank / ABCD), records and daily ask counters; JSON import/export (`questions.example.json`).
+- **UI**: dedicated CustomTkinter 「杂项」 tab (port scanner, misc features, quiz); same quiz config in the tkinter 杂项 tab.
+- Version v0.3.7; 172 Python tests pass.
+
+### v0.3.6
 
 - **Chat-based song requests restored**: `[点歌]song`, `[点歌]一起听 player`, speed/stop/lyrics commands; the bot resolves the stream link and /msg's it to the requester (private per-player playback).
 - **HTTP gateway API removed**: the mod no longer configures addresses/tokens and the bot no longer serves `/api/song/*` (no external gateway cost).
@@ -41,17 +48,6 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 - **Fixes**: seek crash (bad-frame resync), slider not draggable (no snap-back + restart-from-position fallback), listener spam, roomier song GUI, speed order 2.0→0.5.
 - **Installer**: new UI + full packaging (15 mod jars, server plugin, sources, tests, docs; NapCat optional).
 - Regression: 160 Python tests pass.
-
-### v0.3.6-26.11.14
-
-- **Both GUIs now expose the full feature set**: the CustomTkinter UI gained every tab (AI / player config, doc-to-book, player roster, QQ relay, reconnect, misc, port scan, logs, about; theme switch). The original tkinter UI also received port scanning plus support-ticket / dev-blog buttons, and both share the same `data.db`.
-- **One-click Windows installer** (`installer/`): a C# setup wizard wrapped in a single `.exe` — pick an install folder, extract, create desktop/Start-menu shortcuts. It bundles the Python 3.9 runtime with every pip dependency, the Node runtime and production `node_modules`, so the target machine needs **no Python/Node installed**. NapCat is bundled by default and optional at install time.
-- **Runtime data in SQLite** (`data.db`): affinity, book-write progress, prompt templates and QQ account records (tables `affinity`/`kv`/`prompt_templates`/`qq_accounts`/`meta`; WAL + single lock). Old JSON files are auto-migrated on first access and backed up as `<name>.json.bak`.
-- Settings (`config.json` / `mcai_chat.json`) intentionally stay JSON (hand-editable, contain API keys).
-- The installer also ships all 15 song-Mod jars (`Mod/`), the ZMusic server plugin, docs and the promo page.
-- Regression: Python 156 tests pass; installer silent-install + bundled-Python import self-check passes.
-
-### v0.3.6
 
 - New CustomTkinter GUI (Settings / Songs / Tools / Logs / About) as the default entry; `python main.py --legacy` keeps the original tkinter UI.
 - Song Mod: brand-new in-game GUI (draggable progress, speed 0.5–2.0, listen-together, in-game lyrics) for both 1.21.x and 26.x.
@@ -170,3 +166,4 @@ The song mod (`mc-song-mod/`) and the ZMusic plugin (`mc-music-bridge/`) are Apa
 
 > Note: the mod bundles **JLayer** (MP3 decoder, `com.googlecode.soundlibs:jlayer`), which is a third-party
 > **LGPL** component — independent from this project's Apache-2.0 license; comply with it when redistributing.
+
