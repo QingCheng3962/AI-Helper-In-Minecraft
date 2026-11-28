@@ -62,3 +62,6 @@ data.db-shm
 # é—®ç­”é¢˜åº“/è®°å½•ï¼ˆè¿è¡Œæ—¶æ•°æ®ï¼‰
 quiz.db
 quiz.db-*
+# ÀëÏß¹¹½¨»º´æ£¨ÁÙÊ±£©
+mc-song-mod/.gradle-user/
+mc-song-mod/.userhome/
