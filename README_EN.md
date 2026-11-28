@@ -2,7 +2,7 @@
 
 # AI Helper In Minecraft
 
-**Current version: v0.3.7** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
+**Current version: v0.3.8** (SemVer; all historical version labels were rewritten — see the mapping table in the [changelog](#changelog))
 
 A "client-less" Minecraft AI player: it never opens the game itself. A GUI drives a mineflayer engine to join a server, and a large language model powers the in-game chat behaviour.
 
@@ -31,7 +31,12 @@ A "client-less" Minecraft AI player: it never opens the game itself. A GUI drive
 
 ## Changelog
 
-> Only v0.3.7 / v0.3.6 / v0.3.6-26.11.14 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
+> Only v0.3.8 / v0.3.7 / v0.3.6 are kept here; older entries (v0.3.5 and earlier) live in [更新日志.md](更新日志.md).
+
+### v0.3.8
+
+- **Single-page song GUI**: removed the "Mine" and "Listen together" pages; speed buttons realigned; progress bar now uses a version-safe slider (MC handles click/drag), 2.5s anti-snap-back and automatic restart-from-position fallback.
+- **Quiz fixes**: correct `config.qa` read (answers were previously passed to the AI), raw A/B/C/D answers during an active question count as attempts, diagnostic logs, and a "wrong answer public once per question" toggle in both GUIs.
 
 ### v0.3.7
 

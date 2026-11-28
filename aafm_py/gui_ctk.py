@@ -39,7 +39,7 @@ from .config import PromptTemplateManager
 from .controller import Controller
 
 APP_TITLE = 'aafm AI 玩家'
-VERSION = 'v0.3.7'
+VERSION = 'v0.3.8'
 
 LEVEL_COLORS = {
     'error': '#ff6b6b',

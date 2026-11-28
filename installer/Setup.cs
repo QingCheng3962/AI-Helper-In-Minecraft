@@ -14,7 +14,7 @@ namespace AafmSetup
     static class Program
     {
         const string MAGIC = "AAFMINS1";
-        internal const string VERSION = "0.3.7";
+        internal const string VERSION = "0.3.8";
         const int FOOTER = 48;   // magic(8) + appOff(8) + appLen(8) + napOff(8) + napLen(8) + crc-ish(8)
 
         [STAThread]
